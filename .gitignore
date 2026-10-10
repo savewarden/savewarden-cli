@@ -1,0 +1,40 @@
+# Local tooling and generated evidence
+/.cache/
+/.local/
+/bin/
+/dist/
+/reports/
+/coverage.out
+/coverage*.txt
+/savewarden
+/savewarden.exe
+*.test
+*.prof
+
+# Never commit real saves, receipts, accounts or secrets.
+/Savewarden/
+/Ga/
+/games/
+**/saves/
+**/snapshots/
+**/current/
+**/receipts/
+*.sav
+*.save
+*.savegame
+CPY.ini
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.aws/
+.ssh/
+
+# Machine-specific editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
