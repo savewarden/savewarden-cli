@@ -96,7 +96,7 @@ Ordre prévu, avec revue et Human GO entre lots : B1 manifeste strict et
 `inspect` read-only ; B2 `sync` vérifié sans suppression ; B3 snapshots
 immuables ; B4 restauration isolée ; B5 `doctor` et validation pilote.
 La [roadmap originale](.plans/Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md)
-et le [plan B1](.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.1.md) restent
+et le [plan B1](.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md) restent
 les sources du périmètre, et le [changelog](CHANGELOG.md) décrit l'existant.
 
 Licence [MIT](LICENSE), choisie explicitement pour ce bootstrap.

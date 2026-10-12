@@ -5,7 +5,8 @@
 - Lire le plan demandé intégralement et inspecter statut, branche, remote et
   fichiers existants avant toute écriture. Ne pas écraser du travail existant.
 - Lot courant : **B1**, manifeste strict et `inspect` en lecture seule,
-  selon `.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.1.md` (v0.2).
+  selon `.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md`, plan révisé
+  par le propriétaire ; son nom porte désormais sa version.
   Human GO et plan accepté requis avant chaque lot suivant, B2 à B5.
 - Ne jamais déclarer une CI verte sans run terminé sur le commit concerné.
   Une compilation croisée prouve seulement la compilation.
