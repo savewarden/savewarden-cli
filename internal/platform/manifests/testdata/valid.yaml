@@ -1,0 +1,16 @@
+# Synthetic manifest used by tests. The paths are fictitious.
+schema_version: 1
+
+game:
+  id: synthetic-game
+  name: "Synthetic Game"
+
+installation:
+  path: 'D:\Games\Synthetic Game'
+
+sources:
+  - id: saves
+    kind: save
+    base: game-install
+    path: saves
+    required: true

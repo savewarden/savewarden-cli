@@ -17,13 +17,41 @@ func inPackage(path, prefix string) bool {
 	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
 
+// externalModules lists, per layer, the only third-party modules it may import.
+// Every other package is limited to the standard library.
+var externalModules = map[string][]string{
+	"internal/cli":                {"github.com/spf13/cobra"},
+	"internal/platform/manifests": {"go.yaml.in/yaml/v3"},
+}
+
+func isStandardLibrary(path string) bool {
+	return !strings.Contains(strings.Split(path, "/")[0], ".") && path != "C"
+}
+
+func allowedExternal(source, target string) bool {
+	for layer, modules := range externalModules {
+		if !inPackage(source, layer) {
+			continue
+		}
+		for _, module := range modules {
+			if inPackage(target, module) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func allowedImport(source, target string) bool {
 	if !strings.HasPrefix(target, modulePath) {
-		if inPackage(source, "internal/cli") || strings.HasPrefix(source, "internal/platform/") {
-			return true
+		if !isStandardLibrary(target) {
+			return allowedExternal(source, target)
 		}
-		// Domain and composition packages depend only on the standard library.
-		return !strings.Contains(strings.Split(target, "/")[0], ".") && target != "C"
+		// Raw operating-system calls stay inside platform adapters.
+		if target == "syscall" {
+			return strings.HasPrefix(source, "internal/platform/")
+		}
+		return true
 	}
 	target = strings.TrimPrefix(target, modulePath)
 	if inPackage(source, "cmd/savewarden") {
@@ -118,6 +146,17 @@ func TestArchitectureImportRules(t *testing.T) {
 		{"internal/platform/filesystem", modulePath + "internal/entities/game", true},
 		{"internal/platform/filesystem", modulePath + "internal/features/sync", false},
 		{"internal/platform/manifests", "go.yaml.in/yaml/v3", true},
+		{"internal/platform/manifests", "gopkg.in/yaml.v3", false},
+		{"internal/platform/filesystem", "go.yaml.in/yaml/v3", false},
+		{"internal/platform/filesystem", "syscall", true},
+		{"internal/cli", "github.com/spf13/cobra", true},
+		{"internal/cli", "go.yaml.in/yaml/v3", false},
+		{"internal/app", "github.com/spf13/cobra", false},
+		{"cmd/savewarden", "github.com/spf13/cobra", false},
+		{"internal/features/inspect", "syscall", false},
+		{"internal/features/inspect", "crypto/sha256", true},
+		{"internal/entities/game", "syscall", false},
+		{"internal/cli", "C", false},
 		{"internal/cliff", modulePath + "internal/features/sync", false},
 	}
 	for _, tt := range tests {

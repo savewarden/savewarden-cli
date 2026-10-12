@@ -4,16 +4,39 @@ Décision propre à Savewarden : **FSD-inspired, Go-idiomatic**, documentée dan
 [ADR 0001](adr/0001-fsd-inspired-go.md). Mosaera est une inspiration de
 conception, pas une spécification à laquelle le produit prétend être conforme.
 
-## Existant B0
+## Existant B1
 
 ```text
-cmd/savewarden → internal/app → internal/cli → Cobra
+cmd/savewarden → app ─┬─► cli ──────────────► features/inspect ──► entities/game
+                      ├─► platform/manifests ──► entities/game, go.yaml.in/yaml/v3
+                      └─► platform/filesystem ─► bibliothèque standard, syscall
 ```
 
-`main` fournit contexte, arguments, version et streams ; `app.Run` assemble
-une nouvelle arborescence CLI à chaque invocation et mappe les erreurs vers
-le code de sortie. `cli` possède les flags et le texte affiché. Aucun accès
-disque, service métier ou découverte de configuration dans ce parcours.
+`main` fournit contexte, arguments, version et streams. `app.Run` assemble à
+chaque invocation le service `inspect` avec ses deux adaptateurs, construit
+l'arborescence CLI et traduit les erreurs en code de sortie, y compris le
+code 2 d'[ADR 0003](adr/0003-inspect-exit-codes.md). `cli` possède les flags,
+le rendu texte et l'`ExitError`. Aucune découverte de configuration.
+
+| Package | Rôle |
+| --- | --- |
+| `entities/game` | Manifeste, jeu, installation, sources ; validation pure et grammaire des chemins Windows indépendante de l'hôte |
+| `features/inspect` | Orchestration en lecture seule ; ports `ManifestReader`, `FileSystem` et `Scope` ; `Report` typé, indépendant du rendu |
+| `platform/manifests` | Lecture stricte du YAML vers `game.Manifest`, [ADR 0002](adr/0002-manifest-v1-strict-yaml.md) |
+| `platform/filesystem` | Portée ancrée sans suivi de liens ; implémentation Windows supportée, Unix pour les tests du contrat |
+
+Le port `Scope` n'utilise que des types de la bibliothèque standard
+(`fs.FileInfo`, `fs.DirEntry`, `fs.File`) : `platform/filesystem` l'implémente
+sans importer la feature, et `app` fait le pont. Les types d'inventaire restent
+dans la feature tant que seul `inspect` les utilise ; ils rejoindront
+`entities` quand `sync` en aura besoin.
+
+`os.Root` assure le confinement des noms mais suit les liens qui restent sous
+sa racine. L'adaptateur Windows ajoute donc ses propres garanties : ouverture
+de chaque dossier traversé avec `FILE_FLAG_OPEN_REPARSE_POINT`, contrôle des
+attributs sur le handle, dossiers gardés ouverts sans partage de suppression
+jusqu'à la fin, fichiers refusés si le handle montre un point d'analyse ou un
+placeholder. Voir le [modèle de sécurité](safety-model.md).
 
 `dev` est la version par défaut. Une build revue peut injecter une version
 avec `-ldflags="-X main.version=..."` ; cela ne crée pas une release.
@@ -39,19 +62,28 @@ un service supérieur explicitement conçu et un ADR.
 
 Les sous-packages partagent les frontières de leur couche. Les API exportées
 restent limitées ; pas de barrel Go artificiel ni de registre DI. Les imports
-sont contrôlés pour le code de production dans `internal/app/architecture_test.go`, y compris pour les
-fichiers réservés à un OS. Tout ajout de dépendance externe aux entités doit
-changer explicitement le contrat et son ADR.
+sont contrôlés pour le code de production dans `internal/app/architecture_test.go`,
+y compris pour les fichiers réservés à un OS :
 
-Ne créer `entities/game`, `entities/backup`, `features/*`, `platform/filesystem`
-ou `platform/manifests` que lorsqu'un fichier utile existe. Aucun `shared`
-n'est nécessaire dans B0. Les détails Windows seront isolés avec build tags.
+- dépendances tierces autorisées par couche seulement : Cobra dans `cli`,
+  `go.yaml.in/yaml/v3` dans `platform/manifests`, aucune ailleurs ;
+- `syscall` réservé aux adaptateurs `platform/*`.
+
+`internal/app/readonly_test.go` refuse en plus, dans tout le code de
+production, les API connues d'écriture, d'exécution, de réseau et de chargement
+dynamique, ainsi que les modes d'ouverture en écriture. C'est un garde
+statique, pas une preuve : les tests dynamiques de non-mutation le complètent.
+B2 devra l'assouplir explicitement, par package et avec un ADR.
+
+Ne créer `entities/backup`, `features/sync` et les autres packages que lorsqu'un
+fichier utile existe. Aucun `shared` n'est nécessaire. Les détails propres à un
+OS sont isolés par build tags.
 
 ## Contrats à stabiliser
 
-- B1 : YAML `schema_version`, parsing strict, champs inconnus et clés
-  dupliquées rejetés, source de vérité sélectionnée par l'utilisateur,
-  chemins confinés, liens/jonctions refusés par défaut, inventaire déterministe.
+- B1, livré : manifeste v1 strict, [documenté](manifest-v1.md), source de
+  vérité déclarée par l'utilisateur, portée ancrée sans suivi de liens,
+  inventaire déterministe et [contrat de sortie](commands/inspect.md).
 - B2 : destination protégée, plan et staging, paths/tailles/SHA-256,
   détection de changements concomitants, receipt et rollback Windows conçu
   avant toute mise à jour de `current`.
@@ -61,8 +93,8 @@ n'est nécessaire dans B0. Les détails Windows seront isolés avec build tags.
   écrasement ni restauration en place.
 - B5 : diagnostic read-only et campagne pilote.
 
-Ces contrats sont des exigences futures : aucun parser, moteur de copie ou
-format JSON n'est exposé dans B0. Les erreurs futures utilisent contexte et
+Les contrats B2 à B5 sont des exigences futures : aucun moteur de copie ni
+format JSON n'est exposé dans B1. Les erreurs futures utilisent contexte et
 `errors.Is/As` lorsqu'un consommateur doit les distinguer. Les chemins utilisent
 `filepath`, les contenus `io.Reader` et les opérations `context.Context`.
 

@@ -5,10 +5,19 @@ linters:
   default: none
   enable:
     - errcheck
+    - errorlint
+    - gosec
     - govet
     - ineffassign
     - staticcheck
     - unused
+  exclusions:
+    rules:
+      # Tests build and launch the binary under test (G204), and read or
+      # walk their own synthetic fixtures from computed paths (G304, G122).
+      - path: _test\.go
+        linters: [gosec]
+        text: G204|G304|G122
 formatters:
   enable:
     - gofmt

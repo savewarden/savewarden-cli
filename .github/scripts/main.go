@@ -57,7 +57,7 @@ func run() error {
 		return fmt.Errorf("no workflows found; run from repository root")
 	}
 	for _, path := range paths {
-		content, err := os.ReadFile(path)
+		content, err := os.ReadFile(path) //nolint:gosec // G304: paths come from the repository workflow glob.
 		if err != nil {
 			return err
 		}
