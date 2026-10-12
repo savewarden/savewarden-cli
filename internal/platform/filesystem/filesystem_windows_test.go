@@ -134,6 +134,8 @@ func TestFileReplacedAfterLstat(t *testing.T) {
 		if err := os.Remove(filepath.Join(anchor, "a.save")); err != nil {
 			t.Fatal(err)
 		}
+	} else if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatalf("symbolic link creation is required on CI: %v", err)
 	} else {
 		t.Logf("symbolic links unavailable, link swap skipped: %v", err)
 	}

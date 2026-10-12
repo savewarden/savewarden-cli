@@ -142,6 +142,9 @@ func denyWrites(t *testing.T, dir string) bool {
 	}
 	output, err := exec.Command("icacls", dir, "/deny", "*S-1-1-0:(OI)(CI)(WD,AD,WEA,WA,DC)").CombinedOutput()
 	if err != nil {
+		if os.Getenv("GITHUB_ACTIONS") == "true" {
+			t.Fatalf("write denial is required on CI: %v %s", err, output)
+		}
 		t.Logf("write denial unavailable on %s: %v %s", dir, err, output)
 		return false
 	}
@@ -193,6 +196,9 @@ func TestInspectDoesNotWrite(t *testing.T) {
 		}
 	}
 	denied := denyWrites(t, base)
+	if !denied && os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatal("write access must be denied during the run on CI")
+	}
 	t.Logf("write access denied during the run: %v", denied)
 	before := fingerprint(t, base)
 
@@ -245,6 +251,8 @@ func TestReadmeCommandExamples(t *testing.T) {
 		"go run ./cmd/savewarden version",
 		"go build -trimpath -o bin/savewarden ./cmd/savewarden",
 		"savewarden dev\n",
+		`.\bin\savewarden.exe inspect --manifest '`,
+		"docs/commands/inspect.md",
 	} {
 		if !strings.Contains(string(content), example) {
 			t.Errorf("missing tested README example %q", example)

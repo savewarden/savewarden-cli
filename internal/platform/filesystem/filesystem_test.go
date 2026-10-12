@@ -48,6 +48,16 @@ func open(t *testing.T, anchor string) *filesystem.Scope {
 	return scope
 }
 
+// requireOnCI skips a test locally when the OS refuses a fixture, such as a
+// symbolic link without privilege, but fails it on CI where it must run.
+func requireOnCI(t *testing.T, what string, err error) {
+	t.Helper()
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatalf("%s is required on CI: %v", what, err)
+	}
+	t.Skipf("%s unavailable here: %v", what, err)
+}
+
 func notFollowed(err error) bool {
 	var refusal interface{ NotFollowed() bool }
 	return errors.As(err, &refusal) && refusal.NotFollowed()
@@ -174,10 +184,10 @@ func TestRefusesSymlinksInsideTheAnchor(t *testing.T) {
 	write(t, filepath.Join(anchor, "real", "file.save"), "target")
 	// Relative targets stay inside the root, which os.Root follows.
 	if err := os.Symlink("real", filepath.Join(anchor, "dirlink")); err != nil {
-		t.Skipf("symbolic links unavailable here: %v", err)
+		requireOnCI(t, "symbolic link creation", err)
 	}
 	if err := os.Symlink(filepath.Join("real", "file.save"), filepath.Join(anchor, "filelink")); err != nil {
-		t.Skipf("symbolic links unavailable here: %v", err)
+		requireOnCI(t, "symbolic link creation", err)
 	}
 	root, err := os.OpenRoot(anchor)
 	if err != nil {
