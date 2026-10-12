@@ -11,19 +11,13 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-  settings:
-    gosec:
-      excludes:
-        # G304 flags every file opened from a variable path. Reading paths the
-        # user declared is the purpose of inspect; confinement and no-follow
-        # are enforced and tested in platform/filesystem instead.
-        - G304
   exclusions:
     rules:
-      # Smoke tests build and launch the binary under test on purpose.
+      # Tests build and launch the binary under test (G204) and read their
+      # own synthetic fixtures from computed paths (G304) on purpose.
       - path: _test\.go
         linters: [gosec]
-        text: G204
+        text: G204|G304
 formatters:
   enable:
     - gofmt
