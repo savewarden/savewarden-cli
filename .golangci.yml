@@ -5,10 +5,25 @@ linters:
   default: none
   enable:
     - errcheck
+    - errorlint
+    - gosec
     - govet
     - ineffassign
     - staticcheck
     - unused
+  settings:
+    gosec:
+      excludes:
+        # G304 flags every file opened from a variable path. Reading paths the
+        # user declared is the purpose of inspect; confinement and no-follow
+        # are enforced and tested in platform/filesystem instead.
+        - G304
+  exclusions:
+    rules:
+      # Smoke tests build and launch the binary under test on purpose.
+      - path: _test\.go
+        linters: [gosec]
+        text: G204
 formatters:
   enable:
     - gofmt

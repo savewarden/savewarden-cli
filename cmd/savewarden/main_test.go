@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,8 +41,8 @@ func TestBinarySmoke(t *testing.T) {
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
 		if args[0] == "sync" {
-			exit, ok := err.(*exec.ExitError)
-			if !ok || exit.ExitCode() != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown command") {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown command") {
 				t.Fatalf("%v: err=%v stdout=%q stderr=%q", args, err, stdout.String(), stderr.String())
 			}
 		} else {
