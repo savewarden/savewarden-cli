@@ -156,3 +156,44 @@ func TestPrintableEscapesForgedOutput(t *testing.T) {
 		t.Fatalf("a file name forged a findings line:\n%s", out)
 	}
 }
+
+// partialWriter accepts limit bytes, then fails, like a full disk or a
+// closed pipe in the middle of the report.
+type partialWriter struct {
+	limit   int
+	written bytes.Buffer
+}
+
+func (w *partialWriter) Write(p []byte) (int, error) {
+	room := w.limit - w.written.Len()
+	if room >= len(p) {
+		return w.written.Write(p)
+	}
+	n, _ := w.written.Write(p[:max(room, 0)])
+	return n, errors.New("disk full")
+}
+
+// A failed write cannot take back the prefix already written: stdout may
+// hold a truncated report, and the error, never an ExitError, makes it exit 1.
+func TestFailedWriteLeavesOnlyAPrefixAndAnError(t *testing.T) {
+	clean := baseReport()
+	blocking := baseReport()
+	blocking.Findings = []inspect.Finding{{Severity: inspect.Blocking, Code: inspect.CodeUnreadable, Source: "saves", Path: "x", Detail: "locked"}}
+	for name, report := range map[string]inspect.Report{"clean": clean, "blocking": blocking} {
+		t.Run(name, func(t *testing.T) {
+			full := cli.Render(report)
+			stdout := &partialWriter{limit: 40}
+			root := cli.NewRootCommand("dev", stdout, &bytes.Buffer{}, &fakeInspector{report: report})
+			root.SetArgs([]string{"inspect", "--manifest", "m.yaml"})
+			err := root.ExecuteContext(context.Background())
+			var exit *cli.ExitError
+			if err == nil || err.Error() != "disk full" || errors.As(err, &exit) {
+				t.Fatalf("error = %v; a failed write must surface as a plain error", err)
+			}
+			got := stdout.written.String()
+			if got == "" || got == full || !strings.HasPrefix(full, got) {
+				t.Fatalf("stdout = %q, want a strict prefix of the report", got)
+			}
+		})
+	}
+}

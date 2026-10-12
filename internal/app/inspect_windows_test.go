@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -98,5 +99,57 @@ func TestInspectOptionalSourceMissingIsInformation(t *testing.T) {
 	code, out, errOut := runInspect(manifest)
 	if code != 0 || errOut != "" || !strings.Contains(out, "findings: 0 blocking, 1 info\n  info  source-missing  extra  ") {
 		t.Fatalf("exit=%d stderr=%q\n%s", code, errOut, out)
+	}
+}
+
+// partialWriter accepts limit bytes, then fails.
+type partialWriter struct {
+	limit   int
+	written bytes.Buffer
+}
+
+func (w *partialWriter) Write(p []byte) (int, error) {
+	room := w.limit - w.written.Len()
+	if room >= len(p) {
+		return w.written.Write(p)
+	}
+	n, _ := w.written.Write(p[:max(room, 0)])
+	return n, errors.New("disk full")
+}
+
+// ADR 0003: when the report cannot be written in full, the exit code is 1,
+// stderr holds one diagnostic, and stdout may hold a truncated prefix.
+func TestInspectFailedWriteExitsOneWithAPrefix(t *testing.T) {
+	manifest, install := installation(t, savesSource)
+	_, full, _ := runInspect(manifest)
+	elsewhere := filepath.Join(filepath.Dir(install), "elsewhere")
+	if err := os.Mkdir(elsewhere, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		setup func()
+	}{
+		{"clean report", func() {}},
+		{"blocking report", func() {
+			if output, err := exec.Command("cmd", "/c", "mklink", "/J", filepath.Join(install, "saves", "jn"), elsewhere).CombinedOutput(); err != nil {
+				t.Fatalf("mklink: %v %s", err, output)
+			}
+			_, full, _ = runInspect(manifest)
+		}},
+	}
+	for _, c := range cases {
+		name := c.name
+		c.setup()
+		stdout := &partialWriter{limit: 40}
+		var stderr bytes.Buffer
+		code := app.Run(context.Background(), []string{"inspect", "--manifest", manifest}, "dev", stdout, &stderr)
+		got := stdout.written.String()
+		if code != 1 || stderr.String() != "savewarden: disk full\n" {
+			t.Fatalf("%s: exit=%d stderr=%q", name, code, stderr.String())
+		}
+		if got == "" || got == full || !strings.HasPrefix(full, got) {
+			t.Fatalf("%s: stdout = %q, want a strict prefix of %q", name, got, full)
+		}
 	}
 }

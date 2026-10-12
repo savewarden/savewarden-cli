@@ -45,14 +45,18 @@ Links, junctions, reparse points and placeholders are reported, never
 followed. Nothing is written, moved or executed.
 
 Exit codes: 0 complete inventory without blocking findings; 1 invalid
-invocation, invalid manifest or fatal error, nothing on stdout; 2 complete
-report with blocking findings.`,
+invocation, invalid manifest or fatal error, with no report on stdout, or a
+report that could not be written in full, in which case stdout may hold a
+truncated prefix; 2 complete report with blocking findings. Trust the exit
+code, never the presence of output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			report, err := inspector.Inspect(cmd.Context(), inspect.Request{ManifestPath: manifest})
 			if err != nil {
 				return err
 			}
+			// A failed write may leave a prefix on stdout that cannot be taken
+			// back; the write error, exit code 1, marks it as incomplete.
 			if _, err := io.WriteString(cmd.OutOrStdout(), Render(report)); err != nil {
 				return err
 			}

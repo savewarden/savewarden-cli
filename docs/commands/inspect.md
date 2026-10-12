@@ -80,8 +80,12 @@ Décidés par [ADR 0003](../adr/0003-inspect-exit-codes.md).
 | Code | Signification |
 | --- | --- |
 | `0` | Inventaire complet, aucune anomalie bloquante ; des informations sont possibles |
-| `1` | Invocation invalide, manifeste invalide, volume inutilisable, sources qui se chevauchent, interruption ou sortie impossible à écrire ; un seul diagnostic sur stderr, rien sur stdout |
+| `1` | Invocation invalide, manifeste invalide, volume inutilisable, sources qui se chevauchent ou interruption : un seul diagnostic sur stderr, rien sur stdout. Ou rapport impossible à écrire en entier : un seul diagnostic sur stderr, et stdout peut contenir un **préfixe tronqué** du rapport |
 | `2` | Rapport complet sur stdout avec au moins une anomalie bloquante ; une ligne de synthèse sur stderr |
+
+Fiez-vous au code de sortie, jamais à la seule présence d'une sortie : avec
+le code 1, ce qui figure sur stdout n'est pas un rapport, même s'il en a
+l'apparence.
 
 ## Limites
 

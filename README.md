@@ -41,7 +41,8 @@ Sans argument, `savewarden` affiche l'aide. `--help`, `-h`, `help` et
 `<commande> --help` sont disponibles ; `--version` affiche la même version que
 `version`. Succès : code **0**, sortie sur stdout. Erreur d'invocation ou
 d'exécution : code **1**, diagnostic unique sur stderr, sans sortie de données
-ni affichage automatique de l'aide. Pas de sortie JSON à ce stade.
+ni affichage automatique de l'aide ; seul un échec d'écriture sur stdout peut
+y laisser une sortie tronquée. Pas de sortie JSON à ce stade.
 
 Les sorties sont en anglais, UTF-8, sans couleur et terminées par LF. La version
 de développement est explicite ; aucune date ou version calculée depuis Git.
@@ -59,7 +60,8 @@ La sortie liste chaque fichier avec son SHA-256, sa taille et sa date de
 modification, puis les anomalies. Code **0** : inventaire complet. Code **2** :
 rapport complet mais au moins une anomalie bloquante, par exemple une jonction
 refusée ou un fichier verrouillé. Code **1** : manifeste invalide ou erreur,
-sans rapport. Détails, garanties et limites :
+sans rapport complet ; si l'écriture du rapport échoue, stdout peut en garder
+un début tronqué. Détails, garanties et limites :
 [`savewarden inspect`](docs/commands/inspect.md).
 
 `inspect` ne fonctionne que sous Windows. Sa sortie contient des chemins

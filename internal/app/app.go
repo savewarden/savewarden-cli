@@ -15,8 +15,9 @@ import (
 )
 
 // Run creates a fresh command tree for every invocation. Success is exit
-// code 0; an invalid invocation or execution failure is code 1, with nothing
-// on stdout; a cli.ExitError selects its own code after its report.
+// code 0; an invalid invocation or execution failure is code 1, with no data
+// on stdout unless writing stdout itself failed, which may leave a truncated
+// prefix; a cli.ExitError selects its own code after its report.
 func Run(ctx context.Context, args []string, version string, stdout, stderr io.Writer) int {
 	output := &checkedWriter{writer: stdout}
 	inspector := inspect.New(manifests.Reader{}, scopes{})
@@ -24,7 +25,8 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 	command.SetArgs(args)
 	err := command.ExecuteContext(ctx)
 	if output.err != nil {
-		// A report that could not be written is never presented as complete.
+		// A report that could not be written in full exits 1, never 0 or 2,
+		// even though part of it may already be on stdout.
 		err = output.err
 	}
 	if err != nil {
