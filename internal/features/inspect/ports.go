@@ -1,7 +1,6 @@
 package inspect
 
 import (
-	"io"
 	"io/fs"
 
 	"github.com/savewarden/savewarden-cli/internal/entities/game"
@@ -13,7 +12,10 @@ type ManifestReader interface {
 }
 
 // FileSystem opens a read-only scope anchored on a directory, normally a
-// volume root such as D:\.
+// volume root such as D:\. A missing volume yields an fs.ErrNotExist error.
+//
+// Every type in Scope's method set comes from the standard library, so an
+// adapter can implement it without importing this package.
 type FileSystem interface {
 	OpenScope(root string) (Scope, error)
 }
@@ -34,15 +36,8 @@ type Scope interface {
 	// OpenRegular opens a regular file for reading only. It fails closed
 	// if the object actually opened is not a regular file reached without
 	// following any link.
-	OpenRegular(name string) (File, error)
+	OpenRegular(name string) (fs.File, error)
 	// SameFile reports whether two descriptions denote the same object.
 	SameFile(a, b fs.FileInfo) bool
-	Close() error
-}
-
-// File is a regular file opened for reading.
-type File interface {
-	io.Reader
-	Stat() (fs.FileInfo, error)
 	Close() error
 }

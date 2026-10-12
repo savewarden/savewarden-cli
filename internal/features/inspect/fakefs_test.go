@@ -172,7 +172,7 @@ func (s *fakeScope) ReadDir(name string) ([]fs.DirEntry, error) {
 	return entries, nil
 }
 
-func (s *fakeScope) OpenRegular(name string) (inspect.File, error) {
+func (s *fakeScope) OpenRegular(name string) (fs.File, error) {
 	parent, base, err := s.walkTo(name)
 	if err != nil {
 		return nil, err
