@@ -58,7 +58,9 @@ Ces labels OS sont vérifiés dans le catalogue `actions/runner-images`, mais
 les images hébergées continuent à recevoir leurs mises à jour.
 
 Une CI n'est verte qu'après exécution terminée sur son SHA. Le dossier
-[validation B0](validation/b0.md) conserve les preuves et les limites.
+[validation B0](validation/b0.md) conserve les preuves et les limites
+locales ; le [compte rendu post-push](validation/b0-post-push.md) consigne
+la CI distante, les protections appliquées et le Human GO B0.
 L'absence de remote, de push autorisé ou de run ne doit jamais être présentée
 comme une validation GitHub Actions. Pas de jobs de diagrammes/13 artefacts.
 
