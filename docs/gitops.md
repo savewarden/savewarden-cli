@@ -30,6 +30,10 @@ main → release/v0.1.0-a1 → feat/* → PR vers release/v0.1.0-a1
      → tag annoté sur le vrai merge SHA → release draft → Human GO
 ```
 
+Après fusion d'une branche de travail dans sa release branch, cette branche
+est supprimée sur le remote et en local ; son historique reste dans le merge
+commit. Les release branches, protégées contre la suppression, sont conservées.
+
 Une release branch par incrément effectivement publiable ; les alphas et RC
 ne sont pas des tags obligatoires à créer. Les branches de travail partent de
 leur release branch et ciblent celle-ci. PR finale vers `main` sans squash.

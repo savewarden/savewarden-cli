@@ -13,6 +13,7 @@ les frontières ou de travailler sur des sauvegardes.
 Une fois le commit initial B0 revu et intégré, créer `release/v0.1.0-a1`
 depuis son SHA de `main`, puis les branches `feat/*`, `fix/*`, `docs/*` ou
 `test/*` depuis cette release branch. Les PR de version ciblent cette branche.
+Après fusion, supprimer la branche de travail sur le remote et en local.
 Pas de push direct sur `main`, de merge automatique ou d'auto-approbation.
 La PR finale vers `main` utilise un merge commit. Les tags et releases
 nécessitent une validation humaine distincte.
@@ -48,7 +49,10 @@ go test -race ./.github/scripts
 ```
 
 Le race detector Windows nécessite lui aussi une toolchain C compatible ;
-s'il manque, la preuve vient du job Linux. Une cross-compilation depuis
+s'il manque, la preuve vient du job Linux. Sur un poste Windows où le contrôle
+intelligent des applications ou WDAC bloque les exécutables non signés, les
+binaires de test fraîchement compilés peuvent être refusés : relancer le
+package concerné, ou s'appuyer sur la CI, sans désactiver cette protection. Une cross-compilation depuis
 Windows ne remplace jamais l'exécution des tests Linux/macOS.
 La CI exécute les mêmes gates sur `ubuntu-24.04`, `windows-2025` et `macos-15`.
 
@@ -62,7 +66,14 @@ avec leurs empreintes dans `go.sum`.
 L'aide, la version, les erreurs, les codes de sortie et les commandes des
 exemples README sont vérifiés par des tests CLI, dont un smoke du vrai binaire
 dans un dossier temporaire comportant espaces et Unicode. Les règles d'import
-vérifient les sources Go de production, y compris celles sous build tags.
+et le garde de lecture seule vérifient les sources Go de production, y compris
+celles sous build tags.
+
+`inspect` est testé à trois niveaux : faux système de fichiers en mémoire,
+qui injecte liens, verrous et changements concurrents sur tous les OS ;
+vrais dossiers temporaires avec jonctions et verrous sous Windows ; binaire
+réel lancé avec un environnement isolé et l'écriture refusée, suivi d'une
+comparaison d'empreinte complète de l'arborescence.
 
 Pour les futures fonctions : fixtures synthétiques, tempfiles, failure
 injection, chemins absents/identiques/chevauchants, destination non vide,

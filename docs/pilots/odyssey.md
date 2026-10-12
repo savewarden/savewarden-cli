@@ -18,10 +18,28 @@ de joueur et contenu de `CPY.ini` ne sont pas importés dans ce dépôt.
 
 ## Prochains lots, avec Human GO distinct
 
-B1 définira un manifeste v1 avec source relative à l'installation, base
-`game-install` et `SavePath` vérifié en entrée. Inventaire read-only après
-parsing strict et rejet des liens/jonctions. L'utilisateur devra confirmer
-la source active ; aucun rapprochement automatique avec `Ga`.
+B1 fournit le [manifeste v1](../manifest-v1.md) et
+[`inspect`](../commands/inspect.md). Le manifeste déclare le chemin de
+l'installation et la source `saves` relative à celle-ci ; `CPY.ini` n'est pas
+lu automatiquement. L'utilisateur confirme la source active ; aucun
+rapprochement automatique avec `Ga`.
+
+### Protocole manuel B1, lecture seule
+
+Exécuté par le propriétaire, ou par l'agent sur autorisation explicite et
+nominative seulement.
+
+1. Fermer le jeu et le launcher.
+2. Écrire le manifeste **hors du dépôt**, avec le chemin réel de
+   l'installation et `path: saves`.
+3. Lancer `savewarden inspect --manifest <chemin>` deux fois ; les deux
+   sorties doivent être identiques.
+4. Attendu : code 0, au moins les 14 fichiers `.save` constatés le
+   9 octobre, davantage si le jeu a sauvegardé depuis, aucune anomalie.
+5. Optionnel : sauvegarder en jeu, fermer, relancer `inspect`, comparer.
+6. Consigner dans [le rapport B1](../validation/b1.md) le nombre de fichiers,
+   le code de sortie et les anomalies, sans hash individuel, nom de profil ni
+   chemin personnel.
 
 B2 copiera seulement après plan/dry-run, choix explicite de destination et
 autorisation ; pas de suppression de la source. B3 ajoutera un snapshot neuf
