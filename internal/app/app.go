@@ -1,30 +1,54 @@
-// Package app composes the CLI and maps execution errors to process exit codes.
+// Package app composes the CLI with its adapters and maps execution errors
+// to process exit codes.
 package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/savewarden/savewarden-cli/internal/cli"
+	"github.com/savewarden/savewarden-cli/internal/features/inspect"
+	"github.com/savewarden/savewarden-cli/internal/platform/filesystem"
+	"github.com/savewarden/savewarden-cli/internal/platform/manifests"
 )
 
-// Run creates a fresh command tree for every invocation. It never accesses saves.
-// Success is exit code 0; an invalid invocation or execution failure is code 1.
+// Run creates a fresh command tree for every invocation. Success is exit
+// code 0; an invalid invocation or execution failure is code 1, with nothing
+// on stdout; a cli.ExitError selects its own code after its report.
 func Run(ctx context.Context, args []string, version string, stdout, stderr io.Writer) int {
 	output := &checkedWriter{writer: stdout}
-	command := cli.NewRootCommand(version, output, stderr)
+	inspector := inspect.New(manifests.Reader{}, scopes{})
+	command := cli.NewRootCommand(version, output, stderr, inspector)
 	command.SetArgs(args)
 	err := command.ExecuteContext(ctx)
-	if err == nil {
+	if output.err != nil {
+		// A report that could not be written is never presented as complete.
 		err = output.err
 	}
 	if err != nil {
 		// Reporting failure cannot change the already unsuccessful exit code.
 		_, _ = fmt.Fprintf(stderr, "savewarden: %v\n", err)
+		var exit *cli.ExitError
+		if errors.As(err, &exit) {
+			return exit.Code
+		}
 		return 1
 	}
 	return 0
+}
+
+// scopes bridges the file-system adapter to the inspect port. It returns a
+// nil interface on error, never a typed nil pointer.
+type scopes struct{}
+
+func (scopes) OpenScope(root string) (inspect.Scope, error) {
+	scope, err := filesystem.OpenScope(root)
+	if err != nil {
+		return nil, err
+	}
+	return scope, nil
 }
 
 // Cobra's built-in help/version printers do not return write failures.

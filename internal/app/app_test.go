@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,7 +20,11 @@ func TestCLIContract(t *testing.T) {
 		out  string
 		err  string
 	}{
-		{name: "default help", out: "Bootstrap B0"},
+		{name: "default help", out: "inspects declared save sources, read-only"},
+		{name: "help lists inspect", args: []string{"--help"}, out: "inspect     Inventory the save sources of a manifest, read-only"},
+		{name: "inspect help", args: []string{"inspect", "--help"}, out: "Exit codes: 0 complete inventory"},
+		{name: "inspect without manifest", args: []string{"inspect"}, code: 1, err: `required flag(s) "manifest" not set`},
+		{name: "inspect missing manifest", args: []string{"inspect", "--manifest", "missing-manifest.yaml"}, code: 1, err: "missing-manifest.yaml"},
 		{name: "long help", args: []string{"--help"}, out: "Usage:"},
 		{name: "short help", args: []string{"-h"}, out: "Usage:"},
 		{name: "help command", args: []string{"help"}, out: "Usage:"},
@@ -107,5 +113,22 @@ func TestHelpIsDeterministic(t *testing.T) {
 		if code := app.Run(context.Background(), args, "dev", &stdout, &stderr); code != 0 || stdout.String() != first.String() {
 			t.Fatalf("%v: help differs: exit=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
+	}
+}
+
+func TestInspectRejectsInvalidManifestWithoutReport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.yaml")
+	content := "schema_version: 1\ngame:\n  id: Synthetic\n  name: x\ninstallation:\n  path: 'D:\\Games'\n" +
+		"sources:\n  - id: saves\n    kind: save\n    base: game-install\n    path: saves\n    required: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := app.Run(context.Background(), []string{"inspect", "--manifest", path}, "dev", &stdout, &stderr)
+	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "manifest.yaml:3:7: game.id:") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if strings.Count(stderr.String(), "savewarden:") != 1 {
+		t.Fatalf("diagnostic printed more than once: %q", stderr.String())
 	}
 }

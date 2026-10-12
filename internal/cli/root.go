@@ -8,12 +8,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewRootCommand constructs the bootstrap CLI with explicit version and streams.
-func NewRootCommand(version string, stdout, stderr io.Writer) *cobra.Command {
+// NewRootCommand constructs the CLI with explicit version, streams and
+// inspection service.
+func NewRootCommand(version string, stdout, stderr io.Writer, inspector Inspector) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "savewarden",
-		Short:         "Your progress. Always protected.",
-		Long:          "Savewarden protects game saves.\n\nBootstrap B0: help and version only. No save files are accessed.",
+		Use:   "savewarden",
+		Short: "Your progress. Always protected.",
+		Long: "Savewarden protects game saves.\n\n" +
+			"This build inspects declared save sources, read-only: nothing is copied,\n" +
+			"moved, written or executed. Backup, snapshot and restore come later.",
 		Version:       version,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -27,6 +30,7 @@ func NewRootCommand(version string, stdout, stderr io.Writer) *cobra.Command {
 	root.SetVersionTemplate("savewarden {{.Version}}\n")
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.DisableSuggestions = true
+	root.AddCommand(newInspectCommand(inspector))
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the build version",
