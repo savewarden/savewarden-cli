@@ -43,12 +43,13 @@ nominative seulement.
 
 ### Résultat B1 — 12 octobre 2026
 
-Exécuté par le propriétaire avec le binaire du commit de fusion de B1
-(`3fe7d92`) : deux inspections, codes de sortie `0` et `0`,
-rapports identiques, **14 fichiers** inventoriés, `findings: none`. Pilote B1
-réussi. Détail dans [le rapport B1](../validation/b1.md). L'étape facultative
-d'écriture en jeu n'est pas consignée ; aucune empreinte individuelle n'est
-versionnée.
+Exécuté par le propriétaire sous Windows 11 avec le binaire du commit de
+fusion de B1 (`3fe7d92`) : deux inspections, codes de sortie `0` et `0`,
+rapports identiques, **14 fichiers** inventoriés, `findings: none`,
+`PilotPassed = True`. Qualification fonctionnelle validée par le propriétaire
+le 24 octobre 2026. Détail dans [le rapport B1](../validation/b1.md). L'étape
+facultative d'écriture en jeu n'est pas consignée ; aucune empreinte
+individuelle n'est versionnée.
 
 B2 copiera seulement après plan/dry-run, choix explicite de destination et
 autorisation ; pas de suppression de la source. B3 ajoutera un snapshot neuf
