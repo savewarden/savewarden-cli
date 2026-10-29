@@ -147,11 +147,12 @@ func (v *hookVault) Identity(name string) (backup.FileID, error) {
 }
 
 // afterRetirement is the identity check of name by point 5, after the
-// post-check of M1: a rotation checks current there for the fourth time,
-// retained\<prev-op> for the third.
+// post-check of M1: a rotation checks current there for the sixth time,
+// after the check under lock, point 3 and its check after the content, the
+// pre-check and the post-check of M1; retained\<prev-op> for the third.
 func afterRetirement(name string) int {
 	if name == gameRel+"/current" {
-		return 4
+		return 6
 	}
 	return 3
 }
@@ -460,6 +461,13 @@ func TestRotationRefusesAnExistingRetained(t *testing.T) {
 	if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "unexpected-entry "+gameRel+"/retained/"+op1) ||
 		journalOf(f, op3) != "" || snapshot(f, `F:\`) != before {
 		t.Fatalf("result %+v, %v, journal %q", result, err, journalOf(f, op3))
+	}
+	// Appearing between the plan and the lock, it is refused under lock.
+	f = generation(t)
+	result, err = rotateWith(context.Background(), f, appearing{newFakeVaults(f), func() { f.mkdir(gameDir + `\retained\` + op1) }})
+	if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "unexpected-entry "+gameRel+"/retained/"+op1) ||
+		journalOf(f, op3) != "" || !strings.HasPrefix(result.State(), "intervention required for the vault: ") {
+		t.Fatalf("under lock: %+v, %v, journal %q", result, err, journalOf(f, op3))
 	}
 }
 

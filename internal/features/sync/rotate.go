@@ -185,6 +185,9 @@ func (o *operation) checkRetired() error {
 	if err != nil {
 		return err
 	}
+	if id, err := o.vault.Identity(o.retainedDir()); err != nil || id != o.old {
+		return fmt.Errorf("%s was replaced while it was read, or cannot be checked: %v %v", o.retainedDir(), id, err)
+	}
 	if len(differences) > 0 {
 		first := differences[0]
 		return fmt.Errorf("%s no longer matches the receipt of %s: %s %s, %s; %d difference(s) in all", o.retainedDir(), o.previous,
@@ -195,11 +198,15 @@ func (o *operation) checkRetired() error {
 
 // oldUnchanged requires current to match the receipt of the generation it
 // holds, in full: a difference is current-modified, code 2, and nothing is
-// moved.
+// moved. Its identity is read again after the content: a directory swapped
+// during the read is code 3, never taken for a content change.
 func (o *operation) oldUnchanged(name string) error {
 	differences, err := o.oldDifferences(name)
 	if err != nil {
 		return err
+	}
+	if id, err := o.vault.Identity(o.game + "/" + name); err != nil || id != o.old {
+		return o.refuse(fmt.Sprintf("%s was replaced while it was read, or cannot be checked: %v %v; nothing recorded or moved", name, id, err))
 	}
 	if len(differences) > 0 {
 		first := differences[0]
@@ -228,3 +235,13 @@ func (o *operation) oldDifferences(name string) ([]difference, error) {
 }
 
 func (o *operation) retainedDir() string { return o.game + "/" + retainedDir + "/" + o.previous }
+
+// refuse stops in code 3 with nothing recorded: for the operation once its
+// directory exists, for the vault before.
+func (o *operation) refuse(cause string) error {
+	if o.open {
+		return o.intervene(cause)
+	}
+	o.effect = EffectIntervention
+	return &InterventionError{Cause: cause}
+}

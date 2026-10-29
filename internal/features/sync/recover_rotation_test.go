@@ -2,11 +2,13 @@ package sync_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 	"github.com/savewarden/savewarden-cli/internal/features/sync"
@@ -728,5 +730,100 @@ func TestUnstartedOperationWithAnUnexplainedRetainedIsAmbiguous(t *testing.T) {
 		f := unstarted(t, temporaries)
 		f.mkdir(gameDir + `\retained\` + op2)
 		expectRefused(t, "retained", f)
+	}
+}
+
+// rewriteReceipt decodes the receipt of op, changes it and encodes it back:
+// a valid receipt that no published record attests.
+func rewriteReceipt(t *testing.T, f *fakeFS, op string, change func(*backup.Receipt)) {
+	t.Helper()
+	n := f.get(gameDir + `\receipts\` + op + `.json`)
+	receipt, err := backup.DecodeReceipt(n.data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change(&receipt)
+	if n.data, err = backup.EncodeReceipt(receipt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Security review, finding 3: the receipt a restoration checks retained
+// against must be the one the journal of the replaced generation published.
+// A retained generation edited in place, with its receipt rewritten to
+// match, is refused in code 3, never restored.
+func TestRecoveryAuthenticatesTheReplacedGeneration(t *testing.T) {
+	f := crashRotation(t, m1, true, nil)
+	alterRetained(f)
+	rewriteReceipt(t, f, op1, func(r *backup.Receipt) {
+		for i, entry := range r.Sources[0].Entries {
+			if entry.Path == "1.save" {
+				r.Sources[0].Entries[i].SHA256 = sha256.Sum256([]byte("ONE"))
+			}
+		}
+	})
+	if diagnostic := stable(t, f); !strings.Contains(diagnostic, "is not proven") {
+		t.Fatalf("diagnostic %q", diagnostic)
+	}
+	if f.get(gameDir+`\current`) != nil {
+		t.Fatal("an unproven generation was restored")
+	}
+}
+
+// Security review, finding 4: a receipt is committed only after its switch;
+// a committed receipt beside a switch that is not observed is a
+// contradiction, code 3, for a first publication as for a rotation.
+func TestRecoveryRefusesAReceiptWithoutItsSwitch(t *testing.T) {
+	for name, state := range map[string]func() (*fakeFS, string){
+		"first publication, publish-intent": func() (*fakeFS, string) {
+			r := crashAt(t, commitOf(op1, 5, backup.StepPublishIntent), true)
+			return r.f, op1
+		},
+		"rotation, retire-intent": func() (*fakeFS, string) { return crashRotation(t, m1, true, nil), op3 },
+		"rotation, promote-intent": func() (*fakeFS, string) {
+			return crashRotation(t, commitOf(op3, 6, backup.StepPromoteIntent), true, nil), op3
+		},
+	} {
+		f, op := state()
+		source := op1
+		if op == op1 {
+			// The first publication has no other receipt to start from.
+			publishedNow := at.Add(time.Second)
+			receipt := backup.Receipt{Operation: op1, ToolVersion: "dev", GameID: "synthetic-game", GameName: "Synthetic Game",
+				StartedAt: at, PublishIntentAt: at, PublishedAt: &publishedNow, PlanSHA256: sha256.Sum256([]byte(op1)),
+				Sources: []backup.ReceiptSource{{ID: "saves", Kind: "save", Required: true, State: backup.SourceMissing, Directories: []string{}}}}
+			data, err := backup.EncodeReceipt(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.put(gameDir+`\receipts\`+op1+`.json`, f.file(string(data)))
+		} else {
+			data := append([]byte(nil), f.get(gameDir+`\receipts\`+source+`.json`).data...)
+			f.put(gameDir+`\receipts\`+op+`.json`, f.file(string(data)))
+			rewriteReceipt(t, f, op, func(r *backup.Receipt) { r.Operation, r.Previous = op, op1 })
+		}
+		if diagnostic := stable(t, f); !strings.Contains(diagnostic, "is committed but its generation is not current") {
+			t.Fatalf("%s: diagnostic %q", name, diagnostic)
+		}
+	}
+}
+
+// Security review, finding 5: a current swapped while point 3 reads it is
+// code 3 with nothing recorded, never taken for a content change.
+func TestRotationReportsASwapDuringTheReadOfCurrent(t *testing.T) {
+	f := generation(t)
+	vaults := hooked(f)
+	vaults.after[commitOf(op3, 4, backup.StepVerified)] = func() {
+		f.onOpen = func(name string, n *node) {
+			if strings.Contains(name, "current") {
+				f.onOpen = nil
+				copyCurrent(f)
+			}
+		}
+	}
+	result, err := rotateWith(context.Background(), f, vaults)
+	expectIntervention(t, f, result, err, "004-verified.rec", "replaced while it was read")
+	if f.get(gameDir+`\retained`) != nil {
+		t.Fatal("something was retained")
 	}
 }

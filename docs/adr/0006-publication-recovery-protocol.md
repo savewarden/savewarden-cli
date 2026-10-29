@@ -470,7 +470,12 @@ Savewarden : il n'empêche pas un autre processus d'écrire dans `current` ou
 `retained\<prev-op>`. Les relectures des points 3 et 5 bornent ces fenêtres
 sans les fermer : une écriture entre la relecture du point 3 et M1, entre
 celle du point 5 et M2, ou entre la relecture d'une restauration vérifiée et
-M3, n'est pas détectée. Jeu, launcher et tout outil qui
+M3, n'est pas détectée ; de même dans `staging\<op>` entre sa relecture
+(`verified`) et M2, une fenêtre qu'une rotation allonge des relectures de
+`current` et de `retained`. Le plan suivant relit la génération publiée
+contre son receipt et signale tout écart. Chaque relecture relit l'identité
+après le contenu : un dossier remplacé pendant la lecture est une ambiguïté,
+code 3, jamais pris pour un changement de contenu. Jeu, launcher et tout outil qui
 touche le coffre doivent être fermés, comme pour la source.
 
 **Restaurations vérifiées.** Toute restauration M3, en cours d'exécution
@@ -720,3 +725,11 @@ relève de son propriétaire.
   désormais strictement le §3 au pré-contrôle d'une bascule : une identité
   illisible, un lien ou une cible qui ne peut être observée sont une
   ambiguïté, code 3, sans `rolled-back` ni `rollback-failed`.
+- **29 octobre 2026, revue de sécurité indépendante** (B2c) : un receipt de
+  `<op>` validé alors que la bascule de `<op>` n'est pas observée est une
+  contradiction du §3 : code 3, rien écrit, quelle que soit la ligne du
+  tableau, première publication comprise ; la récupération d'une rotation
+  authentifie le receipt de `<prev-op>` par le journal publié de cette
+  génération et l'identité fixée par `planned` avant toute restauration
+  vérifiée ; la fenêtre du staging entre `verified` et M2 est nommée au §5,
+  et chaque relecture relit l'identité après le contenu.

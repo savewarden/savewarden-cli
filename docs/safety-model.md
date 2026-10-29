@@ -91,9 +91,14 @@ restauration B4 crée un dossier distinct et vérifié ; elle ne change jamais
 la sauvegarde active du jeu.
 
 En B2b comme en B2c, le rollback du code consiste à reverter la PR du lot
-sur la release branch. Les coffres déjà écrits restent lisibles et ne sont jamais réécrits :
-une génération publiée, un staging conservé ou un journal clos restent en
-place ; un nouveau coffre est toujours possible.
+sur la release branch. Un binaire B2b refuse un coffre qui a connu une
+rotation : son contrat strict ne connaît pas `current_identity`, le journal
+est `journal-ambiguous`, code 3, et rien n'est écrit, plan comme `--apply` ;
+vérifié sur un coffre synthétique avec un binaire construit depuis
+`54b1c02`. Les données y restent lisibles par `inspect`. Les coffres déjà
+écrits ne sont jamais réécrits : une génération publiée ou conservée, un
+staging conservé ou un journal clos restent en place ; un nouveau coffre est
+toujours possible.
 
 ## Preuves et confidentialité
 

@@ -130,6 +130,16 @@ func (s *Service) recoverPlan(ctx context.Context, request Request, probe bool) 
 		if head = findReceipt(v, j.Previous); head == nil {
 			return rec, &InterventionError{Operation: rec.Operation, Cause: "the receipt of " + j.Previous + ", the generation this rotation replaces, is missing"}
 		}
+		// The receipt a restoration checks retained against must be the one
+		// the journal of that generation published, for the identity
+		// planned fixed (ADR 0006 §4).
+		previous, ok := v.journals[j.Previous]
+		if !ok {
+			return rec, &InterventionError{Operation: rec.Operation, Cause: "the journal of " + j.Previous + ", the generation this rotation replaces, is missing"}
+		}
+		if err := backup.RecognizePrevious(*head, v.receiptSum[j.Previous], previous, j.Old); err != nil {
+			return rec, &InterventionError{Operation: rec.Operation, Cause: "the generation this rotation replaces is not proven: " + err.Error()}
+		}
 	}
 	observed := backup.Observation{
 		Current: presence(scope, game+"/"+currentDir, j),
@@ -152,6 +162,11 @@ func (s *Service) recoverPlan(ctx context.Context, request Request, probe bool) 
 	action, err := backup.Classify(rec.journal, observed)
 	if err != nil {
 		return rec, &InterventionError{Operation: rec.Operation, Cause: err.Error()}
+	}
+	if _, committed := v.receiptSum[rec.Operation]; committed && action != backup.ActionVerifyThenPublish {
+		// A receipt is committed only after its switch: without the switch
+		// observed, journal and vault contradict each other (ADR 0006 §3).
+		return rec, &InterventionError{Operation: rec.Operation, Cause: "the receipt of " + rec.Operation + " is committed but its generation is not current; nothing written"}
 	}
 	switch action {
 	case backup.ActionAbandon:

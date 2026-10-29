@@ -278,5 +278,6 @@ d'état, au receipt ou au plan pour l'état du coffre.
   qualifié ; FAT32, exFAT et les lecteurs réseau sont refusés.
 - **Même disque physique** : deux volumes d'un même disque ne sont pas
   détectés ; un lecteur `subst` n'est pas reconnu comme redirection.
-- **Confidentialité.** La sortie contient des chemins locaux ; anonymisez-la
-  avant tout partage.
+- **Confidentialité.** La sortie contient des chemins locaux, et les
+  diagnostics des identités de fichiers NTFS, dont le numéro de série du
+  volume ; anonymisez-la avant tout partage.
