@@ -729,7 +729,10 @@ relève de son propriétaire.
   `<op>` validé alors que la bascule de `<op>` n'est pas observée est une
   contradiction du §3 : code 3, rien écrit, quelle que soit la ligne du
   tableau, première publication comprise ; la récupération d'une rotation
-  authentifie le receipt de `<prev-op>` par le journal publié de cette
-  génération et l'identité fixée par `planned` avant toute restauration
-  vérifiée ; la fenêtre du staging entre `verified` et M2 est nommée au §5,
-  et chaque relecture relit l'identité après le contenu.
+  vérifie, par recoupement, le receipt de `<prev-op>` contre le journal
+  publié de cette génération et l'identité fixée par `planned` avant toute
+  restauration vérifiée : une altération accidentelle ou partielle est
+  refusée, pas une réécriture délibérée du receipt et du journal, hors
+  modèle ; la fenêtre du staging entre `verified` et M2 est nommée au §5, et
+  chaque relecture relit l'identité après le contenu, récupération et règle
+  M3 comprises.

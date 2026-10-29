@@ -808,22 +808,128 @@ func TestRecoveryRefusesAReceiptWithoutItsSwitch(t *testing.T) {
 	}
 }
 
+// swapDuringRead replaces the directory under name, the first time one of
+// its files is read, by a copy whose content differs: the case a re-read of
+// the identity after the content must catch.
+func swapDuringRead(f *fakeFS, parent, name string) {
+	f.onOpen = func(path string, _ *node) {
+		if !strings.Contains(path, name) {
+			return
+		}
+		f.onOpen = nil
+		dir := f.get(parent)
+		dir.children[name] = copyTree(f, dir.children[name])
+		for _, saves := range []*node{dir.children[name].children["saves"]} {
+			if saves != nil && saves.children["1.save"] != nil {
+				saves.children["1.save"].data = []byte("SWAPPED")
+			}
+		}
+	}
+}
+
 // Security review, finding 5: a current swapped while point 3 reads it is
 // code 3 with nothing recorded, never taken for a content change.
 func TestRotationReportsASwapDuringTheReadOfCurrent(t *testing.T) {
 	f := generation(t)
 	vaults := hooked(f)
-	vaults.after[commitOf(op3, 4, backup.StepVerified)] = func() {
-		f.onOpen = func(name string, n *node) {
-			if strings.Contains(name, "current") {
-				f.onOpen = nil
-				copyCurrent(f)
-			}
-		}
-	}
+	vaults.after[commitOf(op3, 4, backup.StepVerified)] = func() { swapDuringRead(f, gameDir, "current") }
 	result, err := rotateWith(context.Background(), f, vaults)
 	expectIntervention(t, f, result, err, "004-verified.rec", "replaced while it was read")
-	if f.get(gameDir+`\retained`) != nil {
-		t.Fatal("something was retained")
+	if f.get(gameDir+`\retained`) != nil || strings.Contains(journalOf(f, op3), "failed") {
+		t.Fatalf("something was retained or recorded: %s", journalOf(f, op3))
+	}
+}
+
+// The same under lock, before any journal, and for retained after M1.
+func TestSwapsDuringOtherReadsAreCode3(t *testing.T) {
+	f := generation(t)
+	result, err := rotateWith(context.Background(), f, appearing{newFakeVaults(f), func() { swapDuringRead(f, gameDir, "current") }})
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "replaced while it was read") || journalOf(f, op3) != "" ||
+		!strings.HasPrefix(result.State(), "intervention required for the vault: ") {
+		t.Fatalf("under lock: %+v, %v, journal %q", result, err, journalOf(f, op3))
+	}
+	f = generation(t)
+	vaults := hooked(f)
+	vaults.after[m1] = func() { swapDuringRead(f, gameDir+`\retained`, op1) }
+	result, err = rotateWith(context.Background(), f, vaults)
+	expectIntervention(t, f, result, err, "005-retire-intent.rec", "replaced while it was read")
+	if f.get(gameDir+`\current`) != nil {
+		t.Fatal("promoted or restored")
+	}
+}
+
+// Verification of the fixes, finding 1: the recovery reads current again by
+// identity after its content; a current swapped during that read records
+// nothing, neither unpublish-intent, unpromote-intent nor published.
+func TestRecoveryReportsASwapDuringTheCheckOfCurrent(t *testing.T) {
+	first := crashAt(t, "Move games/synthetic-game/staging/"+op1+" games/synthetic-game/current", true)
+	for name, state := range map[string]struct {
+		f    *fakeFS
+		op   string
+		last string
+	}{
+		"first publication": {first.f, op1, "005-publish-intent.rec"},
+		"rotation":          {crashRotation(t, m2, true, nil), op3, "006-promote-intent.rec"},
+	} {
+		swapDuringRead(state.f, gameDir, "current")
+		_, err := recoverWith(state.f, newFakeVaults(state.f))
+		var intervention *sync.InterventionError
+		if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "replaced while it was read") {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := lastRecord(state.f, state.op); got != state.last {
+			t.Fatalf("%s: journal ends at %q, want %q", name, got, state.last)
+		}
+	}
+}
+
+// Verification of the fixes, finding 4: a retained that turned into a
+// junction before M1 cannot be held; nothing is recorded as rolled back.
+func TestRetainedThatCannotBeHeldIsCode3(t *testing.T) {
+	f := generation(t)
+	vaults := hooked(f)
+	vaults.after[commitOf(op3, 5, backup.StepRetireIntent)] = func() { f.put(gameDir+`\retained`, f.link()) }
+	result, err := rotateWith(context.Background(), f, vaults)
+	expectIntervention(t, f, result, err, "005-retire-intent.rec", "cannot be held")
+	if f.get(gameDir+`\current\saves\1.save`) == nil {
+		t.Fatal("current moved")
+	}
+}
+
+// Verification of the fixes, finding 5: the replaced generation must also
+// have its journal; and a generation whose receipt an earlier recovery
+// rebuilt is restored like any other.
+func TestRecoveryAuthenticatesEveryBranch(t *testing.T) {
+	f := crashRotation(t, m1, true, nil)
+	delete(f.get(gameDir+`\journal`).children, op1)
+	if diagnostic := stable(t, f); !strings.Contains(diagnostic, "the journal of "+op1) {
+		t.Fatalf("journal of the replaced generation missing: %q", diagnostic)
+	}
+
+	base := func() *fakeFS {
+		r := crashAt(t, "Move games/synthetic-game/staging/"+op1+" games/synthetic-game/current", true)
+		if _, err := recoverWith(r.f, newFakeVaults(r.f)); err != nil {
+			t.Fatal(err)
+		}
+		r.f.put(installPath+`\saves\new.save`, r.f.file("new"))
+		return r.f
+	}
+	reference := base()
+	clean := newFakeVaults(reference)
+	if _, err := rotateWith(context.Background(), reference, clean); err != nil {
+		t.Fatal(err)
+	}
+	f = base()
+	crashing := newFakeVaults(f)
+	crashing.crashAfter = callIndex(t, clean.calls, m1)
+	if _, err := rotateWith(context.Background(), f, crashing); err == nil {
+		t.Fatal("no crash")
+	}
+	if rec, err := recoverPlan(f); err != nil || rec.Action != sync.RecoverRestore {
+		t.Fatalf("recovery plan %q, %v", rec.Action, err)
+	}
+	if _, err := recoverWith(f, newFakeVaults(f)); err != nil || lastStep(f, op3) != "rolled-back" {
+		t.Fatalf("recovery over a rebuilt receipt: %v, %q", err, lastStep(f, op3))
 	}
 }

@@ -269,6 +269,8 @@ func TestPreparedTemporariesMustMatchTheObservation(t *testing.T) {
 		{"rollback-failed prepared after restore-intent", true, steps(retiring, backup.StepRestoreIntent), backup.StepRollbackFailed, obs(a, o, n), backup.ActionFinishRestore},
 		{"rollback-failed prepared, M3 done", true, steps(retiring, backup.StepRestoreIntent), backup.StepRollbackFailed, obs(o, a, n), ""},
 		{"rollback-failed prepared after unpromote-intent", true, steps(retiring, backup.StepPromoteIntent, backup.StepUnpromoteIntent), backup.StepRollbackFailed, obs(n, o, a), backup.ActionFinishUnpromote},
+		{"rollback-failed prepared, M4 done", true, steps(retiring, backup.StepPromoteIntent, backup.StepUnpromoteIntent), backup.StepRollbackFailed, obs(a, o, n), ""},
+		{"rollback-failed prepared after unpublish-intent", false, steps(publishing, backup.StepUnpublishIntent), backup.StepRollbackFailed, obs(n, a, a), backup.ActionFinishUnpublish},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

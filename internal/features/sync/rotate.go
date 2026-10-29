@@ -36,6 +36,13 @@ func (o *operation) rotate() error {
 	o.critical = true
 	// M1. The retained directory is created under the intent, like staging.
 	moved, err := false, o.ensureDir(o.game+"/"+retainedDir)
+	if err != nil {
+		// Only a creation that failed leaves nothing there; anything else,
+		// a link, a file, an entry that cannot be read, is unexplained.
+		if _, idErr := o.vault.Identity(o.game + "/" + retainedDir); !errors.Is(idErr, fs.ErrNotExist) {
+			err = &unexplainedError{fmt.Sprintf("%s cannot be held before the retirement: %v", retainedDir, err)}
+		}
+	}
 	if err == nil {
 		moved, err = o.switchTo(current, retained, o.old)
 	}

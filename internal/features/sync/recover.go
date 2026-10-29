@@ -250,6 +250,9 @@ func (s *Service) previousGeneration(ctx context.Context, scope Scope, v *vault,
 	if len(compareWithReceipt(dir, head)) > 0 {
 		return backup.Other, nil
 	}
+	if again, err := scope.Identity(game + "/" + currentDir); err != nil || again != id {
+		return backup.Other, nil
+	}
 	return backup.Old, nil
 }
 
@@ -423,6 +426,10 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
 	if err != nil {
 		return err
+	}
+	if id, err := o.vault.Identity(o.game + "/" + currentDir); err != nil || id != o.staging {
+		// Swapped while it was read: nothing is recorded on its strength.
+		return o.intervene(fmt.Sprintf("current was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
 	}
 	_, receiptCommitted := rec.observed.receiptSum[o.op]
 	if differences := compareWithReceipt(dir, backup.Receipt{Sources: o.planned.Sources}); len(differences) > 0 {
