@@ -158,6 +158,15 @@ func TestArchitectureImportRules(t *testing.T) {
 		{"internal/entities/game", "syscall", false},
 		{"internal/cli", "C", false},
 		{"internal/cliff", modulePath + "internal/features/sync", false},
+		// ADR 0004: shared inventory types live in entities/backup.
+		{"internal/features/inspect", modulePath + "internal/entities/backup", true},
+		{"internal/entities/backup", "crypto/sha256", true},
+		{"internal/entities/backup", "encoding/json", true},
+		{"internal/entities/backup", modulePath + "internal/entities/game", true},
+		{"internal/entities/backup", modulePath + "internal/features/inspect", false},
+		{"internal/entities/backup", modulePath + "internal/platform/filesystem", false},
+		{"internal/entities/backup", "syscall", false},
+		{"internal/cli", modulePath + "internal/entities/backup", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.source+"->"+tt.target, func(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 	"github.com/savewarden/savewarden-cli/internal/entities/game"
 )
 
@@ -115,15 +116,15 @@ type inspection struct {
 	report *Report
 }
 
-func (r *inspection) add(severity Severity, code Code, source, path, detail string) {
-	r.report.Findings = append(r.report.Findings, Finding{severity, code, source, path, detail})
+func (r *inspection) add(severity backup.Severity, code backup.Code, source, path, detail string) {
+	r.report.Findings = append(r.report.Findings, backup.Finding{Severity: severity, Code: code, Source: source, Path: path, Detail: detail})
 }
 
-func missingSeverity(source game.Source) Severity {
+func missingSeverity(source game.Source) backup.Severity {
 	if source.Required {
-		return Blocking
+		return backup.Blocking
 	}
-	return Info
+	return backup.Info
 }
 
 // resolve checks every component from the volume root down to the source
@@ -138,13 +139,13 @@ func (r *inspection) resolve(source game.Source, volume string, segments []strin
 			r.add(missingSeverity(source), CodeSourceMissing, source.ID, display, "does not exist")
 			return nil, StatusMissing
 		case err != nil:
-			r.add(Blocking, codeFor(err), source.ID, display, err.Error())
+			r.add(backup.Blocking, codeFor(err), source.ID, display, err.Error())
 			return nil, StatusRefused
 		case isLink(info.Mode()):
-			r.add(Blocking, CodeLinkNotFollowed, source.ID, display, describeLink(info.Mode())+" on the way to the source; not followed")
+			r.add(backup.Blocking, CodeLinkNotFollowed, source.ID, display, describeLink(info.Mode())+" on the way to the source; not followed")
 			return nil, StatusRefused
 		case !info.IsDir():
-			r.add(Blocking, CodeSourceNotDirectory, source.ID, display, "is not a directory")
+			r.add(backup.Blocking, CodeSourceNotDirectory, source.ID, display, "is not a directory")
 			return nil, StatusRefused
 		}
 		chain = append(chain, info)
@@ -190,7 +191,7 @@ func notFollowed(err error) bool {
 	return errors.As(err, &refusal) && refusal.NotFollowed()
 }
 
-func codeFor(err error) Code {
+func codeFor(err error) backup.Code {
 	if notFollowed(err) {
 		return CodeLinkNotFollowed
 	}
