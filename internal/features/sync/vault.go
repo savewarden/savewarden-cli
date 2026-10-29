@@ -32,6 +32,8 @@ type vault struct {
 	exists        bool
 	interventions []Intervention
 	// Game directory content.
+	games, game bool // games and games\<id> exist
+	lock        bool // sync.lock exists
 	current     bool // a plain current directory exists
 	currentLink bool // current exists but is a link, a file or a reparse point
 	receipts    []backup.Receipt
@@ -45,7 +47,7 @@ func (v *vault) intervene(cause Cause, subject, detail string) {
 
 // errVault reports a vault the plan must refuse outright: exit code 1.
 func errVault(vaultPath, format string, args ...any) error {
-	return fmt.Errorf("vault %s: %s", vaultPath, fmt.Sprintf(format, args...))
+	return fmt.Errorf("vault %s: "+format, append([]any{vaultPath}, args...)...)
 }
 
 // resolveVault checks every component of the vault path without following
@@ -122,6 +124,7 @@ func (v *vault) read(scope Scope, vaultPath string, segments []string, gameID st
 }
 
 func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool) error {
+	v.games = games
 	if !games {
 		return nil
 	}
@@ -134,7 +137,7 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 	for _, entry := range entries {
 		switch {
 		case entry.Name == gameID && entry.Kind == backup.KindDirectory:
-			found = true
+			found, v.game = true, true
 		case entry.Name == gameID:
 			return errVault(vaultPath, `games\%s is a link, a file or a reparse point; not followed`, gameID)
 		case strings.EqualFold(entry.Name, gameID):
@@ -157,6 +160,7 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 		present[entry.Name] = true
 		switch {
 		case entry.Name == lockFile && entry.Kind == backup.KindRegular:
+			v.lock = true
 		case entry.Name == currentDir && entry.Kind == backup.KindDirectory:
 			v.current = true
 		case entry.Name == currentDir:

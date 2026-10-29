@@ -69,6 +69,7 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 		Game:         manifest.Game,
 		Vault:        request.VaultPath,
 		Destination:  windowsPath(vaultVolume, append(append([]string{}, gameSegments...), currentDir)),
+		manifest:     manifest, vaultVolume: vaultVolume, vaultSegments: vaultSegments,
 	}
 
 	scope, err := s.files.OpenScope(vaultVolume)
@@ -101,7 +102,7 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return Plan{}, fmt.Errorf("plan interrupted: %w", err)
 	}
-	plan.VaultState, plan.Pending = v.state, v.pending
+	plan.VaultState, plan.Pending, plan.observed = v.state, v.pending, v
 	if len(v.interventions) > 0 {
 		plan.Interventions, plan.CurrentUnchecked = v.interventions, v.current || v.currentLink
 		sort.SliceStable(plan.Interventions, func(a, b int) bool { return plan.Interventions[a].Subject < plan.Interventions[b].Subject })
@@ -313,7 +314,7 @@ func relativeTo(p string) string {
 
 // planSource applies plan B2 §4.4 to one source.
 func (p *Plan) planSource(source game.Source, path string, dir backup.Directory, previous *backup.Receipt) {
-	result := SourcePlan{Source: source, Path: path}
+	result := SourcePlan{Source: source, Path: path, inventory: dir}
 	var old backup.ReceiptSource
 	hadOld := false
 	if previous != nil {

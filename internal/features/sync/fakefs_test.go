@@ -33,7 +33,14 @@ type fakeFS struct {
 	opened  int
 	// described overrides, per volume root, what fakeVolumes reports: by
 	// default a fixed NTFS drive with 1 TiB available.
-	described map[string]backup.Volume
+	volumeOf map[string]backup.Volume
+	// onOpen, if set, runs when a file is opened for reading, before its
+	// content is read: tests change the source there.
+	onOpen func(name string, n *node)
+	// later, if set, is what fakeVolumes reports from its second call on,
+	// such as the check under lock.
+	later     *backup.Volume
+	described int
 }
 
 // fakeVolumes describes the fake volumes; a path on a missing volume fails.
@@ -44,14 +51,18 @@ func (v fakeVolumes) Describe(path string) (backup.Volume, error) {
 	if _, ok := v.f.volumes[root]; !ok {
 		return backup.Volume{}, fs.ErrNotExist
 	}
-	if described, ok := v.f.described[root]; ok {
+	v.f.described++
+	if v.f.later != nil && v.f.described > 1 {
+		return *v.f.later, nil
+	}
+	if described, ok := v.f.volumeOf[root]; ok {
 		return described, nil
 	}
 	return backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 1 << 40}, nil
 }
 
 func newFakeFS(volumes ...string) *fakeFS {
-	f := &fakeFS{volumes: map[string]*node{}, described: map[string]backup.Volume{}}
+	f := &fakeFS{volumes: map[string]*node{}, volumeOf: map[string]backup.Volume{}}
 	for _, volume := range volumes {
 		f.volumes[volume] = f.dir()
 	}
@@ -214,7 +225,11 @@ func (s *fakeScope) OpenRegular(name string) (fs.File, error) {
 		return nil, errors.New(name + ": not a regular file")
 	}
 	s.fs.opened++
-	return &fakeFile{info: info(base, n), reader: bytes.NewReader(append([]byte(nil), n.data...))}, nil
+	opened := info(base, n)
+	if s.fs.onOpen != nil {
+		s.fs.onOpen(name, n)
+	}
+	return &fakeFile{info: opened, node: n, reader: bytes.NewReader(append([]byte(nil), n.data...))}, nil
 }
 
 func (s *fakeScope) SameFile(a, b fs.FileInfo) bool { return a.Sys().(int) == b.Sys().(int) }
@@ -222,12 +237,21 @@ func (s *fakeScope) Close() error                   { return nil }
 
 type fakeFile struct {
 	info   fs.FileInfo
+	node   *node
 	reader *bytes.Reader
+	read   bool
 }
 
-func (f *fakeFile) Read(p []byte) (int, error) { return f.reader.Read(p) }
-func (f *fakeFile) Stat() (fs.FileInfo, error) { return f.info, nil }
-func (f *fakeFile) Close() error               { return nil }
+func (f *fakeFile) Read(p []byte) (int, error) { f.read = true; return f.reader.Read(p) }
+
+// Stat describes the file as opened, then, once read, as it is now.
+func (f *fakeFile) Stat() (fs.FileInfo, error) {
+	if f.read {
+		return info(f.info.Name(), f.node), nil
+	}
+	return f.info, nil
+}
+func (f *fakeFile) Close() error { return nil }
 
 type fakeInfo struct {
 	name    string

@@ -17,6 +17,15 @@ Aucun tag ni release n'est publié par le bootstrap.
   Le plan qualifie le volume du coffre, NTFS sur lecteur local fixe ou
   amovible, sinon code 1, et exige l'espace de la génération complète plus
   max(64 Mio, 5 %) disponible pour l'utilisateur, sinon `insufficient-space`.
+- Première publication par la feature `sync`, pas encore exposée par la
+  CLI : initialisation du coffre I2 à I9 en créations exclusives, verrou,
+  état et espace relus sous verrou, journal validé par renommage avec
+  l'enveloppe E1 et les retries bornés sur les erreurs 32 et 33, copie hachée
+  avec détection de changement de la source, second inventaire, relecture du
+  staging, bascule contrôlée par identité avant et après le renommage,
+  receipt puis `published`. Un `current` existant et différent est refusé,
+  `current-exists`. Énumération des crashs avant et après chaque appel au
+  coffre.
 - Protocole de publication et de récupération (ADR 0006), référence de
   sécurité des écritures à venir, et frontières de `sync` (ADR 0004).
 - Écritures autorisées dans le seul package `internal/platform/vault`

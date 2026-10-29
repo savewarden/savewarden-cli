@@ -630,13 +630,13 @@ func TestVaultVolumeIsQualified(t *testing.T) {
 		{FileSystem: "ntfs", Drive: backup.DriveFixed, Available: 1 << 40},
 	} {
 		f := world()
-		f.described[`F:\`] = volume
+		f.volumeOf[`F:\`] = volume
 		if err := planError(f, manifest(), vaultPath); err == nil || !strings.Contains(err.Error(), "qualified") {
 			t.Errorf("%+v: %v", volume, err)
 		}
 	}
 	f := world()
-	f.described[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveRemovable, Available: 1 << 40}
+	f.volumeOf[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveRemovable, Available: 1 << 40}
 	if p := plan(t, f, manifest(), vaultPath); p.Volume.Drive != backup.DriveRemovable || p.Needed != 6+64<<20 {
 		t.Fatalf("removable NTFS: %+v", p)
 	}
@@ -646,13 +646,13 @@ func TestVaultVolumeIsQualified(t *testing.T) {
 // space available to the user.
 func TestSpaceIsCheckedAtPlan(t *testing.T) {
 	f := world()
-	f.described[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 6 + 64<<20 - 1}
+	f.volumeOf[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 6 + 64<<20 - 1}
 	p := plan(t, f, manifest(), vaultPath)
 	expectFindings(t, p, "blocking insufficient-space  "+vaultPath)
 	if !strings.Contains(p.Findings[0].Detail, "67108870 bytes needed, 67108869 available") {
 		t.Fatalf("detail %q", p.Findings[0].Detail)
 	}
-	f.described[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 6 + 64<<20}
+	f.volumeOf[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 6 + 64<<20}
 	if p := plan(t, f, manifest(), vaultPath); p.Outcome() != "changes" || p.Needed != 6+64<<20 {
 		t.Fatalf("exact space: %q, %d", p.Outcome(), p.Needed)
 	}

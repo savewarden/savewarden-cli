@@ -83,6 +83,9 @@ type SourcePlan struct {
 	Changes backup.Changes // against the current generation; empty unless planned
 	Files   int
 	Bytes   int64
+	// inventory is the full inventory of a planned source: what --apply
+	// copies and must find again.
+	inventory backup.Directory
 }
 
 // Plan is the typed result of a read-only sync plan, independent of
@@ -109,6 +112,12 @@ type Plan struct {
 	Sources       []SourcePlan
 	Interventions []Intervention
 	Findings      []backup.Finding
+
+	// What --apply needs to execute exactly this plan.
+	manifest      game.Manifest
+	vaultVolume   string
+	vaultSegments []string
+	observed      *vault
 }
 
 // Blocking counts the blocking findings.
