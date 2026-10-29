@@ -46,6 +46,8 @@ func firstPlan() sync.Plan {
 		Game:         game.Game{ID: "synthetic-game", Name: "Synthetic Game"},
 		Vault:        `D:\Vault`,
 		VaultState:   sync.VaultAbsent,
+		Volume:       backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 1 << 40},
+		Needed:       6 + 64<<20,
 		Destination:  `D:\Vault\games\synthetic-game\current`,
 		Sources: []sync.SourcePlan{{
 			Source:  game.Source{ID: "saves", Kind: game.KindSave, Required: true},
@@ -73,7 +75,7 @@ func TestRenderFirstPlan(t *testing.T) {
 game: synthetic-game (Synthetic Game)
 vault: D:\Vault (will be created)
 destination: D:\Vault\games\synthetic-game\current
-volume: not checked by this build
+volume: NTFS, fixed drive, 67108870 bytes needed
 current: none
 pending: none
 mode: plan only, nothing written

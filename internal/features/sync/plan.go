@@ -17,6 +17,9 @@ const (
 	CodeCurrentModified backup.Code = "current-modified"
 	CodeLongPath        backup.Code = "long-path"
 	CodeSameVolume      backup.Code = "same-volume"
+	// CodeInsufficientSpace: the space available to the user is below the
+	// full size of the new generation plus its margin.
+	CodeInsufficientSpace backup.Code = "insufficient-space"
 )
 
 const (
@@ -89,7 +92,12 @@ type Plan struct {
 	Game         game.Game
 	Vault        string
 	VaultState   VaultState
-	Destination  string // Windows path of the current generation
+	// Volume describes the vault's volume, qualified as local NTFS.
+	Volume backup.Volume
+	// Needed is the space a publication requires: the full new generation
+	// plus max(64 MiB, 5 %); zero when an intervention stops the plan.
+	Needed      uint64
+	Destination string // Windows path of the current generation
 	// Current is the operation that produced the current generation, empty
 	// when the vault holds none for this game.
 	Current string

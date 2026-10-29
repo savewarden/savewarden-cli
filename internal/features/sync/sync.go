@@ -27,16 +27,18 @@ type Request struct {
 	VaultPath    string
 }
 
-// Service plans synchronisations through injected adapters.
+// Service plans synchronisations through injected adapters, all of them
+// read-only. Writing needs a Writer, given to --apply and --recover only.
 type Service struct {
 	manifests   ManifestReader
 	inventories Inventories
 	files       Files
+	volumes     Volumes
 }
 
 // New returns a Service using the given adapters.
-func New(manifests ManifestReader, inventories Inventories, files Files) *Service {
-	return &Service{manifests: manifests, inventories: inventories, files: files}
+func New(manifests ManifestReader, inventories Inventories, files Files, volumes Volumes) *Service {
+	return &Service{manifests: manifests, inventories: inventories, files: files, volumes: volumes}
 }
 
 // Plan computes what a synchronisation would copy, without writing
@@ -81,6 +83,9 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
+	if plan.Volume, err = s.describe(request.VaultPath, vaultVolume, vaultSegments, v.exists); err != nil {
+		return Plan{}, err
+	}
 	if strings.EqualFold(vaultVolume, installVolume) {
 		install, complete := chainOf(scope, installSegments)
 		if overlapping(scope, v.chain, v.exists, install, complete) {
@@ -121,6 +126,7 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 			plan.add(backup.Info, CodeSameVolume, source.ID, vaultVolume, "vault and source share a volume; not an off-disk backup")
 		}
 	}
+	plan.checkSpace()
 	if previous != nil {
 		for _, old := range previous.Sources {
 			if !declared(manifest, old.ID) {
@@ -131,6 +137,40 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	}
 	plan.sortFindings(manifest)
 	return plan, nil
+}
+
+// describe qualifies the vault's volume, read through the vault itself or,
+// while it does not exist, through its parent.
+func (s *Service) describe(vaultPath, volume string, segments []string, exists bool) (backup.Volume, error) {
+	existing := segments
+	if !exists {
+		existing = segments[:len(segments)-1]
+	}
+	described, err := s.volumes.Describe(windowsPath(volume, existing))
+	if err != nil {
+		return backup.Volume{}, errVault(vaultPath, "volume cannot be described: %v", err)
+	}
+	return described, qualify(vaultPath, described)
+}
+
+// checkSpace compares the space a publication needs with the space the
+// user may still write (plan B2 §4.2, V2). It is checked again under lock.
+func (p *Plan) checkSpace() {
+	var sizes []int64
+	for _, source := range p.Sources {
+		sizes = append(sizes, source.Bytes)
+	}
+	needed, err := spaceNeeded(sizes)
+	switch {
+	case err != nil:
+		p.add(backup.Blocking, CodeInsufficientSpace, "", p.Vault, err.Error())
+	case p.Volume.Available < needed:
+		p.Needed = needed
+		p.add(backup.Blocking, CodeInsufficientSpace, "", p.Vault,
+			fmt.Sprintf("%d bytes needed, %d available to this user", needed, p.Volume.Available))
+	default:
+		p.Needed = needed
+	}
 }
 
 // checkSources refuses sources that resolve to overlapping directories by

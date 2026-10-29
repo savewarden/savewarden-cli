@@ -9,10 +9,12 @@ import (
 	"io"
 
 	"github.com/savewarden/savewarden-cli/internal/cli"
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 	"github.com/savewarden/savewarden-cli/internal/features/inspect"
 	"github.com/savewarden/savewarden-cli/internal/features/sync"
 	"github.com/savewarden/savewarden-cli/internal/platform/filesystem"
 	"github.com/savewarden/savewarden-cli/internal/platform/manifests"
+	"github.com/savewarden/savewarden-cli/internal/platform/vault"
 )
 
 // Run creates a fresh command tree for every invocation. Success is exit
@@ -23,7 +25,7 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 	output := &checkedWriter{writer: stdout}
 	inspector := inspect.New(manifests.Reader{}, scopes{})
 	// The inspect service satisfies sync's Inventories port as is (ADR 0004).
-	planner := sync.New(manifests.Reader{}, inspector, syncScopes{})
+	planner := sync.New(manifests.Reader{}, inspector, syncScopes{}, volumes{})
 	command := cli.NewRootCommand(version, output, stderr, inspector, planner)
 	command.SetArgs(args)
 	err := command.ExecuteContext(ctx)
@@ -66,6 +68,11 @@ func (syncScopes) OpenScope(root string) (sync.Scope, error) {
 	}
 	return scope, nil
 }
+
+// volumes bridges the read-only volume queries of the vault adapter.
+type volumes struct{}
+
+func (volumes) Describe(path string) (backup.Volume, error) { return vault.Describe(path) }
 
 // Cobra's built-in help/version printers do not return write failures.
 // Retain them at the application boundary to keep the exit contract reliable.

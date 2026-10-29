@@ -45,7 +45,7 @@ func newVault(t *testing.T) (string, *vault.Session) {
 
 func create(t *testing.T, s *vault.Session, name, content string, modTime time.Time) {
 	t.Helper()
-	w, err := s.CreateFile(name, modTime)
+	w, err := s.NewFile(name, modTime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestCreationIsExclusive(t *testing.T) {
 		t.Fatalf("vault created twice: %v", err)
 	}
 	create(t, s, "a.save", "one", time.Time{})
-	if _, err := s.CreateFile("a.save", time.Time{}); !errors.Is(err, fs.ErrExist) {
+	if _, err := s.NewFile("a.save", time.Time{}); !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("CREATE_NEW over an existing file: %v", err)
 	}
 	dirs(t, s, "d")
@@ -149,8 +149,8 @@ func TestCreationIsExclusive(t *testing.T) {
 	// Windows answers CREATE_NEW on a directory name with access denied,
 	// error 5: refused all the same.
 	for name, err := range map[string]error{
-		"file over a directory":      func() error { _, err := s.CreateFile("d", time.Time{}); return err }(),
-		"file over a made directory": func() error { _, err := s.CreateFile("made-elsewhere", time.Time{}); return err }(),
+		"file over a directory":      func() error { _, err := s.NewFile("d", time.Time{}); return err }(),
+		"file over a made directory": func() error { _, err := s.NewFile("made-elsewhere", time.Time{}); return err }(),
 	} {
 		if err == nil {
 			t.Errorf("%s: created", name)
@@ -168,7 +168,7 @@ func TestCreationIsExclusive(t *testing.T) {
 func TestFileIsFlushedDatedAndClosedOnce(t *testing.T) {
 	base, s := newVault(t)
 	modTime := time.Date(2026, 10, 9, 16, 32, 8, 123456700, time.UTC)
-	w, err := s.CreateFile("slot.save", modTime)
+	w, err := s.NewFile("slot.save", modTime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestLinksAreNeverFollowed(t *testing.T) {
 		if _, err := s.Identity("games"); !notFollowed(err) {
 			t.Errorf("Identity of a junction: %v", err)
 		}
-		if _, err := s.CreateFile("games/new.save", time.Time{}); err == nil || !strings.Contains(err.Error(), "not held") {
+		if _, err := s.NewFile("games/new.save", time.Time{}); err == nil || !strings.Contains(err.Error(), "not held") {
 			t.Errorf("file created below an unheld junction: %v", err)
 		}
 		if err := s.CreateDir("staging"); !errors.Is(err, fs.ErrExist) {
@@ -410,7 +410,7 @@ func TestLinksAreNeverFollowed(t *testing.T) {
 		if err := s.Hold("dirlink"); !notFollowed(err) {
 			t.Errorf("Hold through a symbolic link: %v", err)
 		}
-		if _, err := s.CreateFile("dirlink/new.save", time.Time{}); err == nil {
+		if _, err := s.NewFile("dirlink/new.save", time.Time{}); err == nil {
 			t.Error("file created through a symbolic link")
 		}
 		if _, err := os.Lstat(filepath.Join(base, "real", "new.save")); !errors.Is(err, fs.ErrNotExist) {
@@ -449,11 +449,11 @@ func TestNamesAreChecked(t *testing.T) {
 		if err := s.CreateDir(name); err == nil {
 			t.Errorf("directory %q created", name)
 		}
-		if _, err := s.CreateFile(name, time.Time{}); err == nil {
+		if _, err := s.NewFile(name, time.Time{}); err == nil {
 			t.Errorf("file %q created", name)
 		}
 	}
-	if _, err := s.CreateFile(".", time.Time{}); err == nil {
+	if _, err := s.NewFile(".", time.Time{}); err == nil {
 		t.Error("the vault itself opened as a file")
 	}
 	if err := s.Move(".", "elsewhere"); err == nil {

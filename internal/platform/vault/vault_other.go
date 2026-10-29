@@ -26,8 +26,8 @@ func (*Session) Hold(string) error { return errors.ErrUnsupported }
 // Release is unavailable on this platform.
 func (*Session) Release(string) error { return errors.ErrUnsupported }
 
-// CreateFile is unavailable on this platform.
-func (*Session) CreateFile(string, time.Time) (io.WriteCloser, error) {
+// NewFile is unavailable on this platform.
+func (*Session) NewFile(string, time.Time) (io.WriteCloser, error) {
 	return nil, errors.ErrUnsupported
 }
 

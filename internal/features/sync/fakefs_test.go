@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 	"github.com/savewarden/savewarden-cli/internal/entities/game"
 	"github.com/savewarden/savewarden-cli/internal/features/inspect"
 	"github.com/savewarden/savewarden-cli/internal/features/sync"
@@ -30,10 +31,27 @@ type fakeFS struct {
 	volumes map[string]*node
 	nextID  int
 	opened  int
+	// described overrides, per volume root, what fakeVolumes reports: by
+	// default a fixed NTFS drive with 1 TiB available.
+	described map[string]backup.Volume
+}
+
+// fakeVolumes describes the fake volumes; a path on a missing volume fails.
+type fakeVolumes struct{ f *fakeFS }
+
+func (v fakeVolumes) Describe(path string) (backup.Volume, error) {
+	root := path[:3]
+	if _, ok := v.f.volumes[root]; !ok {
+		return backup.Volume{}, fs.ErrNotExist
+	}
+	if described, ok := v.f.described[root]; ok {
+		return described, nil
+	}
+	return backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 1 << 40}, nil
 }
 
 func newFakeFS(volumes ...string) *fakeFS {
-	f := &fakeFS{volumes: map[string]*node{}}
+	f := &fakeFS{volumes: map[string]*node{}, described: map[string]backup.Volume{}}
 	for _, volume := range volumes {
 		f.volumes[volume] = f.dir()
 	}

@@ -14,6 +14,9 @@ Aucun tag ni release n'est publié par le bootstrap.
   distinct de l'installation, par nom et par identité ; dossier non vide sans
   marqueur refusé, jamais adopté ; `current` comparé exactement à son receipt ;
   source absente jamais interprétée comme une suppression. Windows seulement.
+  Le plan qualifie le volume du coffre, NTFS sur lecteur local fixe ou
+  amovible, sinon code 1, et exige l'espace de la génération complète plus
+  max(64 Mio, 5 %) disponible pour l'utilisateur, sinon `insufficient-space`.
 - Protocole de publication et de récupération (ADR 0006), référence de
   sécurité des écritures à venir, et frontières de `sync` (ADR 0004).
 - Écritures autorisées dans le seul package `internal/platform/vault`
@@ -78,7 +81,7 @@ Aucun tag ni release n'est publié par le bootstrap.
 ### Limits
 
 - `sync` ne fait que planifier : `--apply` et `--recover` arrivent avec B2b
-  et B2c ; le type de volume du coffre n'est pas encore contrôlé.
+  et B2c ; ReFS n'est pas encore qualifié.
 - snapshot, restore et doctor restent à implémenter ; pas de sortie JSON de
   la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et

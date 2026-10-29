@@ -76,7 +76,13 @@ func RenderPlan(plan sync.Plan) string {
 	fmt.Fprintf(&b, "game: %s (%s)\n", plan.Game.ID, printable(plan.Game.Name))
 	fmt.Fprintf(&b, "vault: %s (%s)\n", printable(plan.Vault), plan.VaultState)
 	fmt.Fprintf(&b, "destination: %s\n", printable(plan.Destination))
-	b.WriteString("volume: not checked by this build\n")
+	// The space available is not shown: it varies between two plans of an
+	// unchanged state, which must stay identical byte for byte.
+	fmt.Fprintf(&b, "volume: %s, %s drive", printable(plan.Volume.FileSystem), plan.Volume.Drive)
+	if plan.Needed > 0 {
+		fmt.Fprintf(&b, ", %d bytes needed", plan.Needed)
+	}
+	b.WriteString("\n")
 	current := plan.Current
 	switch {
 	case current != "":

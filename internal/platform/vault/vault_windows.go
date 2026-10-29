@@ -156,12 +156,12 @@ func (s *Session) Release(dir string) error {
 	return errors.Join(errs...)
 }
 
-// CreateFile creates the regular file name with CREATE_NEW: it fails with
+// NewFile creates the regular file name with CREATE_NEW: it fails with
 // fs.ErrExist if anything has that name. Nothing else may open the file
 // while it is written. Close flushes it, then gives it modTime unless that
 // is zero; the caller treats any error of Write or Close as a failed file,
 // which stays in place.
-func (s *Session) CreateFile(name string, modTime time.Time) (io.WriteCloser, error) {
+func (s *Session) NewFile(name string, modTime time.Time) (io.WriteCloser, error) {
 	if err := s.requireParent(name); err != nil {
 		return nil, err
 	}

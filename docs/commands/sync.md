@@ -45,7 +45,7 @@ manifest: D:\Manifests\synthetic-game.yaml
 game: synthetic-game (Synthetic Game)
 vault: D:\Vault (will be created)
 destination: D:\Vault\games\synthetic-game\current
-volume: not checked by this build
+volume: NTFS, fixed drive, 67108870 bytes needed
 current: none
 pending: none
 mode: plan only, nothing written
@@ -65,7 +65,7 @@ findings: 0 blocking, 1 info
 | --- | --- |
 | `vault` | Chemin et état : `will be created`, `empty, will be initialized`, `initialized` ou `initialization interrupted` |
 | `destination` | Emplacement de la génération courante du jeu dans le coffre |
-| `volume` | Le type de volume, NTFS local exigé, sera contrôlé à partir de B2b |
+| `volume` | Système de fichiers et type de lecteur du coffre, contrôlés avant tout : NTFS sur un lecteur local fixe ou amovible, sinon code 1 ; puis l'espace nécessaire, la taille complète de la nouvelle génération plus max(64 Mio, 5 %). L'espace disponible n'est pas affiché : il varierait d'un plan à l'autre |
 | `current` | Opération qui a produit la génération courante, `none`, ou `not checked, intervention required` quand une intervention arrête le plan |
 | `pending` | Opérations interrompues, avec leur dernière étape validée, ou `unknown, ambiguous journal` |
 | `plan` | `changes`, `up to date`, `blocked` ou `intervention required` |
@@ -97,6 +97,7 @@ interventions: 1
 | `current-modified` | bloquante | La génération courante ne correspond plus exactement à son receipt, n'en a pas, ou le receipt n'a plus de génération |
 | `long-path` | information | Chemin au-delà de 259 caractères dans le coffre |
 | `same-volume` | information | Coffre et source sur le même volume : ce n'est pas une sauvegarde hors disque |
+| `insufficient-space` | bloquante | Espace disponible pour l'utilisateur, quotas compris, inférieur à l'espace nécessaire ; ou taille qui déborderait 64 bits |
 
 Les anomalies du parcours d'`inspect` s'appliquent aussi : `link-not-followed`,
 `unreadable`, `changed-during-read`, `case-collision`, etc. Une anomalie sans
@@ -116,7 +117,7 @@ Voir le [guide du coffre](../vault.md) pour chacun de ces cas.
 | Code | Signification | stderr |
 | --- | --- | --- |
 | `0` | Plan sans anomalie bloquante, ou déjà à jour | Vide |
-| `1` | Invocation, manifeste ou coffre invalide, coffre qui chevauche l'installation, sources qui se chevauchent sous un autre nom, volume indisponible, erreur de lecture, interruption ; ou plan impossible à écrire en entier, auquel cas stdout peut contenir un **préfixe tronqué** | Un diagnostic |
+| `1` | Invocation, manifeste ou coffre invalide, coffre qui chevauche l'installation, sources qui se chevauchent sous un autre nom, volume indisponible ou non qualifié : ReFS, FAT32, exFAT, réseau, optique, RAM, erreur de lecture, interruption ; ou plan impossible à écrire en entier, auquel cas stdout peut contenir un **préfixe tronqué** | Un diagnostic |
 | `2` | Plan complet avec au moins une anomalie bloquante | `savewarden: plan blocked: N blocking finding(s)` |
 | `3` | Le coffre demande une intervention avant tout plan | `savewarden: intervention required: <cause> <sujet>` |
 
@@ -128,8 +129,8 @@ Fiez-vous au code de sortie, jamais à la seule présence d'une sortie.
 - **Plan seulement.** Rien n'est copié avant B2b.
 - **Pas un instantané atomique** : le plan repose sur le même parcours au
   mieux qu'`inspect`.
-- **Volume non contrôlé** dans cette version : NTFS local sera exigé pour
-  écrire, à partir de B2b.
+- **NTFS local seulement.** ReFS, y compris un Dev Drive, n'est pas encore
+  qualifié ; FAT32, exFAT et les lecteurs réseau sont refusés.
 - **Même disque physique** : deux volumes d'un même disque ne sont pas
   détectés ; un lecteur `subst` n'est pas reconnu comme redirection.
 - **Confidentialité.** La sortie contient des chemins locaux ; anonymisez-la
