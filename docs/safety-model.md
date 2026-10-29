@@ -1,6 +1,6 @@
 # Modèle de sécurité
 
-## Garantie actuelle (B2b)
+## Garantie actuelle (B2c)
 
 `inspect` lit un manifeste désigné par l'utilisateur et les fichiers des
 sources qu'il déclare. `sync`, en mode plan, lit en plus le coffre désigné
@@ -15,6 +15,7 @@ d'installation, création de lien ou mutation de configuration ; aucune
 | Écritures confinées, aucune exécution | Seul `platform/vault` écrit, avec les API nommées par [ADR 0005](adr/0005-write-allowed-package.md) ; garde statique contre toute autre API d'écriture, d'exécution, de réseau et de chargement dynamique, dans tous les packages | `readonly_test.go` et ses listes attendues indépendantes ; `inspect` et le plan lancés deux fois avec l'écriture refusée par ACL ou `chmod`, empreinte identique ; `--apply` avec l'écriture refusée sur l'installation, source identique |
 | Rien n'est remplacé ni supprimé | `CREATE_NEW`, `CreateDirectory`, `MoveFileEx` avec le littéral `0` ; aucun fichier existant rouvert en écriture ; temporaires jamais supprimés | Tests Windows réels : création et renommage refusés sur cible existante, erreur 183 ; garde AST des drapeaux |
 | Publication vérifiée | Copie hachée, source inventoriée deux fois, staging relu depuis le disque, identité du staging contrôlée avant et après le renommage | Fautes injectées : source changée, écriture refusée, octet altéré, course sur le renommage |
+| Rotation sans perte | `current` reconnu par receipt, journal publié et identité, relu en entier sous verrou et juste avant le retrait ; identité fixée par `planned` ; génération retirée relue avant la promotion ; restauration seulement si elle est intacte ; toute anomalie après le retrait : code 3, rien déplacé | Fautes injectées à chaque fenêtre : contenu ou identité changés, `current` réapparu, génération retenue altérée ; crash avant et après chaque appel, puis récupération ; test Windows réel de bout en bout |
 | Interruption récupérable, jamais devinée | Journal validé par renommage avant chaque action, contrat strict des champs, récupération explicite selon les tableaux d'ADR 0006 ; ambiguïté ou enveloppe épuisée : code 3 sans écriture | Crash avant et après chaque appel au coffre, puis récupération ; crash pendant la récupération ; processus tué pendant le staging |
 | Aucun lien suivi, parents compris | Contrôle de chaque composant depuis la racine du volume ; ouverture Windows avec `FILE_FLAG_OPEN_REPARSE_POINT` et contrôle des attributs sur le handle ; refus des placeholders | Faux système de fichiers sur trois OS ; vraies jonctions Windows dans la portée, en ancre, et substituées après `Lstat` ; lien symbolique relatif qu'`os.Root` seul aurait suivi |
 | Pas de substitution pendant l'inspection | Dossiers traversés gardés ouverts sans partage de suppression jusqu'à la fin | Renommage refusé tant que la portée est ouverte, accepté après fermeture |
@@ -60,9 +61,9 @@ exécuté par lui.
 B1 et B2a implémentent les invariants 1 à 3 pour la lecture : source
 déclarée par l'utilisateur, chemins canoniques sans `..` ni chevauchement,
 coffre distinct de l'installation, liens jamais suivis, rien d'exécuté. B2b
-implémente les invariants 4 à 6 pour la première publication, selon
-[ADR 0006](adr/0006-publication-recovery-protocol.md) ; le 7 relève des
-snapshots de B3.
+et B2c implémentent les invariants 4 à 6 pour la première publication et
+la rotation, selon [ADR 0006](adr/0006-publication-recovery-protocol.md) ;
+le 7 relève des snapshots de B3.
 
 ## Windows et remplacement de current
 
@@ -72,8 +73,13 @@ référence de sécurité de toute publication et de toute récupération, fixe 
 protocole : créations exclusives, `MoveFileEx` sans drapeau, journal
 write-ahead vérifiable, fenêtre d'absence de `current` reconnue, rollback par
 défaut, récupération explicite dans une enveloppe bornée, fail-closed sur
-toute ambiguïté. Ses hypothèses Windows seront confrontées à des tests réels
-avant le code qui en dépend.
+toute ambiguïté. Ses hypothèses Windows ont été confrontées à des tests réels
+avant le code qui en dépend. Le verrou `sync.lock` n'exclut qu'une autre
+opération Savewarden : jeu, launcher et tout outil qui touche le coffre
+doivent être fermés pendant une synchronisation. Un coffre copié ou déplacé
+change les identités NTFS sans altérer les données : il est refusé en code 3
+sans écriture, et aucune identité n'est adoptée ; sa portabilité relève d'une
+procédure future.
 
 ## Récupération prévue
 
@@ -84,8 +90,8 @@ conserver l'incomplet identifié et diagnostiquer depuis le receipt. Une
 restauration B4 crée un dossier distinct et vérifié ; elle ne change jamais
 la sauvegarde active du jeu.
 
-En B2b, le rollback du code consiste à reverter la PR du lot sur la release
-branch. Les coffres déjà écrits restent lisibles et ne sont jamais réécrits :
+En B2b comme en B2c, le rollback du code consiste à reverter la PR du lot
+sur la release branch. Les coffres déjà écrits restent lisibles et ne sont jamais réécrits :
 une génération publiée, un staging conservé ou un journal clos restent en
 place ; un nouveau coffre est toujours possible.
 

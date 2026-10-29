@@ -24,9 +24,27 @@ Aucun tag ni release n'est publié par le bootstrap.
   l'enveloppe E1 et les retries bornés sur les erreurs 32 et 33, copie hachée
   avec détection de changement de la source, second inventaire, relecture du
   staging, bascule contrôlée par identité avant et après le renommage,
-  receipt puis `published`. Un `current` existant et différent est refusé,
-  `current-exists`. Énumération des crashs avant et après chaque appel au
-  coffre.
+  receipt puis `published`. Énumération des crashs avant et après chaque
+  appel au coffre.
+- Rotation de `current` (B2c, ADR 0006 §5) : `current` reconnu par toute sa
+  chaîne de preuve, receipt de tête, journal publié et son identité NTFS,
+  puis relu en entier sous verrou avant `planned` et juste avant le retrait ;
+  `planned` fixe l'identité de l'ancien `current` ; retrait vers
+  `retained\<op>`, observation exacte et relecture de la génération retirée
+  avant la promotion ; restauration vérifiée après une promotion refusée ;
+  `rollback-failed` une seule fois. Aucune anomalie après le retrait ne
+  déclenche de rollback conjectural : code 3, rien déplacé.
+- Récupération d'une rotation interrompue, tableau fermé d'ADR 0006 §5,
+  restaurations vérifiées comprises, et règle M3 d'une opération sans
+  enregistrement : abandon seulement sans génération publiée attendue et
+  sans `current`, ou à côté de la génération précédente reconnue.
+- `--allow-removals` pour les fichiers retirés d'une source présente, et
+  `--accept-missing-source <id>`, répétable, pour une source facultative
+  absente que `current` contient ; anciens fichiers conservés dans
+  `retained`, receipt `missing` et `accepted: true` ; tout autre usage, code 1.
+- Un `current` d'une autre identité que celle publiée, par exemple dans un
+  coffre copié ou déplacé, est refusé en code 3 sans écriture,
+  `unexpected-entry`, sans conclure à une corruption.
 - Récupération d'une première publication interrompue par la feature
   `sync` : plan de récupération sans
   écriture, observation des identités de `current` et du staging,
@@ -99,11 +117,15 @@ Aucun tag ni release n'est publié par le bootstrap.
 
 ### Limits
 
-- `sync --apply` publie la première génération d'un jeu seulement : la
-  rotation de `current`, `--allow-removals` et `--accept-missing-source`
-  arrivent avec B2c ; ReFS n'est pas encore qualifié ; la durabilité d'un
-  renommage après une coupure de courant n'est pas garantie par Windows, la
-  récupération repose sur l'observation.
+- Les générations remplacées s'accumulent dans `retained` : aucune
+  suppression ni rétention automatique en B2. Pendant une rotation, `current`
+  est absent un court instant. Le verrou n'exclut qu'une autre opération
+  Savewarden : une écriture d'un autre programme entre une relecture et le
+  renommage suivant n'est pas détectée. Copier ou déplacer un coffre n'est pas
+  pris en charge : refus en code 3. `current-exists` n'est plus émis.
+- ReFS n'est pas encore qualifié ; la durabilité d'un renommage après une
+  coupure de courant n'est pas garantie par Windows, la récupération repose
+  sur l'observation.
 - snapshot, restore et doctor restent à implémenter ; pas de sortie JSON de
   la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et
