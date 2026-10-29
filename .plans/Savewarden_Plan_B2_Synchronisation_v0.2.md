@@ -1,6 +1,6 @@
 # Savewarden — Plan B2 : synchronisation sécurisée, `sync` sans suppression
 
-> **Statut : v0.2 — VALIDÉ PAR LE PROPRIÉTAIRE le 29 octobre 2026 — GO B2a donné ; GO distincts requis pour B2b et B2c**
+> **Statut : v0.2 — VALIDÉ PAR LE PROPRIÉTAIRE le 29 octobre 2026 — B2a et B2b livrés ; arbitrages B2c A1–A5 et M3 intégrés (§0.8) ; GO de développement B2c non donné**
 > Version du plan : `0.2` — 29 octobre 2026, validée après revue intégrale ; remplace le brouillon v0.1 du 24 octobre
 > Lot : **B2**, en trois PR successives B2a, B2b, B2c, cible `release/v0.1.0-a1` (D15)
 > Cadre : [plan directeur v0.1](Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md) §4, §7 B2 et §8,
@@ -132,6 +132,51 @@ cinq précisions, intégrées ici sans changer le nom du plan.
    B2b, avec ADR 0005 ; B2c n'ajoute aucune API permise.
 9. **Revues indépendantes obligatoires** : `platform/vault` avant le GO de
    fusion de B2b, revue de sécurité avant celui de B2c.
+
+### 0.8 Arbitrages B2c A1 à A5 et M3 (29 octobre 2026)
+
+Après la qualification de B2b (fusion `8f9f5e1`, pilote réel validé), l'examen
+du plan B2c confronté au code fusionné a montré un défaut : la table de
+récupération d'une rotation attend `current = old` dès `planned`, alors que
+l'identité de l'ancien `current` n'était enregistrée qu'à `retire-intent`.
+Une rotation interrompue pendant sa préparation aurait été ambiguë, code 3.
+Le propriétaire a validé les cinq arbitrages proposés et tranché M3. Ce sont
+des décisions de cadrage : **elles ne valent pas GO de développement B2c**.
+
+| # | Décision | Exigence | Où |
+| --- | --- | --- | --- |
+| A1 | Identité persistante de l'ancien `current` | `planned.fields.current_identity` obligatoire pour une rotation, interdit pour une première publication ; `retire-intent` et `restore-intent` la reprennent exactement, jamais remplacée par une identité nouvellement observée ; journaux B2b, `previous: null`, inchangés | ADR 0006 §3 |
+| A2 | Vérification sous verrou | Génération précédente relue intégralement contre son receipt et identité relevée avant `planned` ; nouvelle relecture, même identité, immédiatement avant le retrait ; tout écart bloque avant déplacement ; pré- et post-contrôles et fermeture des portées inchangés | ADR 0006 §5 |
+| A3 | Retraits et sources absentes | D5 et V1 sans extension : `--allow-removals` pour les fichiers retirés d'une source présente seulement ; `--accept-missing-source <id>`, répétable, pour une source facultative absente et connue du receipt précédent seulement ; source requise absente et source retirée du manifeste toujours bloquantes ; anciens fichiers dans `retained\` ; receipt `missing` et `accepted: true` distingués ; aucun flag n'accorde la permission de l'autre | §4.4 |
+| A4 | Conservation | Aucune suppression ni rétention automatique en B2 ; accumulation des générations conservées et son coût en espace documentés ; contrôles de capacité, quotas et marge maintenus | §4.2 |
+| A5 | Découpage | Les commits du §8.3 restent la référence ; un regroupement techniquement indispensable est admis s'il est expliqué et vérifiable | §8.3 |
+| M3 | Opération non commencée | `001-abandoned` admis seulement si `current` est absent, ou est la génération précédente valide : receipt de tête, journal terminal `published` dont `receipt_sha256` correspond, contenu vérifié ; sinon code 3, rien écrit ; cas distinct d'une rotation dont `planned` existe | ADR 0006 §4 |
+
+**Impacts sur ADR 0004.** Aucune frontière nouvelle, aucun port nouveau :
+la rotation et sa récupération n'emploient que les ports existants, `Vault`
+pour écrire, `Files` et `Inventories` pour lire, `Volumes` et `Clock`. ADR 0005
+est inchangé : B2c n'ajoute aucune API d'écriture. Une correction est due :
+l'amendement B2b d'ADR 0004 ne mentionne pas `Scope.Identity`, la lecture
+d'identité ajoutée en B2b à la portée de lecture, ni la description d'un
+fichier tenu sans partage ; à consigner au commit de documentation de B2c.
+
+**Impacts sur ADR 0007.** Le schéma du receipt v1 ne change pas : `previous`,
+`status: "missing"` et `accepted` existent déjà. À amender, au commit CLI de
+B2c :
+
+- la table des codes stables n'a pas reçu en B2b `current-exists`,
+  `changed-during-sync`, `verification-mismatch` et `insufficient-space`, ni
+  les diagnostics `vault-changed` et `another sync is running` : manque B2b à
+  corriger ;
+- avec la rotation, `current-exists` disparaît : un `current` conforme est
+  remplacé, un `current` non conforme reste bloqué par `current-modified` ;
+- `--accept-missing-source` est répétable, une source par occurrence ; tout
+  usage hors du §4.4 est une invocation invalide, code 1, rien écrit ;
+- rendu d'un retrait ou d'une absence acceptés par flag : l'anomalie reste
+  listée, en information, avec le flag qui l'accepte ;
+- ligne d'état d'un retrait ou d'une promotion échoués puis annulés :
+  `rolled back <op>; current unchanged`, code 1 ; d'un rollback impossible :
+  `intervention required`, code 3.
 
 ---
 
@@ -1184,15 +1229,26 @@ et le mainteneur unique ne s'auto-approuve pas.
 Préalable : B2b fusionnée **et** première publication qualifiée par le
 propriétaire (D4), puis GO B2c.
 
+Amendé par les arbitrages du §0.8. L'ancien commit 1, amendement d'ADR 0006
+« seulement si la qualification révèle un écart », est fait par le cadrage :
+l'écart était dans le protocole de rotation, non dans la qualification. Il
+précède la branche, dans une PR documentaire ou en tête de la branche B2c,
+au choix du propriétaire. La PR B2c garde sept commits :
+
 | # | Commit | Contenu | Point de contrôle |
 | --- | --- | --- | --- |
-| 1 | `docs(adr): amend ADR 0006 after B2b qualification` | Seulement si la qualification a révélé un écart | Revue si présent |
-| 2 | `feat(sync): rotate current into retained with rollback` | Automate §5.5, retries, rollback en cours d'exécution | — |
-| 3 | `feat(sync): removals and missing sources policy` | §4.4, `--allow-removals`, `--accept-missing-source` | — |
-| 4 | `feat(sync): recover an interrupted rotation` | Tableau de récupération §5.5 ; énumération des crashs à chaque transition | **Revue du remplacement** |
-| 5 | `feat(cli): rotation flags and output` | Rendu, `rolled back`, smoke binaire de rotation | — |
-| 6 | `docs: document B2c` | Guide de récupération complet, sécurité, pilote, CHANGELOG | — |
+| 0 | `docs(adr): amend ADR 0006 for the B2c framing` | Fait au cadrage : A1, A2, M3, protection du receipt en rotation | **Revue du cadrage**, préalable au GO |
+| 1 | `feat(backup): persistent identity of the replaced current` | `current_identity` de `planned` obligatoire ou interdit selon le mode ; `Journal.Old` fixé par `planned` ; cohérence de `retire-intent` et `restore-intent` ; présence d'une génération précédente vérifiée pour M3 ; compatibilité des journaux B2b | — |
+| 2 | `feat(sync): rotate current into retained with rollback` | A2 sous verrou avant `planned` et juste avant le retrait ; automate §5.5 ; M1, M2, rollback par M3, retries ; `current-exists` remplacé par la rotation | — |
+| 3 | `feat(sync): removals and missing sources policy` | §4.4, D5, V1, A3 : `--allow-removals`, `--accept-missing-source` répétable | — |
+| 4 | `feat(sync): recover an interrupted rotation` | Tableau §5.5 ; règle M3, première publication comprise ; énumération des crashs à chaque transition et pendant la récupération | **Revue du remplacement** |
+| 5 | `feat(cli): rotation flags and output` | Flags, rendu, `rolled back`, ADR 0007 amendé (§0.8) ; smoke binaire de rotation | — |
+| 6 | `docs: document B2c` | Guide de récupération complet, accumulation des générations (A4), sécurité, pilote, ADR 0004 corrigé, CHANGELOG | — |
 | 7 | `docs: add B2c validation report` | Preuves, revue de sécurité consignée | Revue de sécurité indépendante, Human GO |
+
+Le commit 1 ajoute au découpage d'origine la part « entités » du contrat
+A1 et M3, pour qu'elle soit revue seule avant la rotation ; c'est le seul
+écart au §8.3, compensé par le commit 0 sorti de la PR.
 
 ## 9. Matrice de tests
 
@@ -1354,6 +1410,109 @@ Chemins d'exemple fictifs uniquement.
 - **Annulation** dans la section critique : bascule ou rollback menés à terme.
 - **Binaire** : modification de la source puis rotation ; `retained\` vérifié
   par `inspect` ; `current-modified` injecté : blocage, rien déplacé.
+
+#### Matrice des états B2c, amendée au §0.8
+
+Chaque ligne est un test nommé ; « rien » signifie aucune écriture ni aucun
+déplacement, coffre identique octet pour octet. Les invariants du §9.2
+s'appliquent partout, plus : l'ancien `current` est toujours intact, à sa
+place ou dans `retained\<prev-op>`, identique à son receipt.
+
+**Contrat du journal (A1)**
+
+| Cas | Attendu |
+| --- | --- |
+| `planned` de rotation avec `current_identity` | Lu ; `Journal.Old` égal à ce champ |
+| `planned` de rotation sans `current_identity` | Ambiguïté, code 3 |
+| `planned` de première publication avec `current_identity` | Ambiguïté, code 3 |
+| `retire-intent` dont l'identité diffère de `planned` | Ambiguïté, code 3 |
+| `restore-intent` dont l'identité diffère de `planned` | Ambiguïté, code 3 |
+| Journaux écrits par B2b, première publication | Lus sans changement, mêmes décisions qu'en B2b |
+
+**Vérifications sous verrou (A2)**
+
+| Moment | Écart injecté | Attendu |
+| --- | --- | --- |
+| Entre le plan et le verrou | Contenu de `current` modifié | `current-modified`, code 2, aucun journal ; `metadata only` au plus |
+| Sous verrou, avant `planned` | `current` remplacé par une jonction ou identité illisible | Code 3, aucun journal |
+| Après `verified`, avant `retire-intent` | Contenu modifié, même identité | `failed`, `current-modified`, code 2, staging conservé, rien déplacé |
+| Après `verified`, avant `retire-intent` | `current` remplacé, autre identité | Code 3, rien enregistré ni déplacé |
+| Entre `retire-intent` et M1 | `current` remplacé | Pré-contrôle en échec, code 3, rien déplacé |
+| Avant M1 | `retained\<prev-op>` déjà présent | Code 3, rien déplacé |
+
+**Exécution**
+
+| Événement | Attendu |
+| --- | --- |
+| M1 refusé, erreur 32 ou 33 puis succès dans la limite | Rotation publiée |
+| M1 refusé, erreur 5, fichier ouvert dans `current` | `rolled-back` aussitôt, code 1, `current` inchangé |
+| M2 refusé | `restore-intent`, M3, `rolled-back`, code 1 |
+| M2 refusé puis M3 refusé | `rollback-failed`, code 3, les deux emplacements intacts |
+| `current` réapparu entre M1 et M2 | M2 refusé, M3 refusé, `rollback-failed`, code 3, rien écrasé |
+| Post-contrôle de M2 contraire | Code 3, aucun autre déplacement |
+| Annulation demandée pendant la section critique | Bascule ou rollback menés à terme |
+
+**Récupération, avant `planned` (M3), première publication comprise**
+
+| Observation | Attendu |
+| --- | --- |
+| Dossier d'opération vide, `current` absent | `001-abandoned` |
+| Idem, `current` génération précédente valide | `001-abandoned` |
+| Idem, `current` sans receipt | Code 3, rien |
+| Idem, receipt de `current` corrompu | Code 3, rien |
+| Idem, journal de l'opération précédente absent, non terminal ou non `published` | Code 3, rien |
+| Idem, `receipt_sha256` du `published` précédent différent du receipt | Code 3, rien |
+| Idem, contenu de `current` différent de son receipt | Code 3, rien |
+| Idem, `staging\<op>` présent | Code 3, rien |
+| Seuls des temporaires `001-…`, mêmes cas | Mêmes attendus |
+
+**Récupération d'une rotation, tableau du §5.5**
+
+Une ligne par couple dernier enregistrement, observation, plus toute autre
+observation pour chaque dernier enregistrement, qui doit finir en code 3 :
+`planned` à `verified`, `retire-intent`, `promote-intent`, avec et sans
+receipt déjà validé, `unpromote-intent`, `restore-intent`, `rollback-failed`
+après chacune des intentions, `published`. Le classement pur essaie les
+125 observations par dernier enregistrement, comme en B2a.
+
+**Crashs et récupération répétée**
+
+- Crash avant et après chaque appel au coffre d'une rotation : initialisation
+  sous verrou, `planned` à `verified`, relecture, `retire-intent`, M1,
+  `promote-intent`, M2, receipt, `published`, puis les chemins de rollback
+  par M3 ; puis `--recover --apply`, qui doit finir à la ligne attendue du
+  tableau pour chaque point.
+- Crash à chaque appel de la récupération elle-même, pour chaque action :
+  M3 seul, M4 puis M3, revérification puis receipt ; interruptions
+  successives entre M4 et M3 ; même état terminal pour toutes les séquences.
+- Enveloppe : neuf temporaires d'un enregistrement de rotation ou d'un
+  receipt, code 3 sans écriture ; huit puis succès ; plus long chemin de
+  onze enregistrements ; second `rollback-failed` pour une même intention
+  refusé (E3).
+- Ambiguïté de rotation : trois exécutions, même diagnostic, coffre
+  identique.
+
+**Retraits et sources absentes (A3)**
+
+| Cas | Sans flag | Avec le flag prévu | Avec l'autre flag |
+| --- | --- | --- | --- |
+| Fichiers retirés d'une source présente | `files-removed`, code 2 | `--allow-removals` : publié, fichiers dans `retained\` | `--accept-missing-source` : toujours code 2 |
+| Source facultative absente, connue du receipt précédent | `source-vanished`, code 2 | `--accept-missing-source <id>` : publié, `missing`, `accepted: true` | `--allow-removals` : toujours code 2 |
+| Source requise absente | Code 2 | Aucun flag ne lève | — |
+| Source retirée du manifeste | Code 2 | Aucun flag ne lève | — |
+| `--accept-missing-source` nommant une source requise, présente, inconnue, absente du receipt précédent ou retirée du manifeste | — | Code 1, rien écrit | — |
+| Deux sources acceptées, flag répété | — | Les deux `accepted: true` | — |
+
+**Espace et conservation (A4)** : besoin de la génération complète plus la
+marge, l'ancien `current` n'étant que renommé ; générations conservées
+cumulées sans suppression, documentées.
+
+**Windows réel, binaire et pilote** : rotation réelle, M1 refusé par un
+fichier ouvert dans `current` ; `retained\` relu par `inspect` égal à son
+receipt ; second `--apply` à jour ; processus tué pendant le staging d'une
+rotation puis `--recover`. Pilote B2c exécuté par le propriétaire après la
+fusion : sauvegarde modifiée en jeu, rotation, `retained\` conforme, puis
+idempotence.
 
 ### 9.4 Gates
 
@@ -1564,3 +1723,4 @@ auto-approbation**.
 | 0.2 | 29 octobre 2026 | `d056f3c`, local | Arbitrages du propriétaire : trois PR, NTFS seul, `current` contrôlé strictement, sources absentes protégées ; journal vérifiable et fail-closed ; récupération de première publication dès B2b ; fenêtre d'absence reconnue ; codes et état du coffre distingués ; garanties de durabilité limitées ; permissions agent/produit/propriétaire ; exemples et état Git corrigés ; ADR 0006 érigé en référence de sécurité |
 | 0.2, arbitrages V1–V4 | 29 octobre 2026 | `561ed7a`, local | Arbitrages finaux V1–V4 ; niveaux « préparé, validé, réalisé » d'un enregistrement ; points d'arrêt A1 à A8 de la première publication ; propriétés de la récupération répétée ; §13 réduit aux décisions reportées hors B2 |
 | 0.2, amendements de revue finale | 29 octobre 2026 | commit local suivant `561ed7a` | Revue intégrale de `561ed7a` : protocole d'initialisation I1 à I9 (P0-1) ; enveloppe de récupération E1 à E4 (P0-2) ; rollback de rotation M1 à M4 en tableau fermé (P0-3) ; observations admises avant publication, état `metadata only`, ordre des handles autour de la bascule, provenance des champs d'un receipt reconstruit, nuance après coupure (P1-1 à P1-5) |
+| 0.2, cadrage B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Arbitrages A1 à A5 et M3 du propriétaire (§0.8) ; ADR 0006 amendé ; §8.3 et §9.3 amendés ; impacts sur ADR 0004 et 0007 recensés ; pas de GO de développement B2c |
