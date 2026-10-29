@@ -76,6 +76,31 @@ sha256 <SHA-256 hexadécimal des octets de la première ligne, LF compris>
   identités et cohérence avec l'observation. Un champ inconnu ou manquant est
   une ambiguïté, jamais ignoré.
 
+**Contrat des champs**, tous obligatoires, aucun autre accepté. Une identité
+s'écrit `vvvvvvvv-iiiiiiiiiiiiiiii`, numéro de série du volume puis index de
+fichier en hexadécimal minuscule ; une empreinte, 64 chiffres hexadécimaux
+minuscules ; un texte, une ligne de 1 à 1 024 octets.
+
+| Étape | Champs | Cohérence vérifiée à la lecture |
+| --- | --- | --- |
+| `planned` | `previous` : `null` ou identifiant d'opération ; `plan` : objet strict, version de l'outil, jeu, `started_at`, `changes` et `sources` au format du receipt v1 ; `plan_sha256` | `plan_sha256` est le SHA-256 de `plan` ; `previous` égal à celui du plan |
+| `staging-intent` | `staging` : `staging/<op>` | Nom fixé par l'opération |
+| `staged` | `staging_identity` ; `copied_sha256` | `copied_sha256` est l'empreinte du contenu du plan |
+| `verified` | `verified_sha256` | Idem |
+| `publish-intent`, `promote-intent` | `staging_identity` | Égale à celle de `staged` |
+| `unpublish-intent`, `unpromote-intent` | `current_identity` | Égale à celle de `staged`, puisque c'est le staging qui a été publié ou promu |
+| `retire-intent` | `current_identity` : l'ancien `current` | — |
+| `restore-intent` | `retained_identity` | Égale à celle de `retire-intent` |
+| `rollback-failed` | `error` | — |
+| `published` | `receipt_sha256` : SHA-256 du receipt validé | Comparée au receipt observé |
+| `failed`, `abandoned` | `reason` | — |
+| `rolled-back` | aucun | — |
+
+L'empreinte du contenu est le SHA-256 de la forme JSON canonique des
+`sources` du plan : identifiants, chemins, tailles, dates et SHA-256 de
+chaque fichier, dossiers. Le receipt reprend `plan_sha256` et les `sources`
+du plan.
+
 **Validation d'un enregistrement, dans cet ordre :**
 
 1. créer `NNN-<étape>.rec.tmp-<k>` en `CREATE_NEW`, avec le plus petit `k`
@@ -505,6 +530,9 @@ relève de son propriétaire.
   produit par le protocole. Tests : `TestAbandonedTemporariesAreAccepted`,
   `TestIncoherentTemporariesAreAmbiguous`,
   `TestAbandonedTemporariesDoNotConsumeTheEnvelope`.
+- **29 octobre 2026, champs d'étape** : contrat fermé et typé de chaque
+  étape, cohérence entre enregistrements vérifiée à la lecture (§3) ;
+  `TestStepFieldsAreStrict`, `TestRecordsAreCoherent`.
 - Ces amendements prévalent sur le §5 du plan B2 v0.2, qui reste inchangé
   comme document validé : notamment sur « Temporaire d'un autre numéro que le
   suivant », désormais précisé au §3, et sur l'enveloppe E1, désormais par

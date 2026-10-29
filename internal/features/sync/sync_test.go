@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -156,17 +155,49 @@ func publish(t *testing.T, f *fakeFS, m game.Manifest, op, previous string) {
 
 func windows(volume string, segments []string) string { return volume + strings.Join(segments, `\`) }
 
+// stepValues gives each step of a synthetic first publication the values
+// the protocol would record.
+func stepValues(t *testing.T, step backup.Step) backup.StepValues {
+	t.Helper()
+	plan := &backup.Planned{
+		ToolVersion: "dev", GameID: "synthetic-game", GameName: "Synthetic Game", StartedAt: at,
+		Sources: []backup.ReceiptSource{{ID: "saves", Kind: "save", Required: true, State: backup.SourceMissing, Path: installPath + `\saves`}},
+	}
+	content, err := backup.ContentDigest(plan.Sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := backup.FileID{Volume: 1, Index: 1}
+	switch step {
+	case backup.StepPlanned:
+		return backup.StepValues{Plan: plan}
+	case backup.StepStaged:
+		return backup.StepValues{Staging: staging, Digest: content}
+	case backup.StepVerified:
+		return backup.StepValues{Digest: content}
+	case backup.StepPublishIntent:
+		return backup.StepValues{Staging: staging}
+	case backup.StepUnpublishIntent:
+		return backup.StepValues{Current: staging}
+	case backup.StepPublished:
+		return backup.StepValues{Digest: sha256.Sum256([]byte("receipt"))}
+	case backup.StepFailed, backup.StepAbandoned, backup.StepRollbackFailed:
+		return backup.StepValues{Text: "synthetic"}
+	}
+	return backup.StepValues{}
+}
+
 // writeJournal commits the given steps of op, as the protocol would.
 func writeJournal(t *testing.T, f *fakeFS, op string, steps ...backup.Step) {
 	t.Helper()
 	dir := f.mkdir(vaultPath + `\games\synthetic-game\journal\` + op)
 	prev := ""
 	for i, step := range steps {
-		fields := map[string]json.RawMessage{}
-		if step == backup.StepPlanned {
-			fields["previous"] = json.RawMessage("null")
+		r, err := backup.NewRecord(i+1, step, op, at, prev, stepValues(t, step))
+		if err != nil {
+			t.Fatal(err)
 		}
-		data, err := backup.EncodeRecord(backup.Record{Seq: i + 1, Step: step, Op: op, At: at, Prev: prev, Fields: fields})
+		data, err := backup.EncodeRecord(r)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -71,8 +71,8 @@ type Record struct {
 	// for the first record.
 	Prev string
 	// Fields carries the values proper to the step, such as identities or
-	// the plan of 001-planned. They are validated by the code that writes
-	// them; this package only checks that they are JSON.
+	// the plan of 001-planned, under the "fields" key. Their contract is
+	// fixed per step and checked by Values.
 	Fields map[string]json.RawMessage
 }
 
@@ -222,6 +222,14 @@ type Journal struct {
 	// Previous is the operation whose generation a rotation replaces, empty
 	// for a first publication or before the planned record.
 	Previous string
+	// Values holds the decoded fields of each record, in order.
+	Values []StepValues
+	// Plan and PlanSHA256 come from the planned record; Plan is nil before it.
+	Plan       *Planned
+	PlanSHA256 [32]byte
+	// Staging is the identity of the staging directory recorded by staged;
+	// Old, that of the current generation recorded by retire-intent.
+	Staging, Old FileID
 }
 
 // Last returns the step of the last committed record, empty if none.
@@ -238,28 +246,6 @@ func (j Journal) Terminal() bool { return j.Last().Terminal() }
 // Rotation reports whether the operation replaces an existing current: its
 // planned record names the previous generation.
 func (j Journal) Rotation() bool { return j.Previous != "" }
-
-// plannedPrevious reads the "previous" field of a planned record: null for
-// a first publication, or the operation id of the generation to replace.
-// Rotation and first publication follow different automata, so the field is
-// validated here rather than left to the writer.
-func plannedPrevious(r Record) (string, error) {
-	raw, ok := r.Fields["previous"]
-	if !ok {
-		return "", errors.New(`planned record lacks the field "previous"`)
-	}
-	if string(raw) == "null" {
-		return "", nil
-	}
-	var previous string
-	if err := json.Unmarshal(raw, &previous); err != nil {
-		return "", errors.New(`planned record: "previous" must be null or an operation id`)
-	}
-	if err := ValidOperationID(previous); err != nil || previous == r.Op {
-		return "", fmt.Errorf(`planned record: "previous" %q is not another operation id`, previous)
-	}
-	return previous, nil
-}
 
 var (
 	finalName     = regexp.MustCompile(`^([0-9]{3})-([a-z-]+)\.rec$`)
@@ -330,12 +316,15 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		if !allowed(j.steps(), r.Step, j.Rotation()) {
 			return Journal{}, ambiguous("record %s: transition from %q to %q is not allowed", name, j.Last(), r.Step)
 		}
-		if r.Step == StepPlanned {
-			if j.Previous, err = plannedPrevious(r); err != nil {
-				return Journal{}, ambiguous("record %s: %v", name, err)
-			}
+		values, err := r.Values()
+		if err != nil {
+			return Journal{}, ambiguous("record %s: %v", name, err)
+		}
+		if err := j.coherent(r.Step, values); err != nil {
+			return Journal{}, ambiguous("record %s: %v", name, err)
 		}
 		j.Records = append(j.Records, r)
+		j.Values = append(j.Values, values)
 		previous = data
 	}
 	// The nine names k = 1..9 of a record number are shared by all its
@@ -373,6 +362,42 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		}
 	}
 	return j, nil
+}
+
+// coherent checks the values of the next record against the records
+// before it, and keeps what later records refer to.
+func (j *Journal) coherent(step Step, v StepValues) error {
+	switch step {
+	case StepPlanned:
+		j.Previous, j.Plan, j.PlanSHA256 = v.Previous, v.Plan, v.PlanSHA256
+	case StepStaged, StepVerified:
+		want, err := ContentDigest(j.Plan.Sources)
+		if err != nil {
+			return err
+		}
+		if v.Digest != want {
+			return fmt.Errorf("%s digest does not match the content of the plan", step)
+		}
+		if step == StepStaged {
+			j.Staging = v.Staging
+		}
+	case StepPublishIntent, StepPromoteIntent:
+		if v.Staging != j.Staging {
+			return fmt.Errorf("staging identity %s differs from %s recorded by staged", v.Staging, j.Staging)
+		}
+	case StepUnpublishIntent, StepUnpromoteIntent:
+		// What was published or promoted is the staging directory.
+		if v.Current != j.Staging {
+			return fmt.Errorf("current identity %s differs from the staging identity %s", v.Current, j.Staging)
+		}
+	case StepRetireIntent:
+		j.Old = v.Current
+	case StepRestoreIntent:
+		if v.Retained != j.Old {
+			return fmt.Errorf("retained identity %s differs from %s recorded by retire-intent", v.Retained, j.Old)
+		}
+	}
+	return nil
 }
 
 // Attempts counts the temporaries of the record that would follow the last

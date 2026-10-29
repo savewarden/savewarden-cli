@@ -22,7 +22,7 @@ func TestRecordRoundTrip(t *testing.T) {
 	if len(lines) != 2 || !strings.HasPrefix(lines[1], "sha256 ") {
 		t.Fatalf("record layout:\n%s", data)
 	}
-	if !strings.HasPrefix(lines[0], `{"at":"2026-11-05T10:15:01Z","fields":{},"op":"`+op+`","prev":"`) {
+	if !strings.HasPrefix(lines[0], `{"at":"2026-11-05T10:15:01Z","fields":{"staging":"staging/`+op+`"},"op":"`+op+`","prev":"`) {
 		t.Fatalf("keys must be sorted: %s", lines[0])
 	}
 	r, err := backup.DecodeRecord(data)
@@ -59,7 +59,7 @@ func TestJournalAmbiguities(t *testing.T) {
 			return append(names, other)
 		}, "duplicate record number 002"},
 		{"broken chain", func(names []string, c map[string][]byte) []string {
-			c[names[0]] = mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: op, At: at.Add(time.Hour), Fields: map[string]json.RawMessage{"previous": json.RawMessage("null")}})
+			c[names[0]] = record(t, 1, backup.StepPlanned, false, "", at.Add(time.Hour))
 			return names
 		}, "chain broken"},
 		{"forbidden transition", func(names []string, c map[string][]byte) []string {
@@ -152,15 +152,19 @@ func TestFirstPublicationAndRotationDoNotMix(t *testing.T) {
 			t.Errorf("rotation %v, %v: %v", tt.rotation, tt.steps, err)
 		}
 	}
-	for _, previous := range []string{``, `42`, `"yesterday"`, `"` + op + `"`} {
-		fields := map[string]json.RawMessage{}
-		if previous != "" {
-			fields["previous"] = json.RawMessage(previous)
+	for _, previous := range []string{``, `42`, `"yesterday"`, `"` + op + `"`, `"` + previousOp + `"`} {
+		r, err := backup.NewRecord(1, backup.StepPlanned, op, at, "", valuesFor(t, backup.StepPlanned, false))
+		if err != nil {
+			t.Fatal(err)
 		}
-		data := mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: op, At: at, Fields: fields})
+		delete(r.Fields, "previous")
+		if previous != "" {
+			r.Fields["previous"] = json.RawMessage(previous)
+		}
+		data := mustEncode(t, r)
 		name := backup.RecordName(1, backup.StepPlanned)
 		var ambiguity *backup.AmbiguityError
-		if _, err := backup.ParseJournal(op, []string{name}, map[string][]byte{name: data}); !errors.As(err, &ambiguity) {
+		if _, err := backup.ParseJournal(op, []string{name}, map[string][]byte{name: data}); !errors.As(err, &ambiguity) || !strings.Contains(err.Error(), "previous") {
 			t.Errorf("previous %s: %v", previous, err)
 		}
 	}
