@@ -151,14 +151,14 @@ func TestTerminalOperationsNeedNoRecovery(t *testing.T) {
 	}
 }
 
-// withTemporaries adds temporaries of the record following steps.
+// withTemporaries adds temporaries of the record following steps. As the
+// writer does, each takes the next attempt number of that record, whatever
+// its step.
 func withTemporaries(t *testing.T, rotation bool, steps []backup.Step, prepared ...backup.Step) backup.Journal {
 	t.Helper()
 	names, contents := journalFiles(t, rotation, steps...)
-	attempt := map[backup.Step]int{}
-	for _, step := range prepared {
-		attempt[step]++
-		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(len(steps)+1, step), attempt[step]))
+	for k, step := range prepared {
+		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(len(steps)+1, step), k+1))
 	}
 	j, err := backup.ParseJournal(op, names, contents)
 	if err != nil {
@@ -228,6 +228,35 @@ func TestRecoveryEnvelopeE1(t *testing.T) {
 		if action, err := backup.Classify(withTemporaries(t, false, publishing, prepared...), obs(n, a, a)); !errors.Is(err, backup.ErrEnvelopeExhausted) {
 			t.Fatalf("%s: %q, %v", name, action, err)
 		}
+	}
+}
+
+// Abandoned temporaries of a committed number never consume the envelope of
+// the next one, and do not reopen a closed operation.
+func TestAbandonedTemporariesDoNotConsumeTheEnvelope(t *testing.T) {
+	publishing := steps(pre, backup.StepPublishIntent)
+	names, contents := journalFiles(t, false, publishing...)
+	for k := 1; k < backup.MaxTemporaries; k++ {
+		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(5, backup.StepPublishIntent), k))
+	}
+	for k := 1; k < backup.MaxTemporaries; k++ {
+		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(6, backup.StepPublished), k))
+	}
+	j, err := backup.ParseJournal(op, names, contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action, err := backup.Classify(j, obs(n, a, a)); err != nil || action != backup.ActionVerifyThenPublish {
+		t.Fatalf("eight prepared beside eight abandoned: %q, %v", action, err)
+	}
+
+	names, contents = journalFiles(t, false, steps(publishing, backup.StepPublished)...)
+	names = append(names, backup.RecordName(5, backup.StepPublishIntent)+".tmp-1", backup.RecordName(6, backup.StepPublished)+".tmp-1")
+	if j, err = backup.ParseJournal(op, names, contents); err != nil {
+		t.Fatal(err)
+	}
+	if action, err := backup.Classify(j, obs(n, a, a)); err != nil || action != backup.ActionNone {
+		t.Fatalf("published with abandoned temporaries: %q, %v", action, err)
 	}
 }
 

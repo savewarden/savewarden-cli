@@ -216,7 +216,8 @@ type Journal struct {
 	Records []Record
 	// Prepared counts, for each step, the temporaries of the record that
 	// would follow the last committed one: intentions written but never
-	// committed.
+	// committed. Temporaries of a committed number are abandoned attempts:
+	// accepted, never counted, never read.
 	Prepared map[Step]int
 	// Previous is the operation whose generation a rotation replaces, empty
 	// for a first publication or before the planned record.
@@ -275,8 +276,8 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		return Journal{}, ambiguous("journal directory: %v", err)
 	}
 	type temporary struct {
-		seq  int
-		step Step
+		seq, k int
+		step   Step
 	}
 	var finals []string
 	var temporaries []temporary
@@ -287,7 +288,8 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		}
 		if m := temporaryName.FindStringSubmatch(name); m != nil {
 			seq, _ := strconv.Atoi(m[1])
-			temporaries = append(temporaries, temporary{seq, Step(m[2])})
+			k, _ := strconv.Atoi(m[3])
+			temporaries = append(temporaries, temporary{seq: seq, k: k, step: Step(m[2])})
 			continue
 		}
 		return Journal{}, ambiguous("unexpected entry %q in the journal", name)
@@ -336,23 +338,47 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		j.Records = append(j.Records, r)
 		previous = data
 	}
+	// The nine names k = 1..9 of a record number are shared by all its
+	// steps (envelope E1): the writer takes the smallest k that no
+	// temporary of that number carries, and a committed record was renamed
+	// from one of them, so at most eight remain beside it.
 	next := len(j.Records) + 1
+	used := map[[2]int]bool{}
+	abandoned := map[int]int{}
 	for _, t := range temporaries {
-		switch {
-		case j.Terminal():
-			return Journal{}, ambiguous("temporary record after the terminal step %q", j.Last())
-		case t.seq != next:
-			return Journal{}, ambiguous("temporary record %03d-%s does not follow the last committed record", t.seq, t.step)
-		case !allowed(j.steps(), t.step, j.Rotation()):
-			return Journal{}, ambiguous("temporary record %03d-%s is not an allowed next step", t.seq, t.step)
+		if used[[2]int{t.seq, t.k}] {
+			return Journal{}, ambiguous("temporaries of record %03d share the attempt number %d", t.seq, t.k)
 		}
-		j.Prepared[t.step]++
+		used[[2]int{t.seq, t.k}] = true
+		switch {
+		case t.seq == next && j.Terminal():
+			return Journal{}, ambiguous("temporary record after the terminal step %q", j.Last())
+		case t.seq == next:
+			if !allowed(j.steps(), t.step, j.Rotation()) {
+				return Journal{}, ambiguous("temporary record %03d-%s is not an allowed next step", t.seq, t.step)
+			}
+			j.Prepared[t.step]++
+		case t.seq >= 1 && t.seq < next:
+			// An attempt abandoned before the record of its number was
+			// committed, possibly under another step: it must have been an
+			// allowed step at that number.
+			if !allowed(j.steps()[:t.seq-1], t.step, j.Rotation()) {
+				return Journal{}, ambiguous("abandoned temporary %03d-%s was not an allowed step at that number", t.seq, t.step)
+			}
+			if abandoned[t.seq]++; abandoned[t.seq] >= MaxTemporaries {
+				return Journal{}, ambiguous("record %03d is committed beside nine temporaries; at most eight may remain", t.seq)
+			}
+		default:
+			return Journal{}, ambiguous("temporary record %03d-%s does not follow the last committed record", t.seq, t.step)
+		}
 	}
 	return j, nil
 }
 
 // Attempts counts the temporaries of the record that would follow the last
 // committed one, whatever their step (envelope E1, counted per number).
+// Abandoned temporaries of committed numbers do not count: their number is
+// never written again.
 func (j Journal) Attempts() int {
 	total := 0
 	for _, count := range j.Prepared {

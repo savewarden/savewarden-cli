@@ -43,6 +43,10 @@ Ne modifiez pas le contenu d'un coffre à la main. Savewarden compare la
 génération courante à son receipt avant toute publication : un écart bloque
 tout, et il ne déplace jamais un `current` qu'il ne reconnaît plus.
 
+Des fichiers `*.tmp-<k>` peuvent subsister à la racine, dans `receipts` ou
+dans un journal, à côté du fichier validé : ce sont des essais interrompus,
+conservés exprès et jamais lus. Ne les supprimez pas.
+
 ## Que faire quand `sync` demande une intervention (code 3)
 
 Savewarden refuse de deviner un état qu'il ne sait pas expliquer. Dans tous

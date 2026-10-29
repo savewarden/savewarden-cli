@@ -19,6 +19,10 @@ Aucun tag ni release n'est publié par le bootstrap.
 - Package `entities/backup` : types d'inventaire partagés, receipt v1 et
   marqueur du coffre relus strictement, journal d'opération chaîné et son
   automate, classement des observations de récupération, tous sans I/O.
+  L'enveloppe E1 compte neuf temporaires par numéro d'enregistrement, toutes
+  étapes confondues ; un temporaire abandonné à côté d'un enregistrement
+  validé est accepté aux conditions exactes d'ADR 0006, au lieu de rendre le
+  journal ambigu.
 - `inspect` expose l'inventaire sans suivi d'un dossier quelconque ; sa
   sortie ne change pas. Les fichiers chiffrés par EFS sont signalés à `sync`.
 - Documentation du [coffre](docs/vault.md), du [receipt v1](docs/receipt-v1.md)
