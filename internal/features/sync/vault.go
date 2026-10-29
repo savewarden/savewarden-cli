@@ -38,9 +38,12 @@ type vault struct {
 	lock        bool // sync.lock exists
 	current     bool // a plain current directory exists
 	currentLink bool // current exists but is a link, a file or a reparse point
-	receipts    []backup.Receipt
-	invalid     []string // receipts that do not decode
-	pending     []Pending
+	// currentID is the identity of current once recognised as the
+	// generation its journal published (ADR 0006 §4), its content aside.
+	currentID backup.FileID
+	receipts  []backup.Receipt
+	invalid   []string // receipts that do not decode
+	pending   []Pending
 	// What recovery needs: the parsed journal of each operation, the
 	// SHA-256 of its last record file, and the attempt numbers taken by
 	// temporaries of the marker and of each receipt.
@@ -232,11 +235,55 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 			}
 		}
 	}
+	if len(v.pending) == 0 {
+		// A pending operation is judged by its own recovery table instead.
+		v.recognize(scope, join(gameName, currentDir), prefix+currentDir)
+	}
 	sort.Slice(v.interventions, func(a, b int) bool { return v.interventions[a].Subject < v.interventions[b].Subject })
 	if len(v.pending) > 1 {
 		v.intervene(CauseJournalAmbiguous, prefix+journalDir, fmt.Sprintf("%d operations are pending for this game; only one may be", len(v.pending)))
 	}
 	return nil
+}
+
+// recognize checks that current is the directory its journal published:
+// the head receipt, the journal of its operation terminal in published,
+// the receipt file digest and the observed identity (ADR 0006 §4). The
+// content is compared by the plan. A receipt that is missing or invalid
+// keeps the current-modified finding of B2b; a journal in default is
+// journal-ambiguous; another identity, unexpected-entry. A copied or moved
+// vault lands there: its data may be intact, but nothing proves it, and no
+// identity is ever adopted or rewritten.
+func (v *vault) recognize(scope Scope, name, subject string) {
+	if !v.current || len(v.invalid) > 0 {
+		return
+	}
+	head, err := v.head()
+	if err != nil {
+		return
+	}
+	j, ok := v.journals[head.Operation]
+	if !ok {
+		v.intervene(CauseJournalAmbiguous, subject, "the receipt of "+head.Operation+" has no journal; current is not recognised")
+		return
+	}
+	published, _, _ := j.Published()
+	if err := backup.RecognizePrevious(head, v.receiptSum[head.Operation], j, published); err != nil {
+		v.intervene(CauseJournalAmbiguous, subject, err.Error()+"; current is not recognised")
+		return
+	}
+	id, err := scope.Identity(name)
+	if err != nil {
+		v.intervene(CauseUnexpectedEntry, subject, "its identity cannot be read: "+err.Error())
+		return
+	}
+	if id != published {
+		v.intervene(CauseUnexpectedEntry, subject, fmt.Sprintf(
+			"is %s, not the directory %s that %s published; a copied or moved vault is not supported yet: "+
+				"the identity differs, the data may well be intact, and nothing was written", id, published, head.Operation))
+		return
+	}
+	v.currentID = id
 }
 
 // readJournals validates every operation journal and records those that
@@ -271,7 +318,7 @@ func (v *vault) readJournals(scope Scope, name, subject string, found map[string
 				step = "none"
 			}
 			detail := fmt.Sprintf("last committed step %s; run sync --recover to see how it would be recovered", step)
-			if journal.Last() == backup.StepPublishIntent && v.current {
+			if (journal.Last() == backup.StepPublishIntent || journal.Last() == backup.StepPromoteIntent) && v.current {
 				detail = "pending recovery: current published, receipt missing; run sync --recover"
 			}
 			v.intervene(CausePendingOperation, entry.Name, detail)

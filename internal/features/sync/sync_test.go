@@ -118,7 +118,9 @@ func copyTree(f *fakeFS, n *node) *node {
 }
 
 // publish lays out what a completed publication of op leaves in the vault:
-// current, copied from the sources, its receipt and a terminal journal.
+// current, copied from the sources, its receipt and a terminal journal
+// whose identities and receipt digest are those of the vault, as the
+// protocol records them. With previous, op is a rotation of it.
 func publish(t *testing.T, f *fakeFS, m game.Manifest, op, previous string) {
 	t.Helper()
 	game := vaultPath + `\games\` + m.Game.ID
@@ -141,6 +143,8 @@ func publish(t *testing.T, f *fakeFS, m game.Manifest, op, previous string) {
 			rs.State, rs.Directories, rs.Entries = backup.SourceCopied, dir.Directories, dir.Entries
 			current.children[s.ID] = copyTree(f, f.get(windows(volume, segments)))
 			receipt.Changes.Added += len(dir.Entries)
+		} else {
+			rs.Directories = []string{}
 		}
 		receipt.Sources = append(receipt.Sources, rs)
 	}
@@ -149,8 +153,42 @@ func publish(t *testing.T, f *fakeFS, m game.Manifest, op, previous string) {
 		t.Fatal(err)
 	}
 	f.put(game+`\receipts\`+op+`.json`, f.file(string(data)))
-	writeJournal(t, f, op, backup.StepPlanned, backup.StepStagingIntent, backup.StepStaged, backup.StepVerified,
-		backup.StepPublishIntent, backup.StepPublished)
+	plan := &backup.Planned{ToolVersion: "dev", GameID: m.Game.ID, GameName: m.Game.Name, StartedAt: at,
+		Previous: previous, Changes: receipt.Changes, Sources: receipt.Sources}
+	content, err := backup.ContentDigest(plan.Sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := fakeID(current)
+	records := []journalRecord{
+		{backup.StepPlanned, backup.StepValues{Previous: previous, Plan: plan}},
+		{backup.StepStagingIntent, backup.StepValues{}},
+		{backup.StepStaged, backup.StepValues{Staging: id, Digest: content}},
+		{backup.StepVerified, backup.StepValues{Digest: content}},
+	}
+	if previous == "" {
+		records = append(records, journalRecord{backup.StepPublishIntent, backup.StepValues{Staging: id}})
+	} else {
+		old := backup.FileID{Volume: 0x1a2b3c4d, Index: 1 << 40}
+		if retained := f.get(game + `\retained\` + previous); retained != nil {
+			old = fakeID(retained)
+		}
+		records[0].values.Current = old
+		records = append(records, journalRecord{backup.StepRetireIntent, backup.StepValues{Current: old}},
+			journalRecord{backup.StepPromoteIntent, backup.StepValues{Staging: id}})
+	}
+	records = append(records, journalRecord{backup.StepPublished, backup.StepValues{Digest: sha256.Sum256(data)}})
+	writeRecords(t, f, op, records...)
+}
+
+// fakeID is the identity a fake scope reports for n.
+func fakeID(n *node) backup.FileID {
+	return backup.FileID{Volume: 0x1a2b3c4d, Index: uint64(n.id)} //nolint:gosec // G115: node ids count up from 1.
+}
+
+type journalRecord struct {
+	step   backup.Step
+	values backup.StepValues
 }
 
 func windows(volume string, segments []string) string { return volume + strings.Join(segments, `\`) }
@@ -190,10 +228,20 @@ func stepValues(t *testing.T, step backup.Step) backup.StepValues {
 // writeJournal commits the given steps of op, as the protocol would.
 func writeJournal(t *testing.T, f *fakeFS, op string, steps ...backup.Step) {
 	t.Helper()
+	records := make([]journalRecord, len(steps))
+	for i, step := range steps {
+		records[i] = journalRecord{step, stepValues(t, step)}
+	}
+	writeRecords(t, f, op, records...)
+}
+
+// writeRecords commits the given records of op, chained, dated at.
+func writeRecords(t *testing.T, f *fakeFS, op string, records ...journalRecord) {
+	t.Helper()
 	dir := f.mkdir(vaultPath + `\games\synthetic-game\journal\` + op)
 	prev := ""
-	for i, step := range steps {
-		r, err := backup.NewRecord(i+1, step, op, at, prev, stepValues(t, step))
+	for i, record := range records {
+		r, err := backup.NewRecord(i+1, record.step, op, at, prev, record.values)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +249,7 @@ func writeJournal(t *testing.T, f *fakeFS, op string, steps ...backup.Step) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dir.children[backup.RecordName(i+1, step)] = f.file(string(data))
+		dir.children[backup.RecordName(i+1, record.step)] = f.file(string(data))
 		sum := sha256.Sum256(data)
 		prev = hex.EncodeToString(sum[:])
 	}

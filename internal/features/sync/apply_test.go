@@ -140,21 +140,18 @@ func TestApplyIntoAnEmptyOrInitializedVault(t *testing.T) {
 	}
 }
 
-// B2b publishes a first generation only: a different current is refused.
-func TestExistingCurrentIsRefused(t *testing.T) {
+// B2b refused a different current with current-exists; B2c rotates the
+// recognised current into retained and publishes the new generation.
+func TestExistingCurrentIsRotated(t *testing.T) {
 	f := world()
 	markVault(t, f, vaultPath)
 	publish(t, f, manifest(), op2, "")
 	f.put(installPath+`\saves\new.save`, f.file("new"))
-	before := snapshot(f, `F:\`)
 	r := apply(f, vaultPath)
-	var blocked *sync.BlockedError
-	if !errors.As(r.err, &blocked) || blocked.Code != sync.CodeCurrentExists || r.result.Effect != sync.EffectNone {
+	if r.err != nil || r.result.Effect != sync.EffectPublished || r.result.Operation != op1 {
 		t.Fatalf("result %+v, %v", r.result, r.err)
 	}
-	if snapshot(f, `F:\`) != before || len(r.vaults.calls) != 0 {
-		t.Fatal("the refused apply wrote")
-	}
+	rotated(t, f, op2, op1)
 }
 
 func TestApplyRefusals(t *testing.T) {

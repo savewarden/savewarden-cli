@@ -124,23 +124,77 @@ func TestSyncApplyEndToEnd(t *testing.T) {
 	}
 }
 
-// B2b publishes a first generation only: once the source changed, --apply
-// refuses in code 2 and leaves the vault byte for byte as it was.
-func TestSyncApplyRefusesToReplaceCurrent(t *testing.T) {
+// receiptEntries reads the SHA-256 of every file a receipt describes.
+func receiptEntries(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt struct {
+		Sources []struct {
+			Entries []struct {
+				SHA256 string `json:"sha256"`
+			} `json:"entries"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	var sums []string
+	for _, entry := range receipt.Sources[0].Entries {
+		sums = append(sums, entry.SHA256)
+	}
+	return sums
+}
+
+// Plan B2 §9.3, binary: once the source changed, --apply rotates current
+// into retained on a real NTFS volume; inspect reads the retained
+// generation with the SHA-256 of its receipt; a third --apply is up to
+// date; a current modified by hand blocks in code 2, nothing moved.
+func TestRotationEndToEnd(t *testing.T) {
 	s := newSynthetic(t, buildBinary(t), 0)
-	if _, stderr, code := s.run(t, "--apply"); code != 0 {
+	_, stderr, code := s.run(t, "--apply")
+	first := publishedLine.FindStringSubmatch(stderr)
+	if code != 0 || first == nil {
 		t.Fatalf("first apply: %d %q", code, stderr)
 	}
 	if err := os.WriteFile(filepath.Join(s.install, "saves", "1.save"), []byte("ONE"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stdout, stderr, code := s.run(t, "--apply")
+	second := publishedLine.FindStringSubmatch(stderr)
+	if code != 0 || second == nil || second[1] == first[1] {
+		t.Fatalf("rotation: exit %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	game := filepath.Join(s.vault, "games", "synthetic-game")
+	if data, err := os.ReadFile(filepath.Join(game, "current", "saves", "1.save")); err != nil || string(data) != "ONE" {
+		t.Fatalf("current: %q, %v", data, err)
+	}
+	retained := filepath.Join(game, "retained", first[1])
+	manifest := filepath.Join(s.base, "retained.yaml")
+	writeManifest(t, manifest, retained)
+	inspected, err := exec.Command(s.binary, "inspect", "--manifest", manifest).Output()
+	if err != nil {
+		t.Fatalf("inspect retained: %v\n%s", err, inspected)
+	}
+	for _, sum := range receiptEntries(t, filepath.Join(game, "receipts", first[1]+".json")) {
+		if !strings.Contains(string(inspected), sum) {
+			t.Fatalf("inspect of the retained generation lacks %s:\n%s", sum, inspected)
+		}
+	}
+	if _, stderr, code := s.run(t, "--apply"); code != 0 || stderr != "savewarden: vault: not modified\n" {
+		t.Fatalf("third apply: exit %d, stderr %q", code, stderr)
+	}
+	if err := os.WriteFile(filepath.Join(game, "current", "saves", "1.save"), []byte("one by hand"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	before := fingerprint(t, s.vault)
-	_, stderr, code := s.run(t, "--apply")
-	if code != 2 || !strings.Contains(stderr, "current-exists") || !strings.HasSuffix(stderr, "savewarden: vault: not modified\n") {
-		t.Fatalf("exit %d, stderr %q", code, stderr)
+	if _, stderr, code := s.run(t, "--apply"); code != 2 || !strings.HasSuffix(stderr, "savewarden: vault: not modified\n") {
+		t.Fatalf("modified current: exit %d, stderr %q", code, stderr)
 	}
 	if fingerprint(t, s.vault) != before {
-		t.Fatal("the refused apply changed the vault")
+		t.Fatal("the blocked apply changed the vault")
 	}
 }
 
