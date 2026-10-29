@@ -257,6 +257,10 @@ func (o *operation) unfinished(err error) error {
 
 func (o *operation) result() Result {
 	r := Result{Plan: o.plan, Operation: o.op, Effect: o.effect}
+	if r.Effect == EffectIntervention && !o.open {
+		// Refused before its directory existed: the vault is the subject.
+		r.Operation = ""
+	}
 	if o.effect == EffectPublished {
 		receipt := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, receiptsDir, o.op+".json")
 		r.Receipt = windowsPath(o.plan.vaultVolume, receipt)
@@ -362,15 +366,17 @@ func (o *operation) underLock() error {
 	}
 	before := o.plan.observed
 	if o.rotation() {
+		// Recognition refused under lock: current is not the generation the
+		// plan recognised, code 3 before any journal (ADR 0006 §5, A2).
 		for _, intervention := range v.interventions {
-			if intervention.Subject == o.game+"/"+currentDir {
+			if intervention.Subject == o.game+"/"+currentDir || intervention.Subject == o.game+"/"+retainedDir+"/"+o.previous {
 				o.effect = EffectIntervention
 				return &InterventionError{Cause: string(intervention.Cause) + " " + intervention.Subject + ": " + intervention.Detail}
 			}
 		}
-		if v.currentID != o.old {
+		if !v.current || v.currentLink {
 			o.effect = EffectIntervention
-			return &InterventionError{Cause: fmt.Sprintf("current is no longer the directory %s recognised by the plan", o.old)}
+			return &InterventionError{Cause: "current is no longer the directory recognised by the plan: absent, a link or a reparse point"}
 		}
 	}
 	changed := v.state != VaultInitialized || len(v.interventions) > 0 || len(v.pending) > 0 ||
@@ -378,6 +384,10 @@ func (o *operation) underLock() error {
 		!sameOperations(v.receipts, before.receipts) || len(v.invalid) != len(before.invalid)
 	if changed {
 		return errVault(o.plan.Vault, "vault-changed: the vault changed since the plan; run sync again")
+	}
+	if o.rotation() && v.currentID != o.old {
+		o.effect = EffectIntervention
+		return &InterventionError{Cause: fmt.Sprintf("current is no longer the directory %s recognised by the plan", o.old)}
 	}
 	if o.rotation() {
 		if err := o.oldUnchanged(currentDir); err != nil {

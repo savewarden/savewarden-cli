@@ -57,30 +57,36 @@ func (o *operation) intervene(cause string) error {
 // switchTo renames from to to, in the order of ADR 0006 §4: every pin on
 // from released, identity checked before, target absent, MoveFileEx with
 // retries, identity checked after. moved reports whether the rename may
-// have happened, in which case only recovery decides.
+// have happened, in which case only recovery decides. A check before the
+// rename that fails or cannot be read is an unexplainedError: nothing may
+// then be recorded as if the state were known (ADR 0006 §3).
 func (o *operation) switchTo(from, to string, want backup.FileID) (moved bool, err error) {
 	if err := o.vault.Release(from); err != nil {
-		return false, err
+		return false, &unexplainedError{fmt.Sprintf("%s cannot be released before its rename: %v", from, err)}
 	}
 	id, err := o.vault.Identity(from)
 	switch {
 	case err != nil:
-		return false, fmt.Errorf("%s cannot be checked: %w", from, err)
+		return false, &unexplainedError{fmt.Sprintf("%s cannot be checked before its rename: %v", from, err)}
 	case id != want:
-		return false, &unexplainedError{fmt.Sprintf("%s is %s, not the directory %s recorded by staged", from, id, want)}
+		return false, &unexplainedError{fmt.Sprintf("%s is %s, not the directory %s the journal recorded", from, id, want)}
 	}
 	switch _, err := o.vault.Identity(to); {
 	case err == nil:
 		return false, &unexplainedError{fmt.Sprintf("%s exists, and no record explains it", to)}
 	case !errors.Is(err, fs.ErrNotExist):
-		return false, fmt.Errorf("%s cannot be checked: %w", to, err)
+		return false, &unexplainedError{fmt.Sprintf("%s cannot be checked before the rename: %v", to, err)}
 	}
 	if err := o.move(from, to); err != nil {
-		// MoveFileEx renames a name or fails; the source says which.
-		if id, idErr := o.vault.Identity(from); idErr == nil && id == want {
-			return false, err
+		// MoveFileEx renames a name or fails; the source and the target
+		// say which, and both must confirm that nothing moved.
+		if id, idErr := o.vault.Identity(from); idErr != nil || id != want {
+			return true, err
 		}
-		return true, err
+		if _, toErr := o.vault.Identity(to); !errors.Is(toErr, fs.ErrNotExist) {
+			return false, &unexplainedError{fmt.Sprintf("the rename of %s failed (%v), and %s is no longer absent", from, err, to)}
+		}
+		return false, err
 	}
 	switch id, err := o.vault.Identity(to); {
 	case err != nil:
@@ -98,7 +104,8 @@ func (o *operation) switchTo(from, to string, want backup.FileID) (moved bool, e
 }
 
 // unexplainedError reports, before a rename, an object that no record
-// explains: an ambiguity of ADR 0006 §3.
+// explains or a state that cannot be observed: an ambiguity of ADR 0006 §3,
+// code 3 with nothing recorded.
 type unexplainedError struct{ detail string }
 
 func (e *unexplainedError) Error() string { return e.detail }

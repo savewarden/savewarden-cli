@@ -355,15 +355,25 @@ func TestRotationRefusesCurrentChangedBeforeTheLock(t *testing.T) {
 // junction, is code 3 before any journal.
 func TestRotationRefusesAnUnrecognizedCurrentUnderLock(t *testing.T) {
 	for name, change := range map[string]func(f *fakeFS){
-		"copy":     copyCurrent,
-		"junction": func(f *fakeFS) { f.get(gameDir).children["current"] = f.link() },
+		"copy":                copyCurrent,
+		"junction":            func(f *fakeFS) { f.get(gameDir).children["current"] = f.link() },
+		"unreadable identity": func(f *fakeFS) { f.get(gameDir + `\current`).busy = true },
+		"current gone":        func(f *fakeFS) { delete(f.get(gameDir).children, "current") },
 	} {
 		f := generation(t)
 		result, err := rotateWith(context.Background(), f, appearing{newFakeVaults(f), func() { change(f) }})
 		var intervention *sync.InterventionError
-		if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention || journalOf(f, op3) != "" {
-			t.Fatalf("%s: result %+v, %v, journal %q", name, result, err, journalOf(f, op3))
+		if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention || journalOf(f, op3) != "" ||
+			!strings.HasPrefix(result.State(), "intervention required for the vault: ") {
+			t.Fatalf("%s: result %+v, %v, journal %q, state %q", name, result, err, journalOf(f, op3), result.State())
 		}
+	}
+	// Any other change of the vault under lock stays vault-changed, code 1.
+	f := generation(t)
+	result, err := rotateWith(context.Background(), f, appearing{newFakeVaults(f), func() { writeJournal(t, f, op2, backup.StepPlanned) }})
+	var intervention *sync.InterventionError
+	if err == nil || errors.As(err, &intervention) || !strings.Contains(err.Error(), "vault-changed") || journalOf(f, op3) != "" {
+		t.Fatalf("pending operation under lock: %+v, %v", result, err)
 	}
 }
 
@@ -406,15 +416,50 @@ func TestRetirementPrecheckCatchesASwap(t *testing.T) {
 	if f.get(gameDir+`\retained\`+op1) != nil || f.get(gameDir+`\current`) == nil {
 		t.Fatal("something was moved")
 	}
+	// A state the pre-check cannot confirm is never recorded as rolled back.
+	for name, change := range map[string]func(f *fakeFS){
+		"current gone":         func(f *fakeFS) { delete(f.get(gameDir).children, "current") },
+		"current a junction":   func(f *fakeFS) { f.get(gameDir).children["current"] = f.link() },
+		"junction at retained": func(f *fakeFS) { f.put(gameDir+`\retained\`+op1, f.link()) },
+	} {
+		f := generation(t)
+		vaults := hooked(f)
+		vaults.before["Release "+gameRel+"/current"] = func() { change(f) }
+		result, err := rotateWith(context.Background(), f, vaults)
+		expectIntervention(t, f, result, err, "005-retire-intent.rec", "before")
+		if strings.Contains(journalOf(f, op3), "rolled-back") {
+			t.Fatalf("%s: recorded as rolled back", name)
+		}
+	}
 }
 
+// F2: a check before M3 that cannot be read spends no rollback-failed.
+func TestRestorationPrecheckSpendsNoRollbackFailed(t *testing.T) {
+	f := generation(t)
+	vaults := hooked(f)
+	vaults.deny[gameRel+"/staging/"+op3] = fs.ErrPermission
+	vaults.after[commitOf(op3, 7, backup.StepRestoreIntent)] = func() { f.put(gameDir+`\current`, f.link()) }
+	result, err := rotateWith(context.Background(), f, vaults)
+	expectIntervention(t, f, result, err, "007-restore-intent.rec", "before the rename")
+	if f.get(gameDir+`\retained\`+op1) == nil {
+		t.Fatal("the old generation moved")
+	}
+}
+
+// A retained\<prev-op> that already stands where M1 would retire current
+// is refused by the plan itself: code 3, no journal, nothing moved.
 func TestRotationRefusesAnExistingRetained(t *testing.T) {
 	f := generation(t)
 	f.mkdir(gameDir + `\retained\` + op1)
+	if p := plan(t, f, manifest(), vaultPath); strings.Join(causes(p), ",") != "unexpected-entry "+gameRel+"/retained/"+op1 {
+		t.Fatalf("plan %q", causes(p))
+	}
+	before := snapshot(f, `F:\`)
 	result, err := rotateWith(context.Background(), f, newFakeVaults(f))
-	expectIntervention(t, f, result, err, "005-retire-intent.rec", "exists, and no record explains it")
-	if f.get(gameDir+`\current\saves\1.save`) == nil {
-		t.Fatal("current was moved")
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "unexpected-entry "+gameRel+"/retained/"+op1) ||
+		journalOf(f, op3) != "" || snapshot(f, `F:\`) != before {
+		t.Fatalf("result %+v, %v, journal %q", result, err, journalOf(f, op3))
 	}
 }
 
@@ -566,6 +611,9 @@ func TestCurrentReappearingBetweenMovesIsNeverOverwritten(t *testing.T) {
 		if call == m3 {
 			t.Fatal("a restoration was attempted")
 		}
+	}
+	if p := plan(t, f, manifest(), vaultPath); strings.Contains(p.Interventions[0].Detail, "current published") {
+		t.Fatalf("a foreign current is announced as published: %q", p.Interventions[0].Detail)
 	}
 }
 

@@ -94,6 +94,7 @@ rotation, `retained\<op précédente>`. Il n'agit que dans les cas prévus par
 | Rotation, retrait non effectué | Enregistre `rolled-back` | `rolled back <op>; current unchanged` |
 | Rotation, ancienne génération déjà dans `retained`, nouvelle pas promue | **Restauration vérifiée** : relit la génération retenue contre son receipt ; intacte, la remet en `current`, puis `rolled-back` ; altérée ou remplacée, code 3, rien n'est déplacé | `rolled back <op>; …` ou `intervention required …` |
 | Rotation, nouvelle génération promue | Vérifie `current` entier contre le plan ; égal : receipt et `published` ; différent : la remet en staging, puis restauration vérifiée ; receipt déjà validé : code 3 | `published <op>`, `rolled back <op>; …` ou `intervention required …` |
+| Rotation arrêtée avant le retrait, `current` disparu ou remplacé entre-temps | Aucune ligne ne s'applique : code 3, rien écrit, à chaque exécution. L'ancienne génération n'a pas été déplacée par Savewarden ; remettez-la à sa place si vous l'avez déplacée, sinon conservez le coffre tel quel et utilisez un nouveau coffre | `intervention required …` |
 | Rotation, objet inattendu sous `current` après le retrait | Aucune ligne ne s'applique : code 3, rien écrit ni déplacé, à chaque exécution, tant que l'objet est là ; une fois l'objet ôté par vous, la ligne de restauration vérifiée s'applique | `intervention required …` |
 
 Une interruption pendant la récupération elle-même laisse un état que la

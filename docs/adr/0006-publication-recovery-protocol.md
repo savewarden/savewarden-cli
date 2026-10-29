@@ -468,8 +468,9 @@ l'ancien `current` est relevée une fois, sous verrou, et ne change plus :
 **Fenêtres résiduelles.** `sync.lock` n'exclut qu'une autre opération
 Savewarden : il n'empêche pas un autre processus d'écrire dans `current` ou
 `retained\<prev-op>`. Les relectures des points 3 et 5 bornent ces fenêtres
-sans les fermer : une écriture entre la relecture du point 3 et M1, ou entre
-celle du point 5 et M2, n'est pas détectée. Jeu, launcher et tout outil qui
+sans les fermer : une écriture entre la relecture du point 3 et M1, entre
+celle du point 5 et M2, ou entre la relecture d'une restauration vérifiée et
+M3, n'est pas détectée. Jeu, launcher et tout outil qui
 touche le coffre doivent être fermés, comme pour la source.
 
 **Restaurations vérifiées.** Toute restauration M3, en cours d'exécution
@@ -713,3 +714,9 @@ relève de son propriétaire.
   tableau : code 3, rien écrit, enregistré ni déplacé tant qu'il reste
   présent ; une récupération ne reprend que sur une observation entièrement
   conforme à une ligne, toutes ses vérifications comprises (§4, §5).
+- **29 octobre 2026, revue indépendante du remplacement** (B2c, commit 4) :
+  la troisième fenêtre résiduelle, entre la relecture d'une restauration
+  vérifiée et M3, est nommée au §5 ; aucune règle ne change. Le code applique
+  désormais strictement le §3 au pré-contrôle d'une bascule : une identité
+  illisible, un lien ou une cible qui ne peut être observée sont une
+  ambiguïté, code 3, sans `rolled-back` ni `rollback-failed`.

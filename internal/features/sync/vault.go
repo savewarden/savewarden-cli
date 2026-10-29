@@ -237,7 +237,7 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 	}
 	if len(v.pending) == 0 {
 		// A pending operation is judged by its own recovery table instead.
-		v.recognize(scope, join(gameName, currentDir), prefix+currentDir)
+		v.recognize(scope, gameName, prefix)
 	}
 	sort.Slice(v.interventions, func(a, b int) bool { return v.interventions[a].Subject < v.interventions[b].Subject })
 	if len(v.pending) > 1 {
@@ -254,7 +254,8 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 // journal-ambiguous; another identity, unexpected-entry. A copied or moved
 // vault lands there: its data may be intact, but nothing proves it, and no
 // identity is ever adopted or rewritten.
-func (v *vault) recognize(scope Scope, name, subject string) {
+func (v *vault) recognize(scope Scope, gameName, prefix string) {
+	name, subject := join(gameName, currentDir), prefix+currentDir
 	if !v.current || len(v.invalid) > 0 {
 		return
 	}
@@ -283,6 +284,17 @@ func (v *vault) recognize(scope Scope, name, subject string) {
 				"the identity differs, the data may well be intact, and nothing was written", id, published, head.Operation))
 		return
 	}
+	// Its generation is current: nothing may already stand where a
+	// rotation retires it (ADR 0006 §3), refused before any journal.
+	retained := retainedDir + "/" + head.Operation
+	switch _, err := scope.Lstat(join(gameName, retained)); {
+	case err == nil:
+		v.intervene(CauseUnexpectedEntry, prefix+retained, "exists while the generation of "+head.Operation+" is current; no record explains it")
+		return
+	case !errors.Is(err, fs.ErrNotExist):
+		v.intervene(CauseUnexpectedEntry, prefix+retained, "cannot be checked: "+err.Error())
+		return
+	}
 	v.currentID = id
 }
 
@@ -302,6 +314,12 @@ func (v *vault) readJournals(scope Scope, name, subject string, found map[string
 		}
 		found[entry.Name] = true
 		journal, last, err := readJournal(scope, join(name, entry.Name), entry.Name)
+		promoted := false
+		if err == nil && (journal.Last() == backup.StepPublishIntent || journal.Last() == backup.StepPromoteIntent) {
+			// Only the staging it recorded is a published current.
+			id, idErr := scope.Identity(join(path.Dir(name), currentDir))
+			promoted = idErr == nil && id == journal.Staging
+		}
 		if err != nil {
 			// Unreadable or inconsistent, the journal is ambiguous either way.
 			v.intervene(CauseJournalAmbiguous, entry.Name, err.Error())
@@ -318,7 +336,7 @@ func (v *vault) readJournals(scope Scope, name, subject string, found map[string
 				step = "none"
 			}
 			detail := fmt.Sprintf("last committed step %s; run sync --recover to see how it would be recovered", step)
-			if (journal.Last() == backup.StepPublishIntent || journal.Last() == backup.StepPromoteIntent) && v.current {
+			if promoted {
 				detail = "pending recovery: current published, receipt missing; run sync --recover"
 			}
 			v.intervene(CausePendingOperation, entry.Name, detail)

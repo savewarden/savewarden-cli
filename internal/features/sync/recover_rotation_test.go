@@ -106,46 +106,85 @@ func rotationTerminal(t *testing.T, name string, f *fakeFS) {
 // rotation, then --recover --apply, ends at the row the table names; the
 // old generation is never lost.
 func TestCrashAtEveryRotationCall(t *testing.T) {
-	reference := generation(t)
-	clean := newFakeVaults(reference)
-	if _, err := rotateWith(context.Background(), reference, clean); err != nil {
-		t.Fatal(err)
-	}
+	staging, retained := gameRel+"/staging/"+op3, gameRel+"/retained/"+op1
 	reached := map[sync.RecoveryAction]bool{}
-	for k := 1; k <= len(clean.calls); k++ {
-		for _, after := range []bool{false, true} {
-			name := fmt.Sprintf("%s %d %s", map[bool]string{false: "before", true: "after"}[after], k, clean.calls[k-1])
-			f := generation(t)
-			vaults := newFakeVaults(f)
-			if after {
-				vaults.crashAfter = k
-			} else {
-				vaults.crashBefore = k
+	for _, path := range []struct {
+		name      string
+		configure func(*hookVaults)
+	}{
+		{"nominal", nil},
+		{"M2 refused, restored by M3", denyMoves(staging)},
+		{"M2 and M3 refused, rollback-failed", denyMoves(staging, retained)},
+	} {
+		reference := generation(t)
+		clean := hooked(reference)
+		if path.configure != nil {
+			path.configure(clean)
+		}
+		_, _ = rotateWith(context.Background(), reference, clean)
+		for k := 1; k <= len(clean.calls); k++ {
+			for _, after := range []bool{false, true} {
+				name := fmt.Sprintf("%s, %s %d %s", path.name, map[bool]string{false: "before", true: "after"}[after], k, clean.calls[k-1])
+				f := generation(t)
+				vaults := hooked(f)
+				if path.configure != nil {
+					path.configure(vaults)
+				}
+				if after {
+					vaults.crashAfter = k
+				} else {
+					vaults.crashBefore = k
+				}
+				if _, err := rotateWith(context.Background(), f, vaults); err == nil {
+					t.Fatalf("%s: no crash", name)
+				}
+				want := expectedEnd(f)
+				before := snapshot(f, `F:\`)
+				rec, err := recoverPlan(f)
+				if err != nil {
+					t.Fatalf("%s: recovery plan: %v", name, err)
+				}
+				if snapshot(f, `F:\`) != before {
+					t.Fatalf("%s: the recovery plan wrote", name)
+				}
+				reached[rec.Action] = true
+				if result, err := recoverWith(f, newFakeVaults(f)); err != nil {
+					t.Fatalf("%s: recovery %q: %+v, %v", name, rec.Action, result, err)
+				}
+				if got := lastStep(f, op3); got != want {
+					t.Fatalf("%s: recovery %q ended at %q, want %q", name, rec.Action, got, want)
+				}
+				rotationTerminal(t, name, f)
 			}
-			if _, err := rotateWith(context.Background(), f, vaults); err == nil {
-				t.Fatalf("%s: no crash", name)
-			}
-			before := snapshot(f, `F:\`)
-			rec, err := recoverPlan(f)
-			if err != nil {
-				t.Fatalf("%s: recovery plan: %v", name, err)
-			}
-			if snapshot(f, `F:\`) != before {
-				t.Fatalf("%s: the recovery plan wrote", name)
-			}
-			reached[rec.Action] = true
-			if result, err := recoverWith(f, newFakeVaults(f)); err != nil {
-				t.Fatalf("%s: recovery %q: %+v, %v", name, rec.Action, result, err)
-			}
-			rotationTerminal(t, name, f)
 		}
 	}
 	for _, action := range []sync.RecoveryAction{sync.RecoverNothing, sync.RecoverAbandon, sync.RecoverRolledBack,
-		sync.RecoverRestore, sync.RecoverVerifyPromote} {
+		sync.RecoverRestore, sync.RecoverFinishRestore, sync.RecoverVerifyPromote} {
 		if !reached[action] {
 			t.Errorf("action %q never reached", action)
 		}
 	}
+}
+
+// expectedEnd is the terminal step the table of ADR 0006 §5 gives a
+// rotation left by a crash: published once the new generation is current,
+// abandoned before the retirement, rolled back otherwise.
+func expectedEnd(f *fakeFS) string {
+	if f.get(gameDir+`\journal\`+op3) == nil {
+		return ""
+	}
+	current := f.get(gameDir + `\current`)
+	switch last := lastStep(f, op3); last {
+	case "", "planned", "staging-intent", "staged", "verified", "abandoned":
+		return "abandoned"
+	case "published":
+		return "published"
+	case "promote-intent":
+		if current != nil && current.children["saves"].children["new.save"] != nil {
+			return "published"
+		}
+	}
+	return "rolled-back"
 }
 
 // commitOfReceipt is the commit of the receipt of op by its first temporary.
@@ -526,6 +565,38 @@ func TestRecoveryDoesNotRestoreAnAlteredRetained(t *testing.T) {
 		if f.get(gameDir+`\current`) != nil {
 			t.Fatalf("%s: an altered generation was restored", name)
 		}
+	}
+}
+
+// F3: after M4, the verified restoration is the only guard: an altered
+// retained stops in code 3 with no restore-intent, and stays refused.
+func TestUnpromoteThenAlteredRetainedStops(t *testing.T) {
+	for name, state := range map[string]func() *fakeFS{
+		"promote-intent, current differs": func() *fakeFS {
+			f := crashRotation(t, m2, true, nil)
+			tamperCurrent(f)
+			return f
+		},
+		"unpromote-intent, M4 not done": func() *fakeFS {
+			f := crashRotation(t, m2, true, nil)
+			tamperCurrent(f)
+			crashed := newFakeVaults(f)
+			crashed.crashAfter = callIndex(t, dryRecovery(t, f), commitOf(op3, 7, backup.StepUnpromoteIntent))
+			_, _ = recoverWith(f, crashed)
+			return f
+		},
+	} {
+		f := state()
+		alterRetained(f)
+		var intervention *sync.InterventionError
+		if _, err := recoverWith(f, newFakeVaults(f)); !errors.As(err, &intervention) || !strings.Contains(err.Error(), "nothing restored") {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if strings.Contains(journalOf(f, op3), "restore-intent") || f.get(gameDir+`\current`) != nil ||
+			f.get(gameDir+`\staging\`+op3) == nil || lastRecord(f, op3) != "007-unpromote-intent.rec" {
+			t.Fatalf("%s: journal %s", name, journalOf(f, op3))
+		}
+		stable(t, f)
 	}
 }
 
