@@ -15,6 +15,7 @@ import (
 // Attributes and flags missing from package syscall.
 const (
 	fileAttributeOffline            = 0x00001000
+	fileAttributeEncrypted          = 0x00004000
 	fileAttributeRecallOnOpen       = 0x00040000
 	fileAttributeRecallOnDataAccess = 0x00400000
 	fileFlagOpenNoRecall            = 0x00100000
@@ -99,6 +100,9 @@ func (s *Scope) Lstat(name string) (fs.FileInfo, error) {
 	}
 	if data.FileAttributes&(syscall.FILE_ATTRIBUTE_REPARSE_POINT|placeholderAttributes) != 0 && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) == 0 {
 		return reparseInfo{info}, nil
+	}
+	if data.FileAttributes&fileAttributeEncrypted != 0 {
+		return encryptedInfo{info}, nil
 	}
 	return info, nil
 }
@@ -231,14 +235,23 @@ func longPath(path string) string {
 	return `\\?\` + path
 }
 
+// encryptedInfo marks an EFS-encrypted object, so that callers can refuse
+// to copy it in clear without importing this package.
+type encryptedInfo struct{ fs.FileInfo }
+
+func (encryptedInfo) Encrypted() bool { return true }
+
 type reparseInfo struct{ fs.FileInfo }
 
 func (r reparseInfo) Mode() fs.FileMode { return r.FileInfo.Mode()&fs.ModePerm | fs.ModeIrregular }
 func (r reparseInfo) IsDir() bool       { return false }
 
 func unwrap(info fs.FileInfo) fs.FileInfo {
-	if r, ok := info.(reparseInfo); ok {
-		return r.FileInfo
+	switch wrapped := info.(type) {
+	case reparseInfo:
+		return wrapped.FileInfo
+	case encryptedInfo:
+		return wrapped.FileInfo
 	}
 	return info
 }

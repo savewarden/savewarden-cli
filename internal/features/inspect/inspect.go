@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 	"github.com/savewarden/savewarden-cli/internal/entities/game"
 )
 
@@ -57,7 +58,7 @@ func (s *Service) Inspect(ctx context.Context, request Request) (Report, error) 
 	if err != nil && !volumeMissing {
 		return Report{}, fmt.Errorf("open volume %s: %w", volume, err)
 	}
-	run := &inspection{ctx: ctx, scope: scope, report: &report}
+	run := &inspection{ctx: ctx, scope: scope}
 	if scope != nil {
 		defer func() { _ = scope.Close() }()
 	}
@@ -68,12 +69,19 @@ func (s *Service) Inspect(ctx context.Context, request Request) (Report, error) 
 		if err != nil {
 			return Report{}, err
 		}
-		result := SourceReport{Source: source, Path: windowsPath(volume, segments)}
+		result := SourceReport{Source: source, Path: windowsPath(volume, segments), Status: StatusInventoried}
 		if volumeMissing {
 			result.Status = StatusMissing
 			run.add(missingSeverity(source), CodeSourceMissing, source.ID, volume, "volume "+volume+" is not available")
+		} else if chain, stopped := run.resolve(volume, segments); stopped != nil {
+			result.Status = stopped.status
+			severity := backup.Blocking
+			if stopped.status == StatusMissing {
+				severity = missingSeverity(source)
+			}
+			run.add(severity, stopped.code, source.ID, stopped.path, stopped.detail)
 		} else {
-			chains[i], result.Status = run.resolve(source, volume, segments)
+			chains[i] = chain
 		}
 		report.Sources = append(report.Sources, result)
 	}
@@ -85,17 +93,18 @@ func (s *Service) Inspect(ctx context.Context, request Request) (Report, error) 
 			continue
 		}
 		_, segments, _ := manifest.SourceSegments(i)
-		if err := run.walk(&report.Sources[i], strings.Join(segments, "/"), ""); err != nil {
+		tree := &tree{}
+		if err := run.walk(tree, report.Sources[i].Source.ID, strings.Join(segments, "/"), ""); err != nil {
 			return Report{}, err
 		}
-		sort.Slice(report.Sources[i].Entries, func(a, b int) bool {
-			return report.Sources[i].Entries[a].Path < report.Sources[i].Entries[b].Path
-		})
+		tree.sort()
+		report.Sources[i].Entries, report.Sources[i].Bytes = tree.entries, tree.bytes
 	}
 	order := map[string]int{}
 	for i, source := range manifest.Sources {
 		order[source.ID] = i
 	}
+	report.Findings = run.findings
 	sort.SliceStable(report.Findings, func(a, b int) bool {
 		x, y := report.Findings[a], report.Findings[b]
 		if order[x.Source] != order[y.Source] {
@@ -110,46 +119,50 @@ func (s *Service) Inspect(ctx context.Context, request Request) (Report, error) 
 }
 
 type inspection struct {
-	ctx    context.Context
-	scope  Scope
-	report *Report
+	ctx      context.Context
+	scope    Scope
+	findings []backup.Finding
 }
 
-func (r *inspection) add(severity Severity, code Code, source, path, detail string) {
-	r.report.Findings = append(r.report.Findings, Finding{severity, code, source, path, detail})
+func (r *inspection) add(severity backup.Severity, code backup.Code, source, path, detail string) {
+	r.findings = append(r.findings, backup.Finding{Severity: severity, Code: code, Source: source, Path: path, Detail: detail})
 }
 
-func missingSeverity(source game.Source) Severity {
+func missingSeverity(source game.Source) backup.Severity {
 	if source.Required {
-		return Blocking
+		return backup.Blocking
 	}
-	return Info
+	return backup.Info
 }
 
-// resolve checks every component from the volume root down to the source
-// without following anything, and returns their descriptions.
-func (r *inspection) resolve(source game.Source, volume string, segments []string) ([]fs.FileInfo, SourceStatus) {
+// stop explains why resolve did not reach the directory.
+type stop struct {
+	status SourceStatus // StatusMissing or StatusRefused
+	code   backup.Code
+	path   string // Windows path of the component in cause
+	detail string
+}
+
+// resolve checks every component from the volume root down to the
+// directory without following anything, and returns their descriptions.
+func (r *inspection) resolve(volume string, segments []string) ([]fs.FileInfo, *stop) {
 	chain := make([]fs.FileInfo, 0, len(segments))
 	for k := 1; k <= len(segments); k++ {
 		display := windowsPath(volume, segments[:k])
 		info, err := r.scope.Lstat(strings.Join(segments[:k], "/"))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			r.add(missingSeverity(source), CodeSourceMissing, source.ID, display, "does not exist")
-			return nil, StatusMissing
+			return nil, &stop{StatusMissing, CodeSourceMissing, display, "does not exist"}
 		case err != nil:
-			r.add(Blocking, codeFor(err), source.ID, display, err.Error())
-			return nil, StatusRefused
+			return nil, &stop{StatusRefused, codeFor(err), display, err.Error()}
 		case isLink(info.Mode()):
-			r.add(Blocking, CodeLinkNotFollowed, source.ID, display, describeLink(info.Mode())+" on the way to the source; not followed")
-			return nil, StatusRefused
+			return nil, &stop{StatusRefused, CodeLinkNotFollowed, display, describeLink(info.Mode()) + " on the way to the source; not followed"}
 		case !info.IsDir():
-			r.add(Blocking, CodeSourceNotDirectory, source.ID, display, "is not a directory")
-			return nil, StatusRefused
+			return nil, &stop{StatusRefused, CodeSourceNotDirectory, display, "is not a directory"}
 		}
 		chain = append(chain, info)
 	}
-	return chain, StatusInventoried
+	return chain, nil
 }
 
 // checkOverlaps compares resolved directories by identity, which also
@@ -190,7 +203,7 @@ func notFollowed(err error) bool {
 	return errors.As(err, &refusal) && refusal.NotFollowed()
 }
 
-func codeFor(err error) Code {
+func codeFor(err error) backup.Code {
 	if notFollowed(err) {
 		return CodeLinkNotFollowed
 	}

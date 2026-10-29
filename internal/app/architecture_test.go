@@ -158,6 +158,26 @@ func TestArchitectureImportRules(t *testing.T) {
 		{"internal/entities/game", "syscall", false},
 		{"internal/cli", "C", false},
 		{"internal/cliff", modulePath + "internal/features/sync", false},
+		// ADR 0004: shared inventory types live in entities/backup.
+		{"internal/features/inspect", modulePath + "internal/entities/backup", true},
+		{"internal/entities/backup", "crypto/sha256", true},
+		{"internal/entities/backup", "encoding/json", true},
+		{"internal/entities/backup", modulePath + "internal/entities/game", true},
+		{"internal/entities/backup", modulePath + "internal/features/inspect", false},
+		{"internal/entities/backup", modulePath + "internal/platform/filesystem", false},
+		{"internal/entities/backup", "syscall", false},
+		{"internal/cli", modulePath + "internal/entities/backup", false},
+		// ADR 0004: sync reaches inspect only through its own port.
+		{"internal/features/sync", modulePath + "internal/entities/backup", true},
+		{"internal/features/sync", modulePath + "internal/entities/game", true},
+		{"internal/features/sync", modulePath + "internal/features/inspect", false},
+		{"internal/features/inspect", modulePath + "internal/features/sync", false},
+		{"internal/features/sync", modulePath + "internal/platform/filesystem", false},
+		{"internal/features/sync", modulePath + "internal/platform/vault", false},
+		{"internal/features/sync", modulePath + "internal/app", false},
+		{"internal/features/sync", "syscall", false},
+		{"internal/features/sync", "github.com/spf13/cobra", false},
+		{"internal/cli", modulePath + "internal/features/sync", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.source+"->"+tt.target, func(t *testing.T) {

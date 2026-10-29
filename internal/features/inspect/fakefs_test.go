@@ -20,6 +20,7 @@ type node struct {
 	modTime  time.Time
 	id       int
 	children map[string]*node
+	crypted  bool // reported as EFS-encrypted by the adapter
 	lstatErr error
 	listErr  error
 	openErr  error
@@ -150,11 +151,14 @@ func (s *fakeScope) Lstat(name string) (fs.FileInfo, error) {
 
 func (s *fakeScope) ReadDir(name string) ([]fs.DirEntry, error) {
 	s.fs.listed = append(s.fs.listed, name)
-	parent, base, err := s.walkTo(name)
-	if err != nil {
-		return nil, err
+	n, ok := s.root, true
+	if name != "." {
+		parent, base, err := s.walkTo(name)
+		if err != nil {
+			return nil, err
+		}
+		n, ok = parent.children[base]
 	}
-	n, ok := parent.children[base]
 	switch {
 	case !ok:
 		return nil, fs.ErrNotExist
@@ -226,10 +230,11 @@ type fakeInfo struct {
 	mode    fs.FileMode
 	modTime time.Time
 	id      int
+	crypted bool
 }
 
 func info(name string, n *node) fs.FileInfo {
-	return fakeInfo{name, int64(len(n.data)), n.mode, n.modTime, n.id}
+	return fakeInfo{name, int64(len(n.data)), n.mode, n.modTime, n.id, n.crypted}
 }
 
 func (i fakeInfo) Name() string       { return i.name }
@@ -238,6 +243,7 @@ func (i fakeInfo) Mode() fs.FileMode  { return i.mode }
 func (i fakeInfo) ModTime() time.Time { return i.modTime }
 func (i fakeInfo) IsDir() bool        { return i.mode.IsDir() }
 func (i fakeInfo) Sys() any           { return i.id }
+func (i fakeInfo) Encrypted() bool    { return i.crypted }
 
 type fakeManifests struct {
 	manifest game.Manifest

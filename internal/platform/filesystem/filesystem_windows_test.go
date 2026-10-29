@@ -256,3 +256,36 @@ func TestUnavailableVolumeAndJunctionAnchor(t *testing.T) {
 		t.Fatal("relative anchor accepted")
 	}
 }
+
+// EFS-encrypted files are reported through an optional Encrypted method,
+// so that sync can refuse to copy them in clear; they stay readable.
+func TestEncryptedFilesAreReported(t *testing.T) {
+	anchor := tempAnchor(t)
+	path := filepath.Join(anchor, "secret.save")
+	write(t, path, "secret")
+	write(t, filepath.Join(anchor, "plain.save"), "plain")
+	if output, err := exec.Command("cipher", "/e", "/a", path).CombinedOutput(); err != nil {
+		t.Skipf("EFS unavailable on this system: %v %s", err, output)
+	}
+	t.Cleanup(func() { _ = exec.Command("cipher", "/d", "/a", path).Run() })
+	scope := open(t, anchor)
+	for name, want := range map[string]bool{"secret.save": true, "plain.save": false} {
+		info, err := scope.Lstat(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, ok := info.(interface{ Encrypted() bool })
+		if got := ok && e.Encrypted(); got != want || !info.Mode().IsRegular() {
+			t.Fatalf("%s: encrypted %v, want %v, mode %v", name, got, want, info.Mode())
+		}
+		again, err := scope.Lstat(name)
+		if err != nil || !scope.SameFile(info, again) {
+			t.Fatalf("%s: identity lost through the wrapper: %v", name, err)
+		}
+	}
+	file, err := scope.OpenRegular("secret.save")
+	if err != nil {
+		t.Fatalf("an encrypted file stays readable: %v", err)
+	}
+	_ = file.Close()
+}

@@ -4,10 +4,11 @@
 
 - Lire le plan demandé intégralement et inspecter statut, branche, remote et
   fichiers existants avant toute écriture. Ne pas écraser du travail existant.
-- Lot courant : **B1**, manifeste strict et `inspect` en lecture seule,
-  selon `.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md`, plan révisé
-  par le propriétaire ; son nom porte désormais sa version.
-  Human GO et plan accepté requis avant chaque lot suivant, B2 à B5.
+- Lot courant : **B2a**, plan de `sync` en lecture seule, selon
+  `.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md`, plan directeur de B2
+  validé par le propriétaire, et ADR 0004, 0006 et 0007. B2 est livré en trois
+  PR successives : B2a, B2b, B2c, chacune après un GO distinct ; puis Human GO
+  et plan accepté avant chaque lot suivant, B3 à B5.
 - Ne jamais déclarer une CI verte sans run terminé sur le commit concerné.
   Une compilation croisée prouve seulement la compilation.
 - Tenir code, tests, docs et CHANGELOG.md cohérents. Rapport final : branche,
@@ -28,8 +29,11 @@
 ## Données protégées
 
 - **Ne toucher sous aucun prétexte à `D:\Ga`, `D:\Savewarden`, `E:\GMS`
-  ou aux clés SSH.** Seule exception : une lecture `inspect` du pilote, sur
+  ou aux clés SSH.** Seule exception : une exécution du pilote, sur
   autorisation explicite et nominative du propriétaire pour cette exécution.
+  Les pilotes sont exécutés par le propriétaire : Savewarden y lit alors le
+  manifeste et les sources qu'il désigne, ce qui n'est pas un accès de
+  l'agent. Aucun chemin personnel dans le code, les tests ou les exemples.
   Ne pas importer de saves ou comptes dans Git.
 - Tests exclusivement synthétiques/tempfiles. Les paths historiques dans
   les docs sont des preuves rapportées par le plan, pas des données à explorer.
@@ -37,12 +41,13 @@
   implicite de symlink/junction, relocation ou restauration en place.
 - Le code de production reste en lecture seule tant qu'un lot n'autorise pas
   d'écriture : `internal/app/readonly_test.go` ne s'assouplit que par package,
-  avec un ADR. `os.Root` confine mais suit les liens internes ; ne jamais en
+  avec un ADR ; B2b le fera pour `internal/platform/vault` seulement
+  (ADR 0005). `os.Root` confine mais suit les liens internes ; ne jamais en
   faire l'unique garantie de non-suivi.
-- Futurs writes : préflight, source explicite, destination distincte, staging,
-  comparaison des paths/tailles/SHA-256, détection de changement source et
-  publication après succès. Concevoir rollback Windows avant remplacement
-  de `current`. Aucun snapshot approuvé réécrit.
+- Toute publication ou récupération suit ADR 0006, référence de sécurité :
+  créations exclusives, renommage sans remplacement, journal write-ahead,
+  identités observées, rollback par défaut, fail-closed sur toute ambiguïté.
+  Aucune suppression, aucun écrasement, aucun snapshot approuvé réécrit.
 
 ## GitOps et contrôles
 

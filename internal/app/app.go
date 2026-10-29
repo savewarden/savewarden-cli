@@ -10,6 +10,7 @@ import (
 
 	"github.com/savewarden/savewarden-cli/internal/cli"
 	"github.com/savewarden/savewarden-cli/internal/features/inspect"
+	"github.com/savewarden/savewarden-cli/internal/features/sync"
 	"github.com/savewarden/savewarden-cli/internal/platform/filesystem"
 	"github.com/savewarden/savewarden-cli/internal/platform/manifests"
 )
@@ -21,7 +22,9 @@ import (
 func Run(ctx context.Context, args []string, version string, stdout, stderr io.Writer) int {
 	output := &checkedWriter{writer: stdout}
 	inspector := inspect.New(manifests.Reader{}, scopes{})
-	command := cli.NewRootCommand(version, output, stderr, inspector)
+	// The inspect service satisfies sync's Inventories port as is (ADR 0004).
+	planner := sync.New(manifests.Reader{}, inspector, syncScopes{})
+	command := cli.NewRootCommand(version, output, stderr, inspector, planner)
 	command.SetArgs(args)
 	err := command.ExecuteContext(ctx)
 	if output.err != nil {
@@ -46,6 +49,17 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 type scopes struct{}
 
 func (scopes) OpenScope(root string) (inspect.Scope, error) {
+	scope, err := filesystem.OpenScope(root)
+	if err != nil {
+		return nil, err
+	}
+	return scope, nil
+}
+
+// syncScopes bridges the same read-only adapter to the sync port.
+type syncScopes struct{}
+
+func (syncScopes) OpenScope(root string) (sync.Scope, error) {
 	scope, err := filesystem.OpenScope(root)
 	if err != nil {
 		return nil, err

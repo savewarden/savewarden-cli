@@ -9,19 +9,37 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 )
 
 const readBuffer = 1 << 20
 
-// walk inventories one directory of a source. name is relative to the scope
-// anchor, rel to the source. It returns an error only on cancellation.
-func (r *inspection) walk(source *SourceReport, name, rel string) error {
+// tree accumulates the inventory of one directory.
+type tree struct {
+	entries     []backup.Entry
+	directories []string
+	encrypted   []string
+	bytes       int64
+}
+
+func (t *tree) sort() {
+	sort.Slice(t.entries, func(a, b int) bool { return t.entries[a].Path < t.entries[b].Path })
+	sort.Strings(t.directories)
+	sort.Strings(t.encrypted)
+}
+
+// walk inventories one directory into t. name is relative to the scope
+// anchor ("." for the anchor itself), rel to the inventoried directory;
+// label is the source id given to findings. It returns an error only on
+// cancellation.
+func (r *inspection) walk(t *tree, label, name, rel string) error {
 	if err := r.ctx.Err(); err != nil {
 		return interrupted(err)
 	}
 	entries, err := r.scope.ReadDir(name)
 	if err != nil {
-		r.add(Blocking, codeFor(err), source.Source.ID, display(rel), "cannot list directory: "+err.Error())
+		r.add(backup.Blocking, codeFor(err), label, display(rel), "cannot list directory: "+err.Error())
 		return nil
 	}
 	names := make([]string, 0, len(entries))
@@ -29,60 +47,73 @@ func (r *inspection) walk(source *SourceReport, name, rel string) error {
 		names = append(names, entry.Name())
 	}
 	sort.Strings(names)
-	r.caseCollisions(source.Source.ID, rel, names)
+	r.caseCollisions(label, rel, names)
 	for _, entryName := range names {
 		if err := r.ctx.Err(); err != nil {
 			return interrupted(err)
 		}
-		childName, childRel := name+"/"+entryName, join(rel, entryName)
+		childName, childRel := entryName, join(rel, entryName)
+		if name != "." {
+			childName = name + "/" + entryName
+		}
 		info, err := r.scope.Lstat(childName)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			r.add(Blocking, CodeChangedDuringRead, source.Source.ID, childRel, "disappeared during inspection")
+			r.add(backup.Blocking, CodeChangedDuringRead, label, childRel, "disappeared during inspection")
 		case err != nil:
-			r.add(Blocking, codeFor(err), source.Source.ID, childRel, err.Error())
+			r.add(backup.Blocking, codeFor(err), label, childRel, err.Error())
 		case isLink(info.Mode()):
-			r.add(Blocking, CodeLinkNotFollowed, source.Source.ID, childRel, describeLink(info.Mode())+"; not followed")
+			r.add(backup.Blocking, CodeLinkNotFollowed, label, childRel, describeLink(info.Mode())+"; not followed")
 		case info.IsDir():
-			if err := r.walk(source, childName, childRel); err != nil {
+			t.directories = append(t.directories, childRel)
+			if err := r.walk(t, label, childName, childRel); err != nil {
 				return err
 			}
 		case info.Mode().IsRegular():
-			if err := r.hash(source, childName, childRel, info); err != nil {
+			if encrypted(info) {
+				t.encrypted = append(t.encrypted, childRel)
+			}
+			if err := r.hash(t, label, childName, childRel, info); err != nil {
 				return err
 			}
 		default:
-			r.add(Blocking, CodeSpecialFile, source.Source.ID, childRel, "special file of type "+info.Mode().Type().String()+"; not read")
+			r.add(backup.Blocking, CodeSpecialFile, label, childRel, "special file of type "+info.Mode().Type().String()+"; not read")
 		}
 	}
 	return nil
 }
 
+// encrypted matches adapter descriptions of EFS-encrypted files, without
+// importing them.
+func encrypted(info fs.FileInfo) bool {
+	e, ok := info.(interface{ Encrypted() bool })
+	return ok && e.Encrypted()
+}
+
 // hash reads one regular file in full and records it only if its identity,
 // size and modification time held before, during and after the read.
-func (r *inspection) hash(source *SourceReport, name, rel string, before fs.FileInfo) error {
-	id := source.Source.ID
+func (r *inspection) hash(t *tree, label, name, rel string, before fs.FileInfo) error {
 	file, err := r.scope.OpenRegular(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		r.add(Blocking, CodeChangedDuringRead, id, rel, "disappeared before reading")
+		r.add(backup.Blocking, CodeChangedDuringRead, label, rel, "disappeared before reading")
 		return nil
 	case err != nil:
-		r.add(Blocking, codeFor(err), id, rel, err.Error())
+		r.add(backup.Blocking, codeFor(err), label, rel, err.Error())
 		return nil
 	}
 	defer func() { _ = file.Close() }()
 	opened, err := file.Stat()
 	if err != nil {
-		r.add(Blocking, CodeUnreadable, id, rel, err.Error())
+		r.add(backup.Blocking, CodeUnreadable, label, rel, err.Error())
 		return nil
 	}
 	if !r.scope.SameFile(before, opened) {
-		r.add(Blocking, CodeReplacedBeforeRead, id, rel, "replaced by another file before reading")
+		r.add(backup.Blocking, CodeReplacedBeforeRead, label, rel, "replaced by another file before reading")
 		return nil
 	}
 	if changed(before, opened) {
-		r.add(Blocking, CodeChangedDuringRead, id, rel, "modified before reading")
+		r.add(backup.Blocking, CodeChangedDuringRead, label, rel, "modified before reading")
 		return nil
 	}
 	digest := sha256.New()
@@ -91,22 +122,22 @@ func (r *inspection) hash(source *SourceReport, name, rel string, before fs.File
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
 			return interrupted(ctxErr)
 		}
-		r.add(Blocking, CodeUnreadable, id, rel, err.Error())
+		r.add(backup.Blocking, CodeUnreadable, label, rel, err.Error())
 		return nil
 	}
 	after, err := file.Stat()
 	if err != nil {
-		r.add(Blocking, CodeUnreadable, id, rel, err.Error())
+		r.add(backup.Blocking, CodeUnreadable, label, rel, err.Error())
 		return nil
 	}
 	if changed(before, after) || read != before.Size() {
-		r.add(Blocking, CodeChangedDuringRead, id, rel, "modified while reading")
+		r.add(backup.Blocking, CodeChangedDuringRead, label, rel, "modified while reading")
 		return nil
 	}
-	entry := Entry{Path: rel, Size: read, ModTime: before.ModTime().UTC()}
+	entry := backup.Entry{Path: rel, Size: read, ModTime: before.ModTime().UTC()}
 	copy(entry.SHA256[:], digest.Sum(nil))
-	source.Entries = append(source.Entries, entry)
-	source.Bytes += read
+	t.entries = append(t.entries, entry)
+	t.bytes += read
 	return nil
 }
 
@@ -120,7 +151,7 @@ func (r *inspection) caseCollisions(id, rel string, names []string) {
 	for _, name := range names {
 		key := strings.ToUpper(name)
 		if previous, ok := first[key]; ok {
-			r.add(Blocking, CodeCaseCollision, id, join(rel, name), fmt.Sprintf("differs from %q only by case", previous))
+			r.add(backup.Blocking, CodeCaseCollision, id, join(rel, name), fmt.Sprintf("differs from %q only by case", previous))
 			continue
 		}
 		first[key] = name

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 	"github.com/savewarden/savewarden-cli/internal/entities/game"
 	"github.com/savewarden/savewarden-cli/internal/features/inspect"
 )
@@ -44,7 +45,7 @@ func run(t *testing.T, files *fakeFS, m game.Manifest) inspect.Report {
 	return report
 }
 
-func paths(entries []inspect.Entry) []string {
+func paths(entries []backup.Entry) []string {
 	var out []string
 	for _, entry := range entries {
 		out = append(out, entry.Path)

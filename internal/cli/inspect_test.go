@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/savewarden/savewarden-cli/internal/cli"
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 	"github.com/savewarden/savewarden-cli/internal/entities/game"
 	"github.com/savewarden/savewarden-cli/internal/features/inspect"
 )
@@ -36,7 +37,7 @@ func baseReport() inspect.Report {
 			Source: game.Source{ID: "saves", Kind: game.KindSave, Required: true},
 			Path:   `D:\Games\Synthetic Game\saves`,
 			Status: inspect.StatusInventoried,
-			Entries: []inspect.Entry{
+			Entries: []backup.Entry{
 				{Path: "1.save", Size: 3, ModTime: modTime, SHA256: sha256.Sum256([]byte("one"))},
 				{Path: "Profil été/2.save", Size: 0, ModTime: modTime, SHA256: sha256.Sum256(nil)},
 			},
@@ -48,7 +49,7 @@ func baseReport() inspect.Report {
 func execute(t *testing.T, inspector cli.Inspector, args ...string) (string, error) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	root := cli.NewRootCommand("dev", &stdout, &stderr, inspector)
+	root := cli.NewRootCommand("dev", &stdout, &stderr, inspector, nil)
 	root.SetArgs(args)
 	err := root.ExecuteContext(context.Background())
 	return stdout.String(), err
@@ -84,9 +85,9 @@ func TestRenderFindingsAndExitCodes(t *testing.T) {
 	report := baseReport()
 	report.Sources = append(report.Sources,
 		inspect.SourceReport{Source: game.Source{ID: "config", Kind: game.KindConfig}, Path: `D:\Games\Synthetic Game\config`, Status: inspect.StatusMissing})
-	report.Findings = []inspect.Finding{
-		{Severity: inspect.Blocking, Code: inspect.CodeLinkNotFollowed, Source: "saves", Path: "jn", Detail: "junction or reparse point; not followed"},
-		{Severity: inspect.Info, Code: inspect.CodeSourceMissing, Source: "config", Path: `D:\Games\Synthetic Game\config`, Detail: "does not exist"},
+	report.Findings = []backup.Finding{
+		{Severity: backup.Blocking, Code: inspect.CodeLinkNotFollowed, Source: "saves", Path: "jn", Detail: "junction or reparse point; not followed"},
+		{Severity: backup.Info, Code: inspect.CodeSourceMissing, Source: "config", Path: `D:\Games\Synthetic Game\config`, Detail: "does not exist"},
 	}
 	out, err := execute(t, &fakeInspector{report: report}, "inspect", "--manifest", "m.yaml")
 	var exit *cli.ExitError
@@ -138,7 +139,7 @@ func TestInspectInvocationErrors(t *testing.T) {
 
 func TestPrintableEscapesForgedOutput(t *testing.T) {
 	report := baseReport()
-	report.Sources[0].Entries = []inspect.Entry{
+	report.Sources[0].Entries = []backup.Entry{
 		{Path: "evil\nfindings: none", ModTime: modTime},
 		{Path: " padded ", ModTime: modTime},
 		{Path: `"quoted"`, ModTime: modTime},
@@ -178,12 +179,12 @@ func (w *partialWriter) Write(p []byte) (int, error) {
 func TestFailedWriteLeavesOnlyAPrefixAndAnError(t *testing.T) {
 	clean := baseReport()
 	blocking := baseReport()
-	blocking.Findings = []inspect.Finding{{Severity: inspect.Blocking, Code: inspect.CodeUnreadable, Source: "saves", Path: "x", Detail: "locked"}}
+	blocking.Findings = []backup.Finding{{Severity: backup.Blocking, Code: inspect.CodeUnreadable, Source: "saves", Path: "x", Detail: "locked"}}
 	for name, report := range map[string]inspect.Report{"clean": clean, "blocking": blocking} {
 		t.Run(name, func(t *testing.T) {
 			full := cli.Render(report)
 			stdout := &partialWriter{limit: 40}
-			root := cli.NewRootCommand("dev", stdout, &bytes.Buffer{}, &fakeInspector{report: report})
+			root := cli.NewRootCommand("dev", stdout, &bytes.Buffer{}, &fakeInspector{report: report}, nil)
 			root.SetArgs([]string{"inspect", "--manifest", "m.yaml"})
 			err := root.ExecuteContext(context.Background())
 			var exit *cli.ExitError

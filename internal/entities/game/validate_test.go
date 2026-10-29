@@ -184,3 +184,16 @@ func assertFieldError(t *testing.T, err error, field, want string) {
 		t.Fatalf("error = %q, want field %q containing %q", err, field, want)
 	}
 }
+
+func TestCheckWindowsName(t *testing.T) {
+	for _, name := range []string{"1.save", "Profil été", "100%done%.save", "a b", ".hidden", "CONsole.txt"} {
+		if err := game.CheckWindowsName(name); err != nil {
+			t.Errorf("%q refused: %v", name, err)
+		}
+	}
+	for _, name := range []string{"trailing.", "trailing ", "CON", "nul.txt", "COM1", "a:b", "a?b", "tab\tname", strings.Repeat("x", 256), ""} {
+		if err := game.CheckWindowsName(name); err == nil {
+			t.Errorf("%q accepted", name)
+		}
+	}
+}
