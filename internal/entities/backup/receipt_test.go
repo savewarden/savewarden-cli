@@ -2,6 +2,8 @@ package backup_test
 
 import (
 	"crypto/sha256"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -123,5 +125,27 @@ func TestReceiptStrictness(t *testing.T) {
 	missing.Sources[0].State = backup.SourceMissing
 	if _, err := backup.EncodeReceipt(missing); err == nil {
 		t.Fatal("a missing source cannot hold entries")
+	}
+}
+
+// The example of docs/receipt-v1.md is a valid receipt that encodes back to
+// the same bytes.
+func TestDocumentedReceiptExample(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "receipt-v1.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(content), "```json\n")
+	example, _, closed := strings.Cut(rest, "```")
+	if !ok || !closed {
+		t.Fatal("docs/receipt-v1.md has no JSON example")
+	}
+	r, err := backup.DecodeReceipt([]byte(example))
+	if err != nil {
+		t.Fatalf("documented example is invalid: %v", err)
+	}
+	again, err := backup.EncodeReceipt(r)
+	if err != nil || string(again) != example {
+		t.Fatalf("documented example is not the canonical encoding:\n%s", again)
 	}
 }

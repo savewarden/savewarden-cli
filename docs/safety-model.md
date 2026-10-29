@@ -1,10 +1,12 @@
 # Modèle de sécurité
 
-## Garantie actuelle (B1)
+## Garantie actuelle (B2a)
 
-B1 ajoute une seule capacité : **lire**. `inspect` lit un manifeste désigné
-par l'utilisateur et les fichiers des sources qu'il déclare. Aucune
-découverte d'installation, création de lien ou mutation de configuration.
+Le produit n'a toujours qu'une capacité : **lire**. `inspect` lit un
+manifeste désigné par l'utilisateur et les fichiers des sources qu'il
+déclare. `sync`, en mode plan, lit en plus le coffre désigné par `--vault`,
+s'il existe. Aucune découverte d'installation, création de lien, de coffre
+ou mutation de configuration.
 
 | Garantie | Mécanisme | Preuve |
 | --- | --- | --- |
@@ -13,6 +15,9 @@ découverte d'installation, création de lien ou mutation de configuration.
 | Pas de substitution pendant l'inspection | Dossiers traversés gardés ouverts sans partage de suppression jusqu'à la fin | Renommage refusé tant que la portée est ouverte, accepté après fermeture |
 | Fichier inventorié = fichier lu | Identité, taille et date contrôlées avant, à l'ouverture et après la lecture | Remplacement, croissance, modification et disparition injectés à des instants précis |
 | Manifeste non ambigu | Décodage strict, grammaire Windows canonique | [ADR 0002](adr/0002-manifest-v1-strict-yaml.md) et ses tests |
+| Plan sans écriture | Le plan ne reçoit aucun port d'écriture ; le coffre n'est pas créé | Binaire `sync` lancé deux fois, écriture refusée par ACL ou `chmod` sur tout l'arbre, empreinte identique ; coffre absent après le plan |
+| Coffre distinct, jamais adopté | Comparaison par segments sans casse, puis par identité, avec l'installation ; dossier non vide sans marqueur refusé | Tests de la feature, nom court 8.3 compris ; test Windows de bout en bout |
+| État du coffre jamais deviné | Journal, receipts et marqueur relus strictement ; toute entrée inexpliquée, opération en attente ou ambiguïté arrête le plan en code 3 | Tests de classement exhaustifs d'[ADR 0006](adr/0006-publication-recovery-protocol.md) dans `entities/backup` |
 
 Limites assumées :
 
@@ -47,18 +52,23 @@ exécuté par lui.
 7. Snapshot validé = immuable. Ne jamais réécrire ou supprimer un snapshot
    approuvé, notamment `20261009T183208-cacd3cae` du pilote.
 
-B1 implémente les invariants 1 à 3 pour la lecture : source déclarée par
-l'utilisateur, chemins canoniques sans `..` ni chevauchement, liens jamais
-suivis, rien d'exécuté. Les invariants 4 à 7 concernent les écritures et
-restent bloquants pour B2 à B5.
+B1 et B2a implémentent les invariants 1 à 3 pour la lecture : source
+déclarée par l'utilisateur, chemins canoniques sans `..` ni chevauchement,
+coffre distinct de l'installation, liens jamais suivis, rien d'exécuté. Les
+invariants 4 à 7 concernent les écritures : leur protocole normatif est
+[ADR 0006](adr/0006-publication-recovery-protocol.md), implémenté à partir de
+B2b.
 
 ## Windows et remplacement de current
 
-Ne pas supposer que `os.Rename` remplace atomiquement un répertoire non vide
-sous Windows. B2 nécessite un ADR distinct pour conflits, conservation de
-l'ancien `current`, rollback, interruptions et récupération après crash.
-Les fichiers verrouillés, permissions, collisions de casse, junctions et
-changements concomitants auront des tests Windows avant writes réels.
+Windows n'offre pas d'échange atomique de deux répertoires, et `os.Rename`
+remplace une cible existante. [ADR 0006](adr/0006-publication-recovery-protocol.md),
+référence de sécurité de toute publication et de toute récupération, fixe le
+protocole : créations exclusives, `MoveFileEx` sans drapeau, journal
+write-ahead vérifiable, fenêtre d'absence de `current` reconnue, rollback par
+défaut, récupération explicite dans une enveloppe bornée, fail-closed sur
+toute ambiguïté. Ses hypothèses Windows seront confrontées à des tests réels
+avant le code qui en dépend.
 
 ## Récupération prévue
 
@@ -69,8 +79,9 @@ conserver l'incomplet identifié et diagnostiquer depuis le receipt. Une
 restauration B4 crée un dossier distinct et vérifié ; elle ne change jamais
 la sauvegarde active du jeu.
 
-En B1, le rollback consiste à reverter la PR du lot sur la release branch :
-`inspect` n'écrit rien, il n'existe aucun état de sauvegarde à récupérer.
+En B2a, le rollback consiste encore à reverter la PR du lot sur la release
+branch : ni `inspect` ni le plan de `sync` n'écrivent, il n'existe aucun état
+de sauvegarde à récupérer.
 
 ## Preuves et confidentialité
 

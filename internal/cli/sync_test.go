@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -188,5 +190,16 @@ func TestSyncFailedWriteAndEscaping(t *testing.T) {
 	}
 	if got := stdout.written.String(); got == "" || !strings.HasPrefix(full, got) || got == full {
 		t.Fatalf("stdout = %q", got)
+	}
+}
+
+// The plan shown in docs/commands/sync.md is the exact rendering.
+func TestDocumentedPlanExample(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "docs", "commands", "sync.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "```text\n"+cli.RenderPlan(firstPlan())+"```") {
+		t.Fatalf("docs/commands/sync.md does not show the rendering of the first plan:\n%s", cli.RenderPlan(firstPlan()))
 	}
 }

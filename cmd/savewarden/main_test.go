@@ -294,6 +294,8 @@ func TestReadmeCommandExamples(t *testing.T) {
 		"savewarden dev\n",
 		`.\bin\savewarden.exe inspect --manifest '`,
 		"docs/commands/inspect.md",
+		`.\bin\savewarden.exe sync --manifest '`,
+		"docs/commands/sync.md",
 	} {
 		if !strings.Contains(string(content), example) {
 			t.Errorf("missing tested README example %q", example)

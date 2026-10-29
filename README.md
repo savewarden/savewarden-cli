@@ -6,11 +6,13 @@ Savewarden vise à inspecter, centraliser, vérifier et restaurer les sauvegarde
 de jeux à partir de sources explicitement choisies. Le moteur sera indépendant
 de la CLI, local-first et Windows-first.
 
-**État actuel : lot B1, version `dev`.** La commande `inspect` lit un
+**État actuel : lot B2a, version `dev`.** La commande `inspect` lit un
 [manifeste v1](docs/manifest-v1.md) et inventorie en lecture seule les dossiers
-de sauvegarde qu'il déclare. Rien n'est copié, déplacé, écrit ni exécuté.
-Les commandes `sync`, `snapshot`, `restore` et `doctor` ne sont pas encore
-disponibles. Aucune release ni installation via package manager.
+de sauvegarde qu'il déclare. La commande `sync` **planifie**, en lecture seule
+elle aussi, leur copie vers un [coffre](docs/vault.md). Rien n'est copié,
+déplacé, écrit ni exécuté : la copie arrive avec le lot B2b. Les commandes
+`snapshot`, `restore` et `doctor` ne sont pas encore disponibles. Aucune
+release ni installation via package manager.
 
 ## Compiler et utiliser
 
@@ -67,10 +69,28 @@ un début tronqué. Détails, garanties et limites :
 `inspect` ne fonctionne que sous Windows. Sa sortie contient des chemins
 locaux : anonymisez-la avant de la partager.
 
+## Planifier une synchronisation
+
+Choisissez un coffre : un dossier absent ou vide, distinct de l'installation,
+de préférence sur un autre disque physique. Puis, jeu et launcher fermés :
+
+```powershell
+.\bin\savewarden.exe sync --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre'
+```
+
+Le plan liste chaque fichier comme ajouté, modifié, retiré ou inchangé par
+rapport à la génération courante du coffre, puis les anomalies. Rien n'est
+écrit, pas même le coffre. Code **0** : plan sans anomalie bloquante.
+Code **2** : plan bloqué, par exemple une source requise absente ou un fichier
+retiré. Code **3** : le coffre demande une intervention. Code **1** : manifeste
+ou coffre invalide, ou erreur. Détails : [`savewarden sync`](docs/commands/sync.md).
+
 ## Sécurité et support
 
 - `inspect` ne lit que les dossiers déclarés. Il ne suit aucun lien,
   jonction ni point d'analyse, et ne lit pas les placeholders cloud.
+- `sync` planifie sans écrire ; il refuse tout dossier non vide qui n'est pas
+  un coffre Savewarden et tout coffre qui chevauche l'installation.
 - Le code de production est gardé par un test qui refuse les API d'écriture,
   d'exécution et de réseau. Les tests utilisent des données synthétiques.
 - Les prochaines mutations exigeront une destination explicite, un plan,
@@ -93,10 +113,13 @@ Le [pilote Odyssey](docs/pilots/odyssey.md) conserve les constats historiques
 sans inclure de sauvegardes privées.
 
 Ordre prévu, avec revue et Human GO entre lots : B1 manifeste strict et
-`inspect` read-only ; B2 `sync` vérifié sans suppression ; B3 snapshots
-immuables ; B4 restauration isolée ; B5 `doctor` et validation pilote.
-La [roadmap originale](.plans/Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md)
-et le [plan B1](.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md) restent
-les sources du périmètre, et le [changelog](CHANGELOG.md) décrit l'existant.
+`inspect` read-only ; B2 `sync` vérifié sans suppression, en trois PR : B2a
+plan en lecture seule, B2b première publication, B2c rotation et récupération
+complète ; B3 snapshots immuables ; B4 restauration isolée ; B5 `doctor` et
+validation pilote.
+La [roadmap originale](.plans/Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md),
+le [plan B1](.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md) et le
+[plan B2](.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md) restent les
+sources du périmètre, et le [changelog](CHANGELOG.md) décrit l'existant.
 
 Licence [MIT](LICENSE), choisie explicitement pour ce bootstrap.
