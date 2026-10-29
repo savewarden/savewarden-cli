@@ -45,9 +45,9 @@ func TestClassifyVaultRoot(t *testing.T) {
 	}{
 		{"empty", nil, backup.VaultRoot{State: backup.RootEmpty}},
 		{"interrupted", []backup.NamedEntry{file("savewarden-vault.json.tmp-1"), file("savewarden-vault.json.tmp-2")},
-			backup.VaultRoot{State: backup.RootInterrupted, Temporaries: 2}},
+			backup.VaultRoot{State: backup.RootInterrupted, Temporaries: 2, Taken: map[int]bool{1: true, 2: true}}},
 		{"marked", []backup.NamedEntry{file("savewarden-vault.json"), file("savewarden-vault.json.tmp-1"), dir("games")},
-			backup.VaultRoot{State: backup.RootMarked, Temporaries: 1}},
+			backup.VaultRoot{State: backup.RootMarked, Temporaries: 1, Taken: map[int]bool{1: true}}},
 		{"marked with strays", []backup.NamedEntry{file("savewarden-vault.json"), file("notes.txt"), dir("Games")},
 			backup.VaultRoot{State: backup.RootMarked, Unexpected: []string{"Games", "notes.txt"}}},
 		{"temporaries and another file", []backup.NamedEntry{file("savewarden-vault.json.tmp-1"), file("photo.jpg")},

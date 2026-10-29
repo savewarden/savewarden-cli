@@ -289,3 +289,40 @@ func TestEncryptedFilesAreReported(t *testing.T) {
 	}
 	_ = file.Close()
 }
+
+// Identity reads the volume serial number and file index without following
+// anything; a rename keeps it.
+func TestIdentitySurvivesARename(t *testing.T) {
+	anchor := tempAnchor(t)
+	write(t, filepath.Join(anchor, "staging", "op", "1.save"), "one")
+	junction(t, filepath.Join(anchor, "jn"), filepath.Join(anchor, "staging"))
+	scope := open(t, anchor)
+	before, err := scope.Identity("staging/op")
+	if err != nil || before.Index == 0 {
+		t.Fatalf("identity %v, %v", before, err)
+	}
+	if _, err := scope.Identity("jn"); !notFollowed(err) {
+		t.Fatalf("junction: %v", err)
+	}
+	if _, err := scope.Identity("jn/op"); !notFollowed(err) {
+		t.Fatalf("through a junction: %v", err)
+	}
+	if err := scope.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(anchor, "staging", "op"), filepath.Join(anchor, "current")); err != nil {
+		t.Fatal(err)
+	}
+	scope = open(t, anchor)
+	after, err := scope.Identity("current")
+	if err != nil || after != before {
+		t.Fatalf("after rename %v, %v; want %v", after, err, before)
+	}
+	file, err := scope.Identity("current/1.save")
+	if err != nil || file == before {
+		t.Fatalf("file identity %v, %v", file, err)
+	}
+	if _, err := scope.Identity("missing"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing: %v", err)
+	}
+}

@@ -26,6 +26,15 @@ Aucun tag ni release n'est publié par le bootstrap.
   receipt puis `published`. Un `current` existant et différent est refusé,
   `current-exists`. Énumération des crashs avant et après chaque appel au
   coffre.
+- Récupération d'une première publication interrompue par la feature
+  `sync`, pas encore exposée par la CLI : plan de récupération sans
+  écriture, observation des identités de `current` et du staging,
+  classement d'ADR 0006, puis exécution sous verrou après relecture ;
+  marqueur repris, `abandoned`, `rolled-back`, `current` revérifié puis
+  receipt reconstruit et `published`, ou remis en staging ; `rollback-failed`
+  enregistré une seule fois. Toute ambiguïté et tout dépassement de
+  l'enveloppe arrêtent en code 3 sans écriture. La portée de lecture
+  fournit l'identité d'un fichier sans le suivre.
 - Protocole de publication et de récupération (ADR 0006), référence de
   sécurité des écritures à venir, et frontières de `sync` (ADR 0004).
 - Écritures autorisées dans le seul package `internal/platform/vault`

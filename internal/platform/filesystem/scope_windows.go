@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 )
 
 // Attributes and flags missing from package syscall.
@@ -142,6 +144,29 @@ func (s *Scope) OpenRegular(name string) (fs.File, error) {
 		return nil, err
 	}
 	return os.NewFile(uintptr(handle), path), nil
+}
+
+// Identity returns the volume serial number and file index of name,
+// read on a handle opened without following it and closed at once. A link,
+// junction, reparse point or placeholder is refused.
+func (s *Scope) Identity(name string) (backup.FileID, error) {
+	info, err := s.Lstat(name)
+	if err != nil {
+		return backup.FileID{}, err
+	}
+	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+		return backup.FileID{}, &NotFollowedError{Name: name, Reason: "link, junction, reparse point or placeholder"}
+	}
+	handle, err := openNoFollow(name, s.absolute(name), info.IsDir())
+	if err != nil {
+		return backup.FileID{}, err
+	}
+	defer func() { _ = syscall.CloseHandle(handle) }()
+	var data syscall.ByHandleFileInformation
+	if err := syscall.GetFileInformationByHandle(handle, &data); err != nil {
+		return backup.FileID{}, &fs.PathError{Op: "identity", Path: name, Err: err}
+	}
+	return backup.FileID{Volume: data.VolumeSerialNumber, Index: uint64(data.FileIndexHigh)<<32 | uint64(data.FileIndexLow)}, nil
 }
 
 // SameFile compares volume serial numbers and file indexes.

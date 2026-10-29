@@ -230,6 +230,9 @@ type Journal struct {
 	// Staging is the identity of the staging directory recorded by staged;
 	// Old, that of the current generation recorded by retire-intent.
 	Staging, Old FileID
+	// Taken holds the attempt numbers k already used by temporaries of the
+	// next record: the writer takes the smallest k not in it.
+	Taken map[int]bool
 }
 
 // Last returns the step of the last committed record, empty if none.
@@ -288,7 +291,7 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		}
 		numbers[name[:3]] = true
 	}
-	j := Journal{Op: op, Prepared: map[Step]int{}}
+	j := Journal{Op: op, Prepared: map[Step]int{}, Taken: map[int]bool{}}
 	var previous []byte
 	for i, name := range finals {
 		m := finalName.FindStringSubmatch(name)
@@ -347,6 +350,7 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 				return Journal{}, ambiguous("temporary record %03d-%s is not an allowed next step", t.seq, t.step)
 			}
 			j.Prepared[t.step]++
+			j.Taken[t.k] = true
 		case t.seq >= 1 && t.seq < next:
 			// An attempt abandoned before the record of its number was
 			// committed, possibly under another step: it must have been an

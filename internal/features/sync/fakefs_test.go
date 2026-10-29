@@ -233,7 +233,18 @@ func (s *fakeScope) OpenRegular(name string) (fs.File, error) {
 }
 
 func (s *fakeScope) SameFile(a, b fs.FileInfo) bool { return a.Sys().(int) == b.Sys().(int) }
-func (s *fakeScope) Close() error                   { return nil }
+
+func (s *fakeScope) Identity(name string) (backup.FileID, error) {
+	n, _, err := s.lookup(name)
+	switch {
+	case err != nil:
+		return backup.FileID{}, err
+	case isLink(n.mode):
+		return backup.FileID{}, &notFollowedError{name}
+	}
+	return backup.FileID{Volume: 0x1a2b3c4d, Index: uint64(n.id)}, nil //nolint:gosec // G115: node ids count up from 1.
+}
+func (s *fakeScope) Close() error { return nil }
 
 type fakeFile struct {
 	info   fs.FileInfo

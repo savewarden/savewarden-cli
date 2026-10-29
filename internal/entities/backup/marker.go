@@ -104,14 +104,15 @@ const (
 type VaultRoot struct {
 	State RootState
 	// Temporaries counts the marker temporaries; at MaxTemporaries the
-	// recovery envelope is exhausted.
+	// recovery envelope is exhausted. Taken holds their attempt numbers.
 	Temporaries int
+	Taken       map[int]bool
 	// Unexpected lists, for a marked vault, the entries that have no place
 	// at its root, sorted.
 	Unexpected []string
 }
 
-var markerTemporary = regexp.MustCompile(`^` + regexp.QuoteMeta(MarkerName) + `\.tmp-[1-9]$`)
+var markerTemporary = regexp.MustCompile(`^` + regexp.QuoteMeta(MarkerName) + `\.tmp-([1-9])$`)
 
 // ClassifyVaultRoot applies the initialization table of ADR 0006 to the
 // entries of an existing vault directory.
@@ -130,6 +131,10 @@ func ClassifyVaultRoot(entries []NamedEntry) VaultRoot {
 			marked = true
 		case markerTemporary.MatchString(entry.Name) && entry.Kind == KindRegular:
 			root.Temporaries++
+			if root.Taken == nil {
+				root.Taken = map[int]bool{}
+			}
+			root.Taken[int(entry.Name[len(entry.Name)-1]-'0')] = true
 		case entry.Name == "games" && entry.Kind == KindDirectory:
 			games = true
 		default:

@@ -38,6 +38,9 @@ type Scope interface {
 	ReadDir(name string) ([]fs.DirEntry, error)
 	OpenRegular(name string) (fs.File, error)
 	SameFile(a, b fs.FileInfo) bool
+	// Identity returns the volume serial number and file index of name,
+	// refusing links like Lstat reports them.
+	Identity(name string) (backup.FileID, error)
 	Close() error
 }
 

@@ -81,7 +81,7 @@ bloc `interventions` précède les anomalies :
 
 ```text
 interventions: 1
-  pending-operation  20261105T101500-1a2b3c4d  last committed step publish-intent; recovery needed, --recover is available from B2b
+  pending-operation  20261105T101500-1a2b3c4d  last committed step verified; run sync --recover to see how it would be recovered
 ```
 
 ## Anomalies

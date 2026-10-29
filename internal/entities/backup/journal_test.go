@@ -250,8 +250,9 @@ func TestAbandonedTemporariesAreAccepted(t *testing.T) {
 			for _, count := range want {
 				attempts += count
 			}
-			if len(j.Records) != len(tt.steps) || !reflect.DeepEqual(j.Prepared, want) || j.Attempts() != attempts {
-				t.Fatalf("records %d, prepared %v, attempts %d", len(j.Records), j.Prepared, j.Attempts())
+			if len(j.Records) != len(tt.steps) || !reflect.DeepEqual(j.Prepared, want) || j.Attempts() != attempts ||
+				len(j.Taken) != attempts {
+				t.Fatalf("records %d, prepared %v, attempts %d, taken %v", len(j.Records), j.Prepared, j.Attempts(), j.Taken)
 			}
 		})
 	}
