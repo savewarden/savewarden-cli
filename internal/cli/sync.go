@@ -31,9 +31,10 @@ type Syncer interface {
 
 func newSyncCommand(syncer Syncer) *cobra.Command {
 	var manifest, vault string
-	var apply, recover bool
+	var apply, recover, allowRemovals bool
+	var acceptMissing []string
 	command := &cobra.Command{
-		Use:   "sync --manifest <path> --vault <directory> [--apply] [--recover]",
+		Use:   "sync --manifest <path> --vault <directory> [--apply] [--recover] [--allow-removals] [--accept-missing-source <id>]...",
 		Short: "Plan, apply or recover the copy of a manifest's sources into a vault",
 		Long: `Plan, apply or recover the copy of the sources declared by a manifest into
 a vault.
@@ -44,12 +45,17 @@ as added (+), modified (~), removed (-) or unchanged (=) against the current
 generation of the vault, then the interventions and findings.
 
 --apply copies the sources into a staging directory of the vault, verifies
-it, and publishes it as the first generation of the game. This build
-refuses to replace an existing generation. Sources are only read; nothing is
-ever deleted or overwritten.
+it, and publishes it as the new generation of the game. An existing current
+generation, checked against its receipt and its identity, is renamed into
+retained\<operation> and kept: generations accumulate, none is deleted.
+Sources are only read; nothing is ever deleted or overwritten. Files removed
+from a source that is present need --allow-removals; an optional source
+that vanished but that current holds needs --accept-missing-source <id>,
+once per source. Neither flag covers anything else.
 
 --recover shows how an interrupted operation would be recovered, without
-writing anything; --recover --apply performs that recovery.
+writing anything; --recover --apply performs that recovery. --recover takes
+neither --allow-removals nor --accept-missing-source.
 
 Exit codes: 0 success: plan without blocking findings, published, up to date
 or recovered; 1 invalid invocation, manifest or vault, or failure, the last
@@ -59,7 +65,10 @@ this run; 3 the vault needs an intervention first. With --apply or
 exit code, never the presence of output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			request := sync.Request{ManifestPath: manifest, VaultPath: vault}
+			request := sync.Request{ManifestPath: manifest, VaultPath: vault, AllowRemovals: allowRemovals, AcceptMissing: acceptMissing}
+			if recover && (allowRemovals || len(acceptMissing) > 0) {
+				return &ExitError{Code: 1, Message: "invalid invocation: --recover takes neither --allow-removals nor --accept-missing-source"}
+			}
 			switch {
 			case recover && apply:
 				result, err := syncer.Recover(cmd.Context(), request)
@@ -111,6 +120,9 @@ exit code, never the presence of output.`,
 	command.Flags().StringVar(&vault, "vault", "", "vault directory, absolute Windows path (required)")
 	command.Flags().BoolVar(&apply, "apply", false, "copy, verify and publish; with --recover, perform the recovery")
 	command.Flags().BoolVar(&recover, "recover", false, "show how an interrupted operation would be recovered")
+	command.Flags().BoolVar(&allowRemovals, "allow-removals", false, "accept files removed from a source that is present; they stay in retained")
+	command.Flags().StringArrayVar(&acceptMissing, "accept-missing-source", nil,
+		"accept that this optional source, held by current, is absent; repeat it for each source")
 	_ = command.MarkFlagRequired("manifest")
 	_ = command.MarkFlagRequired("vault")
 	return command
@@ -162,6 +174,9 @@ func RenderApply(result sync.Result) string {
 		fmt.Fprintf(&b, "verification: %d files, %d bytes, SHA-256 verified\n", result.Files, result.Bytes)
 		fmt.Fprintf(&b, "published: %s\n", printable(result.Plan.Destination))
 		fmt.Fprintf(&b, "receipt: %s\n", printable(result.Receipt))
+		if result.Retained != "" {
+			fmt.Fprintf(&b, "retained: %s\n", printable(result.Retained))
+		}
 	}
 	return b.String()
 }
@@ -182,7 +197,13 @@ func RenderRecovery(r sync.Recovery, mode string) string {
 	}
 	fmt.Fprintf(&b, "operation: %s\n", operation)
 	fmt.Fprintf(&b, "last committed step: %s\n", last)
-	if r.Observed != nil {
+	if r.Previous != "" {
+		fmt.Fprintf(&b, "replaces: %s\n", r.Previous)
+	}
+	switch {
+	case r.Observed != nil && r.Previous != "":
+		fmt.Fprintf(&b, "observed: current %s, retained %s, staging %s\n", r.Observed.Current, r.Observed.Retained, r.Observed.Staging)
+	case r.Observed != nil:
 		fmt.Fprintf(&b, "observed: current %s, staging %s\n", r.Observed.Current, r.Observed.Staging)
 	}
 	fmt.Fprintf(&b, "action: %s\n", r.Action)

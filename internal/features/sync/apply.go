@@ -56,10 +56,12 @@ type Result struct {
 	// Cause explains EffectIntervention.
 	Cause string
 	// Receipt is the Windows path of the receipt once published; Files and
-	// Bytes count what was verified.
-	Receipt string
-	Files   int
-	Bytes   int64
+	// Bytes count what was verified. Retained is the Windows path of the
+	// generation a published rotation kept in retained.
+	Receipt  string
+	Retained string
+	Files    int
+	Bytes    int64
 	// Recovery is what --recover found and did, nil for --apply.
 	Recovery *Recovery
 }
@@ -258,6 +260,10 @@ func (o *operation) result() Result {
 	if o.effect == EffectPublished {
 		receipt := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, receiptsDir, o.op+".json")
 		r.Receipt = windowsPath(o.plan.vaultVolume, receipt)
+		if o.rotation() {
+			retained := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, retainedDir, o.previous)
+			r.Retained = windowsPath(o.plan.vaultVolume, retained)
+		}
 		for _, source := range o.planned.Sources {
 			r.Files += len(source.Entries)
 			r.Bytes += source.Bytes()

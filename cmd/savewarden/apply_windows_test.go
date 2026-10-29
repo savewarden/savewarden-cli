@@ -241,3 +241,42 @@ func TestSyncKilledDuringStagingThenRecovered(t *testing.T) {
 		t.Fatalf("apply after recovery: exit %d, stderr %q", code, stderr)
 	}
 }
+
+// The policy flags on a real vault: a removed file blocks in code 2 until
+// --allow-removals, which keeps it in retained; --recover refuses them in
+// code 1 without writing.
+func TestRotationFlagsEndToEnd(t *testing.T) {
+	s := newSynthetic(t, buildBinary(t), 0)
+	_, stderr, code := s.run(t, "--apply")
+	first := publishedLine.FindStringSubmatch(stderr)
+	if code != 0 || first == nil {
+		t.Fatalf("first apply: %d %q", code, stderr)
+	}
+	if err := os.Remove(filepath.Join(s.install, "saves", "1.save")); err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(t, s.vault)
+	if stdout, stderr, code := s.run(t, "--apply"); code != 2 || !strings.Contains(stdout, "blocking  files-removed  saves  1.save") {
+		t.Fatalf("removal without the flag: exit %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	if _, stderr, code := s.run(t, "--recover", "--allow-removals"); code != 1 || !strings.Contains(stderr, "--recover takes neither") {
+		t.Fatalf("--recover with a policy flag: exit %d, stderr %q", code, stderr)
+	}
+	if _, stderr, code := s.run(t, "--apply", "--accept-missing-source", "saves"); code != 1 || !strings.Contains(stderr, "is required") {
+		t.Fatalf("invalid --accept-missing-source: exit %d, stderr %q", code, stderr)
+	}
+	if fingerprint(t, s.vault) != before {
+		t.Fatal("a refused run changed the vault")
+	}
+	stdout, stderr, code := s.run(t, "--apply", "--allow-removals")
+	if code != 0 || publishedLine.FindStringSubmatch(stderr) == nil || !strings.Contains(stdout, "info  files-removed  saves  1.save") {
+		t.Fatalf("removal with the flag: exit %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	game := filepath.Join(s.vault, "games", "synthetic-game")
+	if _, err := os.Stat(filepath.Join(game, "current", "saves", "1.save")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the removed file is still current: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(game, "retained", first[1], "saves", "1.save")); err != nil || string(data) != "one" {
+		t.Fatalf("the removed file is not retained: %q, %v", data, err)
+	}
+}

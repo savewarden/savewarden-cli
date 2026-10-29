@@ -39,6 +39,9 @@ type Recovery struct {
 	// Operation is the interrupted operation, empty when there is none.
 	Operation string
 	Last      backup.Step
+	// Previous is the generation an interrupted rotation replaces, empty
+	// for a first publication.
+	Previous string
 	// Observed holds the presences of current, of the retained generation of
 	// a rotation and of the staging, by identity; nil when no operation is
 	// pending.
@@ -120,6 +123,7 @@ func (s *Service) recoverPlan(ctx context.Context, request Request, probe bool) 
 	rec.journal = v.journals[rec.Operation]
 	rec.Last = rec.journal.Last()
 	j := rec.journal
+	rec.Previous = j.Previous
 	game := join(strings.Join(vaultSegments, "/"), gamesDir+"/"+manifest.Game.ID)
 	var head *backup.Receipt
 	if j.Rotation() {

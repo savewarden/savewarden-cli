@@ -2,7 +2,8 @@
 
 Date : 29 octobre 2026. Statut : accepté pour B2, plan B2 v0.2 §4, validé par
 le propriétaire le 29 octobre 2026. B2a livre le mode plan ; B2b et B2c
-ajoutent leurs modes sans changer ce qui est fixé ici, sauf amendement.
+ajoutent leurs modes sans changer ce qui est fixé ici, sauf amendement ;
+amendé pour B2c (voir Amendements).
 
 ## Contexte
 
@@ -33,6 +34,9 @@ savewarden sync --manifest <m> --vault <v> [--apply] [--recover] [--allow-remova
 - `--vault` suit la grammaire `ParseWindowsAbsolute` du manifeste v1 ; rien
   n'est nettoyé ni complété.
 - Le mode plan n'écrit rien, nulle part. Il ne reçoit aucun port d'écriture.
+- `--accept-missing-source` est répétable, une source par occurrence.
+  `--recover` refuse `--allow-removals` et `--accept-missing-source` :
+  invocation invalide, code 1, rien écrit.
 
 ### Sortie du plan
 
@@ -60,9 +64,9 @@ publié.
 | Code | Résultat | stdout | stderr en mode plan |
 | --- | --- | --- | --- |
 | `0` | Plan sans anomalie bloquante, ou déjà à jour ; en B2b et B2c, publication vérifiée | Rapport | Vide |
-| `1` | Invocation, manifeste ou coffre invalide, volume indisponible, chevauchement, erreur de lecture, interruption, rapport impossible à écrire en entier | Vide, ou préfixe tronqué | Un diagnostic |
+| `1` | Invocation, manifeste ou coffre invalide, volume indisponible, chevauchement, erreur de lecture, interruption, rapport impossible à écrire en entier ; en B2c, drapeau de politique hors de ses conditions, retrait ou promotion échoués puis annulés | Vide, ou préfixe tronqué | Un diagnostic |
 | `2` | Rapport complet avec au moins une anomalie bloquante ; rien n'est publié | Rapport | `savewarden: plan blocked: N blocking finding(s)` |
-| `3` | Intervention requise : opération en attente, initialisation interrompue, entrée imprévue dans le coffre, journal ou receipts ambigus | Rapport | `savewarden: intervention required: <cause>` |
+| `3` | Intervention requise : opération en attente, initialisation interrompue, entrée imprévue dans le coffre, dont un `current` d'une autre identité que celle publiée, journal ou receipts ambigus ; en B2c, rollback impossible ou anomalie observée après le retrait | Rapport | `savewarden: intervention required: <cause>` |
 
 Avec `--apply` ou `--recover` (B2b), stderr se termine par la **ligne d'état
 du coffre** `savewarden: vault: <état>`, avec les états et combinaisons du
@@ -70,7 +74,13 @@ plan B2 §4.8 : `not modified`, `metadata only; nothing staged or published`,
 `current unchanged; operation <op> kept in staging`, `published <op>`,
 `rolled back <op>; current unchanged`, `intervention required for <op>:
 <cause>`. Une publication réussie suivie d'un rapport impossible à écrire
-sort en code 1 avec `vault: published <op>` : le receipt fait foi.
+sort en code 1 avec `vault: published <op>` : le receipt fait foi. Une
+rotation emploie les mêmes états : `published <op>` une fois l'ancienne
+génération conservée dans `retained\<prev-op>` ; `rolled back <op>; current
+unchanged`, code 1, pour un retrait ou une promotion échoués puis annulés ;
+`intervention required for <op>: <cause>`, code 3, pour un rollback
+impossible ou une anomalie observée après le retrait, sans rollback
+conjectural.
 
 ### Codes stables
 
@@ -88,6 +98,19 @@ parcours :
 | `current-modified` | bloquante | `current` différent de son receipt, sans receipt valide, ou receipt sans `current` |
 | `long-path` | information | Chemin final au-delà de 259 unités UTF-16 |
 | `same-volume` | information | Coffre et source sur le même volume : pas une sauvegarde hors disque |
+| `insufficient-space` | bloquante, au plan comme sous verrou | Espace disponible pour l'utilisateur inférieur à la génération complète plus sa marge |
+
+Codes d'un `--apply` qui n'a rien publié, code 2 :
+
+| Code | Sens |
+| --- | --- |
+| `current-exists` | **Définition historique, B2b** : `current` existant et différent du plan, refusé avant tout staging par une version sans rotation. B2c ne l'émet plus dans son chemin nominal, où la génération précédente reconnue est remplacée ; le code reste réservé à ce sens |
+| `changed-during-sync` | Source modifiée, apparue ou disparue entre le plan et la copie, pendant la copie ou avant le second inventaire |
+| `verification-mismatch` | Relecture du staging différente des empreintes copiées ; staging conservé |
+
+Diagnostics de code 1, sans code stable : `vault-changed`, le coffre a changé
+depuis le plan ou le plan de récupération ; `another sync is running on this
+game`, verrou tenu par une autre opération.
 
 Causes d'intervention : `pending-operation`, `initialization-interrupted`,
 `unexpected-entry`, `journal-ambiguous`.
@@ -99,7 +122,20 @@ une suppression volontaire ; `--allow-removals` ne couvre jamais une source
 absente ou retirée du manifeste ; `--accept-missing-source <id>` ne couvre
 qu'une source facultative, physiquement absente et présente dans le receipt
 précédent ; un `current` qui ne correspond plus exactement à son receipt
-bloque toute publication, sans contournement en B2.
+bloque toute publication, sans contournement en B2. Une anomalie acceptée par
+un drapeau reste listée, en information, avec le drapeau qui l'accepte ; le
+nouveau receipt note une source absente acceptée `status: "missing"`,
+`accepted: true`, et ses fichiers restent dans la génération conservée. Tout
+autre usage de `--accept-missing-source`, source requise, présente, inconnue,
+retirée du manifeste, absente du receipt précédent ou nommée deux fois, est
+une invocation invalide, code 1, rien écrit.
+
+Un `current` reconnu exige aussi son identité publiée (ADR 0006 §4) : le sens
+de `current-modified` est inchangé, et un `current` d'une autre identité que
+celle que son journal a publiée relève de `unexpected-entry`, code 3, quel
+que soit son contenu. Le diagnostic constate l'écart d'identité et dit qu'un
+coffre copié ou déplacé n'est pas encore pris en charge, sans parler de
+corruption ni de compromission ; aucune identité n'est adoptée ni réécrite.
 
 Le receipt de `current` est le seul receipt valide qu'aucun autre ne désigne
 comme `previous`. Aucun, ou plusieurs : `current-modified`.
@@ -201,3 +237,15 @@ pour l'état. Les tests de `internal/cli`, `internal/app` et du binaire fixent
 chaque code ; ceux d'`internal/entities/backup` fixent chaque règle de
 relecture du receipt et du marqueur. Un changement incompatible du receipt
 exige un nouveau `schema_version` et un amendement de cet ADR.
+
+## Amendements
+
+- **29 octobre 2026, B2c**, selon le cadrage validé (plan B2 §0.8, R5) :
+  codes émis par B2b et absents de la table, `current-exists` dans sa
+  définition historique, `changed-during-sync`, `verification-mismatch`,
+  `insufficient-space`, et les diagnostics `vault-changed` et `another sync
+  is running` ; `--accept-missing-source` répétable et ses usages invalides en
+  code 1 ; `--recover` sans drapeau de politique ; rendu des anomalies
+  acceptées ; états d'une rotation ; `unexpected-entry` pour un `current`
+  d'une autre identité. `TestStableCodesAreDocumented` vérifie que chaque code
+  déclaré par la feature figure ici.
