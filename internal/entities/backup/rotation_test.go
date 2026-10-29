@@ -276,3 +276,51 @@ func TestUnidentifiedCurrentIsNeverOld(t *testing.T) {
 		t.Errorf("current without any published generation: %v", err)
 	}
 }
+
+// The closed table of ADR 0006 §5 alone: for each last record of a
+// rotation, the 125 observations of current, retained and staging, with a
+// generation expected or not, are accepted exactly as often as the table
+// has rows; (other, old, new) never is.
+func TestRotationRecoveryTableIsClosed(t *testing.T) {
+	other := backup.Other
+	retiring := steps(pre, backup.StepRetireIntent)
+	for _, tt := range []struct {
+		steps []backup.Step
+		rows  int
+	}{
+		{pre[:1], 1},
+		{pre[:2], 2},
+		{pre[:3], 1},
+		{pre, 1},
+		{retiring, 2},
+		{steps(retiring, backup.StepPromoteIntent), 2},
+		{steps(retiring, backup.StepPromoteIntent, backup.StepUnpromoteIntent), 2},
+		{steps(retiring, backup.StepPromoteIntent, backup.StepUnpromoteIntent, backup.StepRollbackFailed), 2},
+		{steps(retiring, backup.StepRestoreIntent), 2},
+		{steps(retiring, backup.StepRestoreIntent, backup.StepRollbackFailed), 2},
+	} {
+		j := journal(t, true, tt.steps...)
+		for _, expected := range []bool{false, true} {
+			accepted := 0
+			for _, c := range presences {
+				for _, r := range presences {
+					for _, s := range presences {
+						observed := obs(c, r, s)
+						observed.Expected = expected
+						if _, err := backup.Classify(j, observed); err == nil {
+							accepted++
+						}
+					}
+				}
+			}
+			if accepted != tt.rows {
+				t.Errorf("%s, expected %v: %d observations accepted, the table has %d rows", j.Last(), expected, accepted, tt.rows)
+			}
+		}
+		if len(tt.steps) > len(pre) {
+			if _, err := backup.Classify(j, obs(other, o, n)); err == nil {
+				t.Errorf("%s: an unexpected object under current was accepted", j.Last())
+			}
+		}
+	}
+}

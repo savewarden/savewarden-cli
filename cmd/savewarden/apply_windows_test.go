@@ -364,3 +364,34 @@ func TestSyncKilledDuringRotationThenRecovered(t *testing.T) {
 		t.Fatalf("apply after recovery: exit %d, stderr %q", code, stderr)
 	}
 }
+
+// A copied vault keeps the data but not the identities NTFS gave them: the
+// plan, --apply and --recover refuse it in code 3, and the copy stays
+// identical byte for byte. The original vault still works.
+func TestCopiedVaultIsRefusedWithoutWriting(t *testing.T) {
+	s := newSynthetic(t, buildBinary(t), 0)
+	if _, stderr, code := s.run(t, "--apply"); code != 0 {
+		t.Fatalf("first apply: %d %q", code, stderr)
+	}
+	copied := s
+	copied.vault = filepath.Join(s.base, "Coffre copié")
+	if err := os.CopyFS(copied.vault, os.DirFS(s.vault)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.install, "saves", "1.save"), []byte("ONE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(t, copied.vault)
+	for _, args := range [][]string{nil, {"--apply"}, {"--recover"}} {
+		stdout, stderr, code := copied.run(t, args...)
+		if code != 3 || !strings.Contains(stdout+stderr, "copied or moved vault is not supported yet") {
+			t.Fatalf("%v on the copy: exit %d, stderr %q, stdout:\n%s", args, code, stderr, stdout)
+		}
+	}
+	if fingerprint(t, copied.vault) != before {
+		t.Fatal("a refused run changed the copied vault")
+	}
+	if _, stderr, code := s.run(t, "--apply"); code != 0 || publishedLine.FindStringSubmatch(stderr) == nil {
+		t.Fatalf("the original vault: exit %d, stderr %q", code, stderr)
+	}
+}
