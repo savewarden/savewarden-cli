@@ -17,7 +17,9 @@ intégrale et amendements, le 29 octobre 2026.
 
 L'ADR 0006 qu'il prévoit devient la **référence de sécurité** de toutes les
 opérations de publication et de récupération de Savewarden, en B2 comme dans
-les lots suivants. Son contenu normatif est fixé au §5.
+les lots suivants. Son contenu normatif, fixé au §5 et validé le
+29 octobre 2026, est désormais porté par ADR 0006 amendé, qui prévaut sur le
+§5 en cas d'écart (§5, priorité).
 
 GO B2a donné par le propriétaire le 29 octobre 2026 : travail en lecture seule
 selon le §8.1. Ce plan ne vaut ni GO B2b ou B2c, ni autorisation de tag ou de
@@ -154,7 +156,8 @@ des décisions de cadrage : **elles ne valent pas GO de développement B2c**.
 
 **Revue du cadrage (29 octobre 2026).** Le propriétaire a validé ce cadrage
 sous conditions. Ses corrections sont intégrées à ADR 0006 et prévalent sur
-les §4.5 et §5.5 ; elles ne valent pas davantage GO de développement :
+le §4.5 et sur tout le §5 ; elles ne valent pas davantage GO de
+développement :
 
 | # | Correction | Exigence | Où |
 | --- | --- | --- | --- |
@@ -776,7 +779,28 @@ Deux axes distincts, fixés par ADR 0007 :
 - Un consommateur se fie au code pour le résultat de la commande, et à la
   ligne d'état, au receipt ou au mode plan pour l'état du coffre.
 
-## 5. ADR 0006 — protocole de publication et de récupération (contenu normatif)
+## 5. ADR 0006 — protocole de publication et de récupération (texte validé ; ADR 0006 amendé prévaut)
+
+**Priorité.** Ce §5 est conservé tel qu'il a été validé le 29 octobre 2026.
+ADR 0006, amendé avant les premières écritures de B2b puis pour le cadrage de
+B2c, est la seule référence normative du protocole : en cas d'écart, il
+prévaut sur toute règle des §5.1 à §5.9, sans exception, et aucun code ni
+test ne s'appuie sur ce §5 contre lui. Écarts connus, chacun remplacé par
+l'ADR :
+
+| Passage du §5 | Règle qui prévaut | ADR 0006 |
+| --- | --- | --- |
+| §5.3, format et champs d'un enregistrement | Champs sous la clé `fields`, contrat fermé par étape, cohérence entre enregistrements ; `current_identity` de `planned`, obligatoire pour une rotation, interdit sinon | §3 |
+| §5.3, temporaires d'un autre numéro que le suivant | Conditions exactes d'acceptation des temporaires abandonnés à côté d'un enregistrement validé | §3 |
+| §5.4, ligne I8 et première ligne du tableau de récupération | Règle M3 : génération publiée attendue ou non, génération précédente reconnue ; sinon code 3, rien écrit | §4 |
+| §5.4, notation des observations | `old` fixé par `current_identity` de `planned` ; toute autre identité notée `other` | §4 |
+| §5.4, phrase sur `current-exists` | Règle de B2b seulement ; en B2c, seule la génération précédente reconnue est remplacée | §4 |
+| §5.4 et §5.5, `current` « conforme à son receipt » | Génération précédente reconnue : chaîne de preuve entière, identité publiée comprise ; coffre copié ou déplacé : code 3, rien écrit | §4 |
+| §5.5, automate et exécution | Identité persistante et vérifications sous verrou, points 1 à 5 ; fenêtres résiduelles ; restaurations vérifiées ; nouvelle observation après un échec de M2 | §5 |
+| §5.5, tableau de récupération | Ligne M3 ; restaurations vérifiées ; receipt déjà validé protégé ; (`other`, `old`, `new`) sans ligne applicable | §5 |
+| §5.9, enveloppe E1 | Neuf temporaires par destination logique : numéro d'enregistrement toutes étapes confondues, chaque receipt, le marqueur | §3, §9 |
+
+Cette liste guide la lecture ; elle ne limite pas la priorité de l'ADR.
 
 ### 5.1 Portée
 
@@ -804,6 +828,8 @@ peut pas s'y conformer exige un amendement de l'ADR, revu, avant son code.
 | I12 | La récupération est garantie **dans une enveloppe bornée et déclarée** (§5.9) ; au-delà, fail-closed |
 
 ### 5.3 Journal vérifiable
+
+*Texte d'origine : ADR 0006 §3 amendé prévaut (priorité en tête du §5).*
 
 Emplacement : `games\<game-id>\journal\<op-id>\`, un dossier par opération.
 
@@ -885,6 +911,8 @@ récupération. Hors des cas prévus par les tableaux de récupération des §5.
 et §5.5, Savewarden ne tente aucune réparation.
 
 ### 5.4 Initialisation du coffre et première publication (B2b)
+
+*Texte d'origine : ADR 0006 §4 amendé prévaut (priorité en tête du §5).*
 
 #### Initialisation du coffre, avant tout journal
 
@@ -1015,6 +1043,8 @@ current published, receipt missing » : il ne confond jamais cet état avec un
 `current` modifié hors de Savewarden (§4.5).
 
 ### 5.5 Rotation de `current` (B2c)
+
+*Texte d'origine : ADR 0006 §5 amendé prévaut (priorité en tête du §5).*
 
 Automate, `current` existant et conforme à son receipt `<prev-op>`. Quatre
 déplacements possibles, chacun précédé de sa propre intention validée :
@@ -1826,3 +1856,4 @@ auto-approbation**.
 | 0.2, revue du cadrage B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Corrections R1 à R5 du propriétaire (§0.8) : M3 sans `current`, génération précédente reconnue par son identité publiée, fenêtre M1–M2 et restaurations vérifiées, fenêtres résiduelles du verrou, codes B2b et `current-exists` historique dans ADR 0007 ; §4.5 et §8.3 ajustés ; matrice du §9.3 nommée test par test ; pas de GO de développement B2c |
 | 0.2, effets de la revue B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Trois effets arbitrés par le propriétaire (§0.8) : coffre copié ou déplacé refusé sous condition, portabilité reportée (§13) ; M3 strict validé ; `current` réapparu entre M1 et M2 validé ; §4.5, §8.3, §9.3 et §10 ajustés ; pas de GO de développement B2c |
 | 0.2, cohérence après M1 | 29 octobre 2026 | local, branche `docs/b2c-framing` | Correction du propriétaire sur `7c00103` : un objet inattendu sous `current` après M1, (`other`, `old`, `new`), ne relève d'aucune ligne de récupération, code 3 sans mutation tant qu'il reste présent ; trois tests de récupération ajoutés au §9.3 ; pas de GO de développement B2c |
+| 0.2, priorité d'ADR 0006 | 29 octobre 2026 | local, branche `docs/b2c-framing` | Revue indépendante du cadrage à `e7f1ac1` : ADR 0006 amendé déclaré prioritaire sur tout le §5, conservé tel que validé ; écarts connus recensés en tête du §5 ; aucune règle modifiée ; pas de GO de développement B2c |
