@@ -176,7 +176,7 @@ changement de comportement du mode plan pour un coffre écrit par B2b.
 | --- | --- | --- |
 | Coffre B2b copié ou déplacé : `unexpected-entry`, code 3 | Accepté sous condition, refus conservateur temporaire | Code 3, aucune écriture, aucune adoption ni réécriture d'identité ; la documentation dit qu'une copie peut changer les identités NTFS sans corrompre les données, que copier ou déplacer un coffre n'est pas encore pris en charge, et le diagnostic ne prétend prouver ni corruption ni compromission ; portabilité renvoyée à une procédure future de requalification ou d'import contrôlé (§13), sans affaiblir la récupération fail-closed |
 | M3 plus strict que le code B2b fusionné | Validé | Correction aux commits 1 et 4 du §8.3 ; journaux B2b toujours lus ; absence normale de génération distinguée de la disparition d'une génération publiée |
-| `current` réapparu entre M1 et M2 | Validé | Code 3, ni promotion ni restauration automatique ; objets conservés en place, ancienne génération dans `retained\<prev-op>` ; diagnostic nommant l'ambiguïté |
+| `current` réapparu entre M1 et M2 | Validé | Code 3, ni promotion ni restauration automatique ; objets conservés en place, ancienne génération dans `retained\<prev-op>` ; diagnostic nommant l'ambiguïté ; en récupération, (`other`, `old`, `new`) ne relève d'aucune ligne : code 3 sans écriture, enregistrement ni déplacement tant que l'objet reste présent, reprise seulement sur une observation entièrement conforme à une ligne (ADR 0006 §5) |
 
 **Impacts sur ADR 0004.** Aucune frontière nouvelle, aucun port nouveau :
 la rotation et sa récupération n'emploient que les ports existants, `Vault`
@@ -1442,9 +1442,10 @@ Chemins d'exemple fictifs uniquement.
   rollback refusé : `rollback-failed`, code 3 ; `current` réapparu entre les
   deux renommages : rien écrasé ; fichier ouvert dans `current` pendant la
   rotation.
-- **Fenêtre M1–M2** : `retained\<prev-op>` modifié ou remplacé après le
-  retrait : ni promotion ni restauration, code 3, rien écrit ; récupération
-  identique, jamais de restauration d'une génération altérée.
+- **Fenêtre M1–M2** : `retained\<prev-op>` modifié ou remplacé, ou objet
+  inattendu sous `current`, après le retrait : ni promotion ni restauration,
+  code 3, rien écrit ; récupération en code 3 tant que l'écart demeure,
+  jamais de restauration d'une génération altérée.
 - **Crash, énumération à chaque transition (P0-3)** : crash avant et après
   chacun des déplacements M1 à M4, et pendant la validation de `retire-intent`,
   `promote-intent`, `unpromote-intent`, `restore-intent`, `rollback-failed`,
@@ -1534,8 +1535,11 @@ d'opération vide, puis temporaires `001-…` seuls ; le test B2b
 | Idem | `retained\<prev-op>` remplacé, autre identité | Idem | `TestPromotionRefusedWhenRetainedReplacedAfterRetirement` |
 | Idem | `current` réapparu | Idem, rien écrasé ; l'objet apparu reste en place, l'ancienne génération dans `retained\<prev-op>` ; diagnostic nommant l'ambiguïté | `TestPromotionRefusedWhenCurrentReappearsAfterRetirement` |
 | Après un refus de M2 | `retained\<prev-op>` altéré depuis la relecture du point 5 | Nouvelle observation : code 3, aucun `restore-intent`, rien déplacé | `TestFailedPromotionDoesNotRestoreAnAlteredRetained` |
-| `--recover` de `retire-intent`, `promote-intent`, `unpromote-intent` ou `restore-intent`, observation (—, `old`, `new`) | `retained\<prev-op>` altéré | Code 3, rien écrit ; trois exécutions, même diagnostic | `TestRecoveryDoesNotRestoreAnAlteredRetained` |
+| `--recover` de `retire-intent`, `promote-intent`, `unpromote-intent` ou `restore-intent`, observation (—, `old`, `new`) | `retained\<prev-op>` altéré, même identité | Code 3, rien écrit ; trois exécutions, même diagnostic | `TestRecoveryDoesNotRestoreAnAlteredRetained` |
 | Idem | Aucun, `retained\<prev-op>` conforme | `restore-intent` s'il manque, M3, `rolled-back` | `TestRecoveryRestoresAVerifiedRetained` |
+| `--recover` répété de `retire-intent` ou de `promote-intent`, après M1 | Objet inattendu sous `current` : (`other`, `old`, `new`) | Aucune ligne : code 3 à chacune de trois exécutions, même diagnostic ; rien écrit, enregistré ni déplacé, coffre identique octet pour octet ; objet, `retained\<prev-op>` et staging en place | `TestRepeatedRecoveryWithAnUnexpectedCurrentAfterRetirement` |
+| Idem | `retained\<prev-op>` d'une autre identité : (—, `other`, `new`) | Idem | `TestRecoveryRefusesAReplacedRetained` |
+| Après ces refus | Objet inattendu retiré par le test lui-même, hors Savewarden ; observation redevenue (—, `old`, `new`), `retained\<prev-op>` conforme | Ligne (—, `old`, `new`), toutes ses vérifications comprises : restauration vérifiée, `restore-intent`, M3, `rolled-back` | `TestRecoveryResumesOnlyOnAFullyConformingObservation` |
 | Entre la relecture du point 5 et M2 | Écriture externe dans `retained\<prev-op>` | Non détectée, limite documentée (R4) ; aucun test ne prétend la détecter | — |
 
 **Exécution**, `internal/features/sync`, et Windows réel pour les erreurs du
@@ -1821,3 +1825,4 @@ auto-approbation**.
 | 0.2, cadrage B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Arbitrages A1 à A5 et M3 du propriétaire (§0.8) ; ADR 0006 amendé ; §8.3 et §9.3 amendés ; impacts sur ADR 0004 et 0007 recensés ; pas de GO de développement B2c |
 | 0.2, revue du cadrage B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Corrections R1 à R5 du propriétaire (§0.8) : M3 sans `current`, génération précédente reconnue par son identité publiée, fenêtre M1–M2 et restaurations vérifiées, fenêtres résiduelles du verrou, codes B2b et `current-exists` historique dans ADR 0007 ; §4.5 et §8.3 ajustés ; matrice du §9.3 nommée test par test ; pas de GO de développement B2c |
 | 0.2, effets de la revue B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Trois effets arbitrés par le propriétaire (§0.8) : coffre copié ou déplacé refusé sous condition, portabilité reportée (§13) ; M3 strict validé ; `current` réapparu entre M1 et M2 validé ; §4.5, §8.3, §9.3 et §10 ajustés ; pas de GO de développement B2c |
+| 0.2, cohérence après M1 | 29 octobre 2026 | local, branche `docs/b2c-framing` | Correction du propriétaire sur `7c00103` : un objet inattendu sous `current` après M1, (`other`, `old`, `new`), ne relève d'aucune ligne de récupération, code 3 sans mutation tant qu'il reste présent ; trois tests de récupération ajoutés au §9.3 ; pas de GO de développement B2c |
