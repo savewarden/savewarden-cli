@@ -20,8 +20,13 @@ func TestCLIContract(t *testing.T) {
 		out  string
 		err  string
 	}{
-		{name: "default help", out: "inspects declared save sources, read-only"},
+		{name: "default help", out: "inspects declared save sources and plans their synchronisation"},
 		{name: "help lists inspect", args: []string{"--help"}, out: "inspect     Inventory the save sources of a manifest, read-only"},
+		{name: "help lists sync", args: []string{"--help"}, out: "sync        Plan the copy of a manifest's sources into a vault, read-only"},
+		{name: "sync help", args: []string{"sync", "--help"}, out: "Exit codes: 0 plan without blocking findings"},
+		{name: "sync without flags", args: []string{"sync"}, code: 1, err: `required flag(s) "manifest", "vault" not set`},
+		{name: "sync apply is not available", args: []string{"sync", "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply"}, code: 1, err: "unknown flag: --apply"},
+		{name: "sync missing manifest", args: []string{"sync", "--manifest", "missing-manifest.yaml", "--vault", `D:\Vault`}, code: 1, err: "missing-manifest.yaml"},
 		{name: "inspect help", args: []string{"inspect", "--help"}, out: "Exit codes: 0 complete inventory"},
 		{name: "inspect without manifest", args: []string{"inspect"}, code: 1, err: `required flag(s) "manifest" not set`},
 		{name: "inspect missing manifest", args: []string{"inspect", "--manifest", "missing-manifest.yaml"}, code: 1, err: "missing-manifest.yaml"},
@@ -32,7 +37,7 @@ func TestCLIContract(t *testing.T) {
 		{name: "version", args: []string{"version"}, out: "savewarden dev\n"},
 		{name: "version flag", args: []string{"--version"}, out: "savewarden dev\n"},
 		{name: "short version flag", args: []string{"-v"}, out: "savewarden dev\n"},
-		{name: "unknown command", args: []string{"sync"}, code: 1, err: "unknown command"},
+		{name: "unknown command", args: []string{"snapshot"}, code: 1, err: "unknown command"},
 		{name: "unknown flag", args: []string{"--manifest", "anything.yaml"}, code: 1, err: "unknown flag"},
 		{name: "version arguments", args: []string{"version", "extra"}, code: 1, err: "unknown command"},
 		{name: "version flag error", args: []string{"version", "--json"}, code: 1, err: "unknown flag"},

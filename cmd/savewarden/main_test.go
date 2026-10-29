@@ -53,7 +53,7 @@ func TestBinarySmoke(t *testing.T) {
 		err := cmd.Run()
 		if args[0] == "sync" || args[0] == "inspect" {
 			var exit *exec.ExitError
-			want := map[string]string{"sync": "unknown command", "inspect": `required flag(s) "manifest" not set`}[args[0]]
+			want := map[string]string{"sync": `required flag(s) "manifest", "vault" not set`, "inspect": `required flag(s) "manifest" not set`}[args[0]]
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), want) {
 				t.Fatalf("%v: err=%v stdout=%q stderr=%q", args, err, stdout.String(), stderr.String())
 			}
@@ -62,7 +62,7 @@ func TestBinarySmoke(t *testing.T) {
 				t.Fatalf("%v: err=%v stderr=%q", args, err, stderr.String())
 			}
 			if args[0] == "--help" {
-				if !strings.Contains(stdout.String(), "inspects declared save sources, read-only") || !strings.Contains(stdout.String(), "inspect") {
+				if !strings.Contains(stdout.String(), "plans their synchronisation") || !strings.Contains(stdout.String(), "inspect") || !strings.Contains(stdout.String(), "sync") {
 					t.Fatalf("help: %q", stdout.String())
 				}
 			} else if stdout.String() != "savewarden dev\n" {
@@ -159,10 +159,13 @@ func denyWrites(t *testing.T, dir string) bool {
 	return true
 }
 
-// TestInspectDoesNotWrite runs the real binary against a synthetic
+// assertReadOnlyRuns runs the real binary twice against a synthetic
 // installation with an isolated environment and, where possible, with
-// write access denied. Nothing may change and no file may appear.
-func TestInspectDoesNotWrite(t *testing.T) {
+// write access denied on the whole tree. Nothing may change, no file may
+// appear and both runs must print the same output. args receives the
+// temporary base directory and the manifest path.
+func assertReadOnlyRuns(t *testing.T, args func(base, manifest string) []string, check func(t *testing.T, stdout, stderr string, err error)) {
+	t.Helper()
 	binary := buildBinary(t)
 	base := filepath.Clean(t.TempDir())
 	install := filepath.Join(base, "Jeu synthétique")
@@ -204,7 +207,7 @@ func TestInspectDoesNotWrite(t *testing.T) {
 
 	var outputs []string
 	for range 2 {
-		cmd := exec.Command(binary, "inspect", "--manifest", manifest)
+		cmd := exec.Command(binary, args(base, manifest)...)
 		cmd.Dir = work
 		cmd.Env = os.Environ()
 		for name, dir := range isolated {
@@ -213,16 +216,7 @@ func TestInspectDoesNotWrite(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
-		if runtime.GOOS == "windows" {
-			if err != nil || stderr.Len() != 0 || !strings.Contains(stdout.String(), "files: 2  bytes: 6\n") || !strings.Contains(stdout.String(), "findings: none\n") {
-				t.Fatalf("err=%v stderr=%q stdout:\n%s", err, stderr.String(), stdout.String())
-			}
-		} else {
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "Windows installations only") {
-				t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
-			}
-		}
+		check(t, stdout.String(), stderr.String(), err)
 		outputs = append(outputs, stdout.String())
 	}
 	if outputs[0] != outputs[1] {
@@ -231,6 +225,53 @@ func TestInspectDoesNotWrite(t *testing.T) {
 	if after := fingerprint(t, base); after != before {
 		t.Fatalf("the run changed the tree:\n%s\n---\n%s", before, after)
 	}
+}
+
+// expectWindowsOnly checks the refusal of Windows volumes on other systems.
+func expectWindowsOnly(t *testing.T, stdout, stderr string, err error) {
+	t.Helper()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout != "" || !strings.Contains(stderr, "Windows installations only") {
+		t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+}
+
+func TestInspectDoesNotWrite(t *testing.T) {
+	assertReadOnlyRuns(t, func(_, manifest string) []string { return []string{"inspect", "--manifest", manifest} },
+		func(t *testing.T, stdout, stderr string, err error) {
+			if runtime.GOOS != "windows" {
+				expectWindowsOnly(t, stdout, stderr, err)
+				return
+			}
+			if err != nil || stderr != "" || !strings.Contains(stdout, "files: 2  bytes: 6\n") || !strings.Contains(stdout, "findings: none\n") {
+				t.Fatalf("err=%v stderr=%q stdout:\n%s", err, stderr, stdout)
+			}
+		})
+}
+
+// The plan mode of sync writes nothing: not the vault, not its parent, not
+// the sources, not the working directory.
+func TestSyncPlanDoesNotWrite(t *testing.T) {
+	assertReadOnlyRuns(t, func(base, manifest string) []string {
+		vault := `D:\Coffre synthétique`
+		if runtime.GOOS == "windows" {
+			vault = filepath.Join(base, "Coffre synthétique")
+		}
+		return []string{"sync", "--manifest", manifest, "--vault", vault}
+	}, func(t *testing.T, stdout, stderr string, err error) {
+		if runtime.GOOS != "windows" {
+			expectWindowsOnly(t, stdout, stderr, err)
+			return
+		}
+		if err != nil || stderr != "" {
+			t.Fatalf("err=%v stderr=%q stdout:\n%s", err, stderr, stdout)
+		}
+		for _, want := range []string{"(will be created)\n", "mode: plan only, nothing written\nplan: changes\n", "added: 2", "same-volume"} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("stdout lacks %q:\n%s", want, stdout)
+			}
+		}
+	})
 }
 
 func values(m map[string]string) []string {
