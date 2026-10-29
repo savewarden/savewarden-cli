@@ -11,10 +11,10 @@ auto-approbation.
 | --- | --- |
 | GO humain | GO B2b du propriétaire, transmis par la session principale, puis arbitrages E1 et `fields` confirmés, avec le contrôle des temporaires abandonnés demandé avant les premières écritures, le 29 octobre 2026 |
 | Branche | `feat/b2b-first-publication`, créée depuis `release/v0.1.0-a1` en `b4f649f`, Go 1.27.3 |
-| PR | Pas encore ouverte : branche non poussée, en attente d'un GO distinct |
+| PR | Pas encore ouverte à la rédaction ; puis, sur GO distincts, [savewarden/savewarden-cli#6](https://github.com/savewarden/savewarden-cli/pull/6), fusionnée dans `release/v0.1.0-a1` par le merge commit `8f9f5e1` |
 | Écritures | Seul `internal/platform/vault` écrit, ADR 0005 ; tout autre package reste sous le garde de lecture seule |
 | Revues indépendantes | Revue de l'assouplissement du garde, point de contrôle du §8.2 ; revue obligatoire de `platform/vault` et du chemin d'écriture, consignée ci-dessous |
-| Pilote B2b | **Non exécuté** : il attend son propre Human GO, après la fusion |
+| Pilote B2b | Non exécuté à la fusion ; **exécuté par le propriétaire après fusion, le 29 octobre 2026, et validé**, voir [Pilote B2b](#pilote-b2b) |
 
 Commits, dans l'ordre :
 
@@ -64,8 +64,8 @@ et 324 suppressions, dont 3 897 lignes de tests.
 | 12 | Propriétés du §5.9 dans l'enveloppe | `TestRecoveryIsInterruptible`, crash à chaque appel de la récupération, remise en staging comprise ; `TestAmbiguityIsStable`, trois exécutions identiques ; `TestRecoveryEnvelope`, huit et neuf temporaires d'un enregistrement, d'un receipt, du marqueur ; `TestRollbackFailureIsRecordedOnce`, E3 ; `TestRecoveryRefusesAnInvalidReceipt` ; provenance du receipt reconstruit |
 | 13 | Espace selon V2, au préflight et sous verrou | `TestSpaceIsCheckedAtPlan`, `TestSpaceNeeded`, débordement 64 bits compris ; « space gone under lock » : ni journal ni staging, `metadata only` ; disque plein au fichier N, `TestWriteFailureKeepsTheStaging` |
 | 14 | Garde pour `platform/vault` seul, `MoveFileEx` à `0`, `x/sys` limité, retries 32 et 33 | `readonly_test.go` et `architecture_test.go`, listes attendues indépendantes ; `TestRenameRetries`, `TestOtherRenameErrorsAreNotRetried` |
-| 15 | Revue indépendante consignée ; pilote exécuté ou absence déclarée | Revue ci-dessous ; **pilote non exécuté, absence déclarée** : cela bloque B2c |
-| 19 | 7 checks verts sur le SHA exact | **Non établi** : branche non poussée, aucun run CI |
+| 15 | Revue indépendante consignée ; pilote exécuté ou absence déclarée | Revue ci-dessous ; pilote non exécuté à la fusion, puis **exécuté après fusion et validé par le propriétaire** : le préalable de B2c est levé |
+| 19 | 7 checks verts sur le SHA exact | Non établi à la rédaction ; puis 7 checks verts sur `971631b`, tête de la PR, et sur `8f9f5e1` après fusion, voir [CI](#ci) |
 | 20 | Docs cohérentes, exemples vérifiés | Guide de commande, guide du coffre et de récupération, README, CHANGELOG, ADR 0004 à 0007 ; exemples de `docs/commands/sync.md` et du README vérifiés par test |
 | 21 | Aucun accès aux données protégées | Tests en `t.TempDir()` ou en mémoire, chemins fictifs ; aucun accès à `D:\Ga`, `D:\Savewarden`, `E:\GMS` ni aux clés SSH |
 
@@ -104,11 +104,18 @@ Tests réels Windows de ce lot :
 
 ## CI
 
-**Aucun run.** La branche n'est pas poussée : aucune exécution GitHub Actions
-ne valide ce lot. Le code Unix nouveau, `Identity` de la portée et son test,
-n'a été que compilé et analysé localement. Les sept checks requis devront être
-verts sur le SHA exact de la PR, lien du run joint, avant tout Human GO de
-fusion.
+**À la rédaction : aucun run.** La branche n'était pas poussée ; le code Unix
+nouveau, `Identity` de la portée et son test, n'avait été que compilé et
+analysé localement.
+
+**Après le GO de push :** les sept checks requis sont verts sur le SHA exact
+de la PR, puis sur le commit de fusion. Ils couvrent aussi ce qui n'avait pas
+pu tourner localement : le détecteur de courses et le code Unix.
+
+| Commit | Run | Résultat |
+| --- | --- | --- |
+| `971631b`, tête de la PR #6 | [40912389777](https://github.com/savewarden/savewarden-cli/actions/runs/40912389777) | 7/7 : Verify Ubuntu, Windows et macOS, Race detector, Lint, Vulnerability scan, Pins |
+| `8f9f5e1`, fusion dans `release/v0.1.0-a1` | [40915661887](https://github.com/savewarden/savewarden-cli/actions/runs/40915661887) | 7/7, mêmes jobs |
 
 ## Revues indépendantes
 
@@ -168,6 +175,50 @@ partage, d'où la lecture de l'entrée de répertoire en `79a562f` ; et la date
 de `planned` différait de celle du plan, d'où une fausse horloge qui avance
 désormais à chaque lecture.
 
+## Pilote B2b
+
+**Au Human GO de fusion :** non exécuté. Aucune autorisation d'accès aux
+sauvegardes réelles n'avait été donnée à l'agent ; il n'a lu aucune des zones
+protégées par `AGENTS.md` et n'a pas exécuté le pilote ensuite.
+
+**Après fusion, 29 octobre 2026 :** exécuté par le propriétaire, sur
+Assassin's Creed Odyssey, selon [la page du pilote](../pilots/odyssey.md) :
+une première publication vers un coffre neuf, puis un contrôle d'idempotence,
+le second `--apply` n'étant lancé qu'après un plan `up to date`.
+
+| Élément | Résultat |
+| --- | --- |
+| Binaire | Compilé depuis un clone distinct, dont le script du pilote vérifie que `HEAD` est le commit de fusion `8f9f5e1` avant toute exécution |
+| Poste | Windows 11 |
+| Source | `saves` sous l'installation déclarée par le manifeste du pilote |
+| Coffre | Neuf, distinct de l'ancien coffre du pilote ; son volume a été qualifié par `sync` lui-même, NTFS local |
+| Première publication | `sync --apply`, code `0` |
+| Contenu publié | 14 fichiers, 9 520 705 octets ; 14 SHA-256 sur 14 identiques à la source |
+| Source | Inchangée après la publication |
+| Receipt | 1 receipt créé |
+| Plan suivant | Code `0`, `plan: up to date`, aucune anomalie |
+| Second `sync --apply` | Code `0`, `up to date`, dernière ligne de stderr `savewarden: vault: not modified` |
+| Coffre après le second `--apply` | Inchangé : empreinte identique des chemins, tailles et SHA-256 de toutes ses entrées |
+| Verdict | `IdempotencePassed = True` |
+
+**Qualification fonctionnelle, 29 octobre 2026 :** le propriétaire valide le
+pilote B2b. Il démontre sur une sauvegarde réelle les deux propriétés
+nominales du lot : première publication copiée en entier, vérifiée par
+SHA-256, avec receipt et source inchangée ; seconde exécution sans aucune
+mutation du coffre.
+
+Limites du pilote :
+
+- Il qualifie le chemin nominal. Les crashs, l'initialisation interrompue et
+  la récupération restent prouvés par les tests synthétiques et la CI ; le
+  pilote ne simule aucune coupure de courant.
+- Un seul jeu, une seule source, un seul poste ; la rotation de `current`
+  relève de B2c.
+- Ne sont versionnés ni les empreintes individuelles, ni le receipt réel, ni
+  le nom de profil, ni aucun chemin personnel, ni la sortie complète ; selon
+  les vérifications du propriétaire, l'ancien coffre et les sauvegardes
+  sources restent intacts.
+
 ## Écarts au plan
 
 - Les éléments 3, 4 et 5 du §8.2 forment un seul commit, `26319ea` :
@@ -220,13 +271,17 @@ désormais à chaque lecture.
 ## Questions pour le propriétaire
 
 1. Autoriser le push de `feat/b2b-first-publication` et l'ouverture de la PR
-   vers `release/v0.1.0-a1`.
+   vers `release/v0.1.0-a1`. *Réglée : GO de push, puis GO de fusion ; PR #6
+   fusionnée en `8f9f5e1`.*
 2. Valider le regroupement des éléments 3 à 5 du §8.2 en un commit, et les
    écarts ci-dessus, dont la modification de `platform/filesystem`.
+   *Sans réponse explicite à ce jour.*
 3. Confirmer la décision M3 : une opération sans enregistrement est
-   abandonnée même si un `current` existe.
+   abandonnée même si un `current` existe. *Sans réponse explicite à ce
+   jour.*
 4. Après fusion, fixer le cadre du pilote B2b : coffre neuf, volume, jeu, et
-   autorisation nominative.
+   autorisation nominative. *Réglée : pilote exécuté par le propriétaire et
+   validé, voir [Pilote B2b](#pilote-b2b).*
 
 ## Recommandation
 
@@ -235,3 +290,8 @@ le SHA exact : critères 6 à 14, 20 et 21 couverts ; revues indépendantes
 menées et intégrées ; critère 15 partiel, le pilote attendant son GO. **Pas
 d'auto-approbation** : push, PR, fusion et pilote attendent chacun une
 décision du propriétaire. Aucun tag ni release.
+
+**Après fusion :** CI verte sur la tête de la PR et sur le commit de fusion,
+pilote exécuté et validé par le propriétaire. B2b est clos fonctionnellement ;
+le préalable de B2c est levé, mais B2c attend son propre GO de développement.
+Aucun tag ni release.
