@@ -47,6 +47,12 @@ Aucun tag ni release n'est publié par le bootstrap.
   instructions agents et dossier historique du pilote Odyssey.
 - Licence MIT choisie par le propriétaire du projet.
 
+### Security
+
+- Toolchain Go épinglée en 1.27.3 dans `go.mod`, donc en CI : corrige
+  GO-2026-6809 dans `crypto/x509` de la bibliothèque standard, signalé par
+  govulncheck au niveau module seulement ; le code ne l'appelle pas.
+
 ### Limits
 
 - `sync` ne fait que planifier : `--apply` et `--recover` arrivent avec B2b
