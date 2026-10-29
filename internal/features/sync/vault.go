@@ -87,6 +87,14 @@ func resolveVault(scope Scope, vaultPath string, segments []string) (*vault, err
 // read classifies an existing vault and, when it is initialized, reads the
 // marker, the game directory, its journals and receipts.
 func (v *vault) read(scope Scope, vaultPath string, segments []string, gameID string) error {
+	return v.readProbing(scope, vaultPath, segments, gameID, true)
+}
+
+// readProbing reads the vault; with probe, a pending operation whose lock
+// is held by another process is reported as a running sync, code 1, rather
+// than as an interrupted one. A run that holds the lock itself does not
+// probe it.
+func (v *vault) readProbing(scope Scope, vaultPath string, segments []string, gameID string, probe bool) error {
 	if !v.exists {
 		return nil
 	}
@@ -131,7 +139,20 @@ func (v *vault) read(scope Scope, vaultPath string, segments []string, gameID st
 	for _, name := range classified.Unexpected {
 		v.intervene(CauseUnexpectedEntry, name, "has no place at the vault root")
 	}
-	return v.readGame(scope, vaultPath, root, gameID, hasEntry(entries, gamesDir))
+	if err := v.readGame(scope, vaultPath, root, gameID, hasEntry(entries, gamesDir)); err != nil {
+		return err
+	}
+	if probe && v.lock && len(v.pending) > 0 {
+		lock, err := scope.OpenRegular(join(root, gamesDir+"/"+gameID+"/"+lockFile))
+		var busy interface{ Busy() bool }
+		if errors.As(err, &busy) && busy.Busy() {
+			return errVault(vaultPath, "another sync is running on this game; run it again once it ends")
+		}
+		if err == nil {
+			_ = lock.Close()
+		}
+	}
+	return nil
 }
 
 func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool) error {

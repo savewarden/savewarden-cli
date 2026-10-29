@@ -59,7 +59,14 @@ func TestJournalAmbiguities(t *testing.T) {
 			return append(names, other)
 		}, "duplicate record number 002"},
 		{"broken chain", func(names []string, c map[string][]byte) []string {
-			c[names[0]] = record(t, 1, backup.StepPlanned, false, "", at.Add(time.Hour))
+			// A valid planned record, but not the one record 002 chains to.
+			values := valuesFor(t, backup.StepPlanned, false)
+			values.Plan.GameName = "Another Game"
+			r, err := backup.NewRecord(1, backup.StepPlanned, op, at, "", values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c[names[0]] = mustEncode(t, r)
 			return names
 		}, "chain broken"},
 		{"forbidden transition", func(names []string, c map[string][]byte) []string {
@@ -305,5 +312,16 @@ func TestIncoherentTemporariesAreAmbiguous(t *testing.T) {
 				t.Fatalf("error = %v, want an ambiguity mentioning %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// Plan B2 §4.7: the plan starts at the date of its own record.
+func TestPlanStartsAtItsRecord(t *testing.T) {
+	data := record(t, 1, backup.StepPlanned, false, "", at.Add(time.Second))
+	name := backup.RecordName(1, backup.StepPlanned)
+	var ambiguity *backup.AmbiguityError
+	if _, err := backup.ParseJournal(op, []string{name}, map[string][]byte{name: data}); !errors.As(err, &ambiguity) ||
+		!strings.Contains(err.Error(), "started_at") {
+		t.Fatalf("error = %v", err)
 	}
 }

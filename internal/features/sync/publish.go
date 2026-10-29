@@ -20,8 +20,12 @@ func (o *operation) publish() error {
 	}
 	o.critical = true
 	moved, err := o.switchTo(o.stagingDir(), current, o.staging)
+	var unexplained *unexplainedError
 	switch {
 	case err == nil:
+	case errors.As(err, &unexplained):
+		// An object no record explains: nothing is recorded or moved.
+		return o.intervene(err.Error())
 	case moved:
 		return o.intervene("the switch did not end as recorded: " + err.Error())
 	default:
@@ -63,11 +67,11 @@ func (o *operation) switchTo(from, to string, want backup.FileID) (moved bool, e
 	case err != nil:
 		return false, fmt.Errorf("%s cannot be checked: %w", from, err)
 	case id != want:
-		return false, fmt.Errorf("%s is %s, not the directory %s recorded by staged", from, id, want)
+		return false, &unexplainedError{fmt.Sprintf("%s is %s, not the directory %s recorded by staged", from, id, want)}
 	}
 	switch _, err := o.vault.Identity(to); {
 	case err == nil:
-		return false, fmt.Errorf("%s exists", to)
+		return false, &unexplainedError{fmt.Sprintf("%s exists, and no record explains it", to)}
 	case !errors.Is(err, fs.ErrNotExist):
 		return false, fmt.Errorf("%s cannot be checked: %w", to, err)
 	}
@@ -92,6 +96,12 @@ func (o *operation) switchTo(from, to string, want backup.FileID) (moved bool, e
 	}
 	return true, nil
 }
+
+// unexplainedError reports, before a rename, an object that no record
+// explains: an ambiguity of ADR 0006 §3.
+type unexplainedError struct{ detail string }
+
+func (e *unexplainedError) Error() string { return e.detail }
 
 // writeReceipt commits receipts\<op>.json from the plan and returns its
 // SHA-256. A receipt written at publication has publishedAt; one rebuilt by

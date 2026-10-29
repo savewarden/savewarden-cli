@@ -323,7 +323,7 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		if err != nil {
 			return Journal{}, ambiguous("record %s: %v", name, err)
 		}
-		if err := j.coherent(r.Step, values); err != nil {
+		if err := j.coherent(r, values); err != nil {
 			return Journal{}, ambiguous("record %s: %v", name, err)
 		}
 		j.Records = append(j.Records, r)
@@ -370,9 +370,13 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 
 // coherent checks the values of the next record against the records
 // before it, and keeps what later records refer to.
-func (j *Journal) coherent(step Step, v StepValues) error {
-	switch step {
+func (j *Journal) coherent(r Record, v StepValues) error {
+	switch step := r.Step; step {
 	case StepPlanned:
+		// The plan starts at the date of its record (plan B2 §4.7).
+		if !v.Plan.StartedAt.Equal(r.At) {
+			return fmt.Errorf("plan started_at %s differs from the date of its record %s", formatUTC(v.Plan.StartedAt), formatUTC(r.At))
+		}
 		j.Previous, j.Plan, j.PlanSHA256 = v.Previous, v.Plan, v.PlanSHA256
 	case StepStaged, StepVerified:
 		want, err := ContentDigest(j.Plan.Sources)

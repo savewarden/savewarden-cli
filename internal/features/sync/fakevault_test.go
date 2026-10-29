@@ -273,12 +273,14 @@ func (s *fakeVault) Lock(name string) error {
 		if s.v.locks[path] {
 			return busyError{}
 		}
-		switch n := s.v.f.get(path); {
+		n := s.v.f.get(path)
+		switch {
 		case n == nil:
-			s.v.f.put(path, s.v.f.file(""))
+			n = s.v.f.put(path, s.v.f.file(""))
 		case !n.mode.IsRegular():
 			return errors.New(name + ": not a regular file")
 		}
+		n.busy = true
 		s.v.locks[path], s.lock = true, path
 		return nil
 	})
@@ -287,19 +289,27 @@ func (s *fakeVault) Lock(name string) error {
 func (s *fakeVault) Close() error {
 	if s.lock != "" {
 		delete(s.v.locks, s.lock)
+		if n := s.v.f.get(s.lock); n != nil {
+			n.busy = false
+		}
 		s.lock = ""
 	}
 	s.held = map[string]bool{}
 	return nil
 }
 
-// fakeClock advances only when slept on.
+// fakeClock ticks one microsecond at every reading, like a real clock
+// between two calls, and jumps when slept on.
 type fakeClock struct {
 	now   time.Time
 	slept []time.Duration
 }
 
-func (c *fakeClock) Now() time.Time { return c.now }
+func (c *fakeClock) Now() time.Time {
+	now := c.now
+	c.now = c.now.Add(time.Microsecond)
+	return now
+}
 
 func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) error {
 	if err := ctx.Err(); err != nil {

@@ -251,11 +251,21 @@ func describe(err error) error {
 		case errorInvalidDrive, errorNotReady:
 			return fmt.Errorf("volume not available: %w", fs.ErrNotExist)
 		case errorSharingViolation:
-			return fmt.Errorf("locked by another process: %w", err)
+			return &lockedError{err}
 		}
 	}
 	return err
 }
+
+// lockedError reports a file held by another process without sharing,
+// such as a save locked by its game or the lock of a running sync.
+type lockedError struct{ err error }
+
+func (e *lockedError) Error() string { return "locked by another process: " + e.err.Error() }
+func (e *lockedError) Unwrap() error { return e.err }
+
+// Busy marks the error for callers that cannot import this package.
+func (e *lockedError) Busy() bool { return true }
 
 // longPath prefixes \\?\ so CreateFile reads the clean absolute path
 // literally, beyond MAX_PATH and without Win32 normalisation.

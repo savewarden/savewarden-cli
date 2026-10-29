@@ -51,6 +51,11 @@ type Recovery struct {
 // without writing anything. An ambiguity is an InterventionError: nothing
 // is guessed, and --apply would do nothing either.
 func (s *Service) RecoverPlan(ctx context.Context, request Request) (Recovery, error) {
+	return s.recoverPlan(ctx, request, true)
+}
+
+// recoverPlan is RecoverPlan; a run that holds the lock does not probe it.
+func (s *Service) recoverPlan(ctx context.Context, request Request, probe bool) (Recovery, error) {
 	manifest, err := s.manifests.Read(request.ManifestPath)
 	if err != nil {
 		return Recovery{}, err
@@ -76,7 +81,7 @@ func (s *Service) RecoverPlan(ctx context.Context, request Request) (Recovery, e
 	if rec.Volume, err = s.describe(request.VaultPath, vaultVolume, vaultSegments, v.exists); err != nil {
 		return rec, err
 	}
-	if err := v.read(scope, request.VaultPath, vaultSegments, manifest.Game.ID); err != nil {
+	if err := v.readProbing(scope, request.VaultPath, vaultSegments, manifest.Game.ID, probe); err != nil {
 		return rec, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -100,6 +105,11 @@ func (s *Service) RecoverPlan(ctx context.Context, request Request) (Recovery, e
 	}
 	if len(v.pending) == 0 {
 		return rec, nil
+	}
+	// A receipt that cannot be read is never rewritten, completed or
+	// replaced: recovery stops before writing anything (ADR 0006 A5).
+	if len(v.invalid) > 0 {
+		return rec, &InterventionError{Operation: v.pending[0].Operation, Cause: "receipt " + v.invalid[0] + " is not valid; it is never rewritten"}
 	}
 	rec.Operation = v.pending[0].Operation
 	rec.journal = v.journals[rec.Operation]
@@ -173,11 +183,11 @@ func (s *Service) Recover(ctx context.Context, request Request, w Writer) (Resul
 		return result, errVault(request.VaultPath, "%w", err)
 	}
 	o := &operation{
-		s: s, w: w, ctx: ctx, vault: session, op: rec.Operation, game: gamesDir + "/" + rec.Game.ID,
+		s: s, w: w, ctx: ctx, vault: session, op: rec.Operation, game: gamesDir + "/" + rec.Game.ID, recovering: true,
 		plan:     Plan{Vault: rec.Vault, Game: rec.Game, vaultVolume: rec.vaultVolume, vaultSegments: rec.vaultSegments},
 		attempts: map[int]map[int]bool{}, receipt: map[int]bool{}, marker: map[int]bool{},
 	}
-	err = o.recover(&rec, request)
+	err = o.unfinished(o.recover(&rec, request))
 	if closeErr := session.Close(); err == nil && closeErr != nil {
 		err = closeErr
 	}
@@ -190,8 +200,17 @@ func (s *Service) Recover(ctx context.Context, request Request, w Writer) (Resul
 
 func (o *operation) recover(rec *Recovery, request Request) error {
 	if rec.Action == RecoverInitialization {
+		// The vault root is read again once the session pins it: still only
+		// marker temporaries, the same ones (ADR 0006 I3).
+		again, err := o.s.recoverPlan(o.ctx, request, false)
+		if err != nil {
+			return err
+		}
+		if again.Action != RecoverInitialization || len(again.observed.rootTaken) != len(rec.observed.rootTaken) {
+			return errVault(rec.Vault, "vault-changed: the vault changed since the recovery plan; run sync --recover again")
+		}
 		// The marker alone; games and the rest come with the next --apply.
-		for k := range rec.observed.rootTaken {
+		for k := range again.observed.rootTaken {
 			o.marker[k] = true
 		}
 		marker, err := backup.EncodeMarker(backup.Marker{CreatedAt: o.now(), ToolVersion: o.w.ToolVersion})
@@ -216,7 +235,7 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 		return errVault(rec.Vault, "lock: %w", err)
 	}
 	// Under lock, the decision must be the one just shown.
-	again, err := o.s.RecoverPlan(o.ctx, request)
+	again, err := o.s.recoverPlan(o.ctx, request, false)
 	if err != nil {
 		return err
 	}
@@ -276,7 +295,14 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 	if err != nil {
 		return err
 	}
+	_, receiptCommitted := rec.observed.receiptSum[o.op]
 	if differences := compareWithReceipt(dir, backup.Receipt{Sources: o.planned.Sources}); len(differences) > 0 {
+		if receiptCommitted {
+			// A5 and A6: a receipt already describes current, which no
+			// longer matches; moving it back would leave the receipt orphan.
+			return o.intervene(fmt.Sprintf("current no longer matches the plan of %s, whose receipt is committed: %s %s, %s",
+				o.op, orDash(differences[0].source), orDash(differences[0].path), differences[0].detail))
+		}
 		if err := o.record(backup.StepUnpublishIntent, backup.StepValues{Current: o.staging}); err != nil {
 			return err
 		}
@@ -286,7 +312,7 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 	digest, ok := rec.observed.receiptSum[o.op]
 	if ok {
 		receipt := findReceipt(rec.observed, o.op)
-		if receipt == nil || receipt.PlanSHA256 != o.planSum || !sameSources(receipt.Sources, o.planned.Sources) {
+		if receipt == nil || !o.matchesPlan(*receipt) {
 			return o.intervene("the receipt of " + o.op + " does not match its plan")
 		}
 	} else {
@@ -333,6 +359,15 @@ func findReceipt(v *vault, op string) *backup.Receipt {
 		}
 	}
 	return nil
+}
+
+// matchesPlan reports whether a committed receipt is the one this
+// operation writes: everything but the moment of publication or recovery.
+func (o *operation) matchesPlan(r backup.Receipt) bool {
+	p := o.planned
+	return r.Operation == o.op && r.ToolVersion == p.ToolVersion && r.GameID == p.GameID && r.GameName == p.GameName &&
+		r.StartedAt.Equal(p.StartedAt) && r.PublishIntentAt.Equal(o.intentAt) && r.Previous == p.Previous &&
+		r.PlanSHA256 == o.planSum && r.Changes == p.Changes && sameSources(r.Sources, p.Sources)
 }
 
 func sameSources(a, b []backup.ReceiptSource) bool {

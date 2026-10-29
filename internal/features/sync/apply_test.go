@@ -467,8 +467,13 @@ func TestCrashAtEveryVaultCall(t *testing.T) {
 				if journal == nil || journal.children["005-publish-intent.rec"] == nil {
 					t.Fatalf("%s: current without publish-intent", name)
 				}
-				if current.id != clean.f.get(gameDir+`\current`).id && current.id == 0 {
-					t.Fatalf("%s: current of unknown identity", name)
+				staged, err := backup.DecodeRecord(journal.children["003-staged.rec"].data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				values, err := staged.Values()
+				if err != nil || values.Staging != (backup.FileID{Volume: 0x1a2b3c4d, Index: uint64(current.id)}) { //nolint:gosec // G115: node ids count up from 1.
+					t.Fatalf("%s: current is not the staged directory: %v, %v", name, values.Staging, err)
 				}
 			}
 			if p.Outcome() == "changes" && r.f.get(gameDir+`\journal\`+op1) != nil {
@@ -538,4 +543,56 @@ func (v *racingVault) Move(from, to string) error {
 		v.r.swap = nil
 	}
 	return v.Vault.Move(from, to)
+}
+
+// A current that appears before the switch is an object no record
+// explains: nothing is recorded or moved, code 3.
+func TestCurrentAppearingBeforeTheSwitch(t *testing.T) {
+	f := world()
+	vaults := newFakeVaults(f)
+	staging := "games/synthetic-game/staging/" + op1
+	racing := &racingVaults{fakeVaults: vaults, from: "never", swap: nil}
+	appearing := &appearingCurrent{racingVaults: racing, staging: staging, appear: func() { f.mkdir(gameDir + `\current`) }}
+	result, err := service(f, manifest()).Apply(context.Background(), sync.Request{ManifestPath: "m.yaml", VaultPath: vaultPath},
+		sync.Writer{Vaults: appearing, Clock: &fakeClock{now: at}, Random: strings.NewReader("\x1a\x2b\x3c\x4d"), ToolVersion: "dev"})
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention || !strings.Contains(err.Error(), "no record explains") {
+		t.Fatalf("result %+v, %v", result, err)
+	}
+	journal := names(f.get(gameDir + `\journal\` + op1))
+	if journal[len(journal)-1] != "005-publish-intent.rec" || f.get(gameDir+`\staging\`+op1) == nil {
+		t.Fatalf("journal %v", journal)
+	}
+	if _, err := recoverWith(f, newFakeVaults(f)); !errors.As(err, &intervention) {
+		t.Fatalf("recovery of an unexplained current: %v", err)
+	}
+}
+
+// appearingCurrent creates current when the staging is released for the
+// switch, between the intent and the pre-check.
+type appearingCurrent struct {
+	*racingVaults
+	staging string
+	appear  func()
+}
+
+func (a *appearingCurrent) Open(path string) (sync.Vault, error) {
+	v, err := a.fakeVaults.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return &appearingVault{Vault: v, a: a}, nil
+}
+
+type appearingVault struct {
+	sync.Vault
+	a *appearingCurrent
+}
+
+func (v *appearingVault) Release(dir string) error {
+	if dir == v.a.staging && v.a.appear != nil {
+		v.a.appear()
+		v.a.appear = nil
+	}
+	return v.Vault.Release(dir)
 }

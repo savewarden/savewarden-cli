@@ -22,6 +22,7 @@ type node struct {
 	id       int
 	crypted  bool
 	listErr  error
+	busy     bool // held without sharing: cannot be opened
 	children map[string]*node
 }
 
@@ -223,6 +224,8 @@ func (s *fakeScope) OpenRegular(name string) (fs.File, error) {
 		return nil, &notFollowedError{name}
 	case !n.mode.IsRegular():
 		return nil, errors.New(name + ": not a regular file")
+	case n.busy:
+		return nil, busyError{}
 	}
 	s.fs.opened++
 	opened := info(base, n)

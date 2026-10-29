@@ -10,9 +10,12 @@
 //   - every directory from the volume root down to the vault, and every
 //     directory the session creates or holds below it, is opened with
 //     FILE_FLAG_OPEN_REPARSE_POINT, checked on its handle and kept open
-//     without FILE_SHARE_DELETE until released, so it cannot be renamed or
-//     swapped for a junction while names are created in it. os.Root is not
-//     used: it follows links that stay inside its tree;
+//     without FILE_SHARE_DELETE until released, so it cannot be renamed,
+//     deleted or replaced by a junction while names are created in it.
+//     A hostile process of the same account could still turn an empty
+//     pinned directory into a mount point in place: that stays outside the
+//     threat model of plan B2 §6.1. os.Root is not used: it follows links
+//     that stay inside its tree;
 //   - every name is checked against the Windows grammar of entities/game, and
 //     paths are passed with the \\?\ prefix, literally.
 //

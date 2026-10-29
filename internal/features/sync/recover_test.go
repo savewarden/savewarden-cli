@@ -92,9 +92,21 @@ func TestRecoveryAfterEveryCrash(t *testing.T) {
 				t.Fatalf("%s: the recovery plan wrote", name)
 			}
 			reached[rec.Action] = true
+			want := ""
+			switch last := lastStep(r.f, op1); {
+			case last == "published", last == "publish-intent" && r.f.get(gameDir+`\current`) != nil:
+				want = "published" // A3 to A7
+			case last == "publish-intent":
+				want = "rolled-back" // A2
+			case r.f.get(gameDir+`\journal\`+op1) != nil:
+				want = "abandoned" // up to A1, I8 included
+			}
 			result, err := recoverWith(r.f, newFakeVaults(r.f))
 			if err != nil {
 				t.Fatalf("%s: recovery %q: %+v, %v", name, rec.Action, result, err)
+			}
+			if got := lastStep(r.f, op1); got != want {
+				t.Fatalf("%s: recovery ended at %q, want %q", name, got, want)
 			}
 			terminal(t, name, r.f)
 		}
@@ -122,8 +134,12 @@ func TestRecoveryRebuildsTheReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	receipt, err := backup.DecodeReceipt(r.f.get(gameDir + `\receipts\` + op1 + `.json`).data)
-	if err != nil || receipt.PublishedAt != nil || receipt.RecoveredAt == nil || !receipt.RecoveredAt.Equal(at.Add(timeLater)) ||
-		receipt.RecoveredBy != "dev" || !receipt.PublishIntentAt.Equal(at) {
+	intent, decodeErr := backup.DecodeRecord(r.f.get(gameDir + `\journal\` + op1 + `\005-publish-intent.rec`).data)
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if err != nil || receipt.PublishedAt != nil || receipt.RecoveredAt == nil || receipt.RecoveredAt.Before(at.Add(timeLater)) ||
+		receipt.RecoveredBy != "dev" || !receipt.PublishIntentAt.Equal(intent.At) {
 		t.Fatalf("receipt %+v, %v", receipt, err)
 	}
 	if p := plan(t, r.f, manifest(), vaultPath); p.Outcome() != "up to date" {
@@ -187,15 +203,25 @@ func TestRollbackFailureIsRecordedOnce(t *testing.T) {
 // Plan B2 §5.9: a crash at any call of the recovery itself, then a new
 // recovery, ends in the same terminal state as an uninterrupted one.
 func TestRecoveryIsInterruptible(t *testing.T) {
+	tamper := func(f *fakeFS) { f.get(gameDir + `\current\saves\1.save`).data = []byte("ONE") }
 	for _, point := range []struct {
 		call  string
 		after bool
+		edit  func(*fakeFS)
 	}{
-		{"Move games/synthetic-game/staging/" + op1 + " games/synthetic-game/current", true},
-		{"Close games/synthetic-game/journal/" + op1 + "/005-publish-intent.rec.tmp-1", true},
-		{"CreateDir games/synthetic-game/staging/" + op1, true},
+		{"Move games/synthetic-game/staging/" + op1 + " games/synthetic-game/current", true, nil},
+		{"Move games/synthetic-game/staging/" + op1 + " games/synthetic-game/current", true, tamper},
+		{"Close games/synthetic-game/journal/" + op1 + "/005-publish-intent.rec.tmp-1", true, nil},
+		{"CreateDir games/synthetic-game/staging/" + op1, true, nil},
 	} {
-		reference := crashAt(t, point.call, point.after)
+		prepare := func() *run {
+			r := crashAt(t, point.call, point.after)
+			if point.edit != nil {
+				point.edit(r.f)
+			}
+			return r
+		}
+		reference := prepare()
 		clean := newFakeVaults(reference.f)
 		if _, err := recoverWith(reference.f, clean); err != nil {
 			t.Fatal(err)
@@ -204,7 +230,7 @@ func TestRecoveryIsInterruptible(t *testing.T) {
 		for k := 1; k <= len(clean.calls); k++ {
 			for _, after := range []bool{false, true} {
 				name := fmt.Sprintf("%s, then recovery crash %v at %d %s", point.call, after, k, clean.calls[k-1])
-				r := crashAt(t, point.call, point.after)
+				r := prepare()
 				crashing := newFakeVaults(r.f)
 				if after {
 					crashing.crashAfter = k
@@ -402,5 +428,125 @@ func TestRecoveryRefusesWhatTheProtocolCannotProduce(t *testing.T) {
 				t.Fatalf("the refused recovery wrote: %v", vaults.calls)
 			}
 		})
+	}
+}
+
+// A5 and A6: once a receipt is committed, a current that no longer matches
+// the plan is never moved back: that would leave the receipt orphan.
+func TestRecoveryKeepsAPublishedReceiptWithItsCurrent(t *testing.T) {
+	receipt := "Move games/synthetic-game/receipts/" + op1 + ".json.tmp-1 games/synthetic-game/receipts/" + op1 + ".json"
+	published := "Close games/synthetic-game/journal/" + op1 + "/006-published.rec.tmp-1"
+	for _, point := range []string{receipt, published} {
+		r := crashAt(t, point, point == receipt)
+		r.f.get(gameDir + `\current\saves\1.save`).data = []byte("ONE")
+		before := snapshot(r.f, `F:\`)
+		vaults := newFakeVaults(r.f)
+		result, err := recoverWith(r.f, vaults)
+		var intervention *sync.InterventionError
+		if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention || !strings.Contains(err.Error(), "receipt is committed") {
+			t.Fatalf("%s: %+v, %v", point, result, err)
+		}
+		for _, call := range vaults.calls {
+			if !strings.HasPrefix(call, "Lock ") {
+				t.Fatalf("%s: the refused recovery wrote: %v", point, vaults.calls)
+			}
+		}
+		if snapshot(r.f, `F:\`) != before {
+			t.Fatalf("%s: vault changed", point)
+		}
+	}
+}
+
+// I1: a committed receipt that does not decode is never rewritten, and no
+// run adds a temporary next to it.
+func TestRecoveryRefusesAnInvalidReceipt(t *testing.T) {
+	r := crashAt(t, "Move games/synthetic-game/receipts/"+op1+".json.tmp-1 games/synthetic-game/receipts/"+op1+".json", true)
+	r.f.get(gameDir + `\receipts\` + op1 + `.json`).data = []byte("{")
+	before := snapshot(r.f, `F:\`)
+	for i := range 3 {
+		vaults := newFakeVaults(r.f)
+		_, err := recoverWith(r.f, vaults)
+		var intervention *sync.InterventionError
+		if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "is not valid") || len(vaults.calls) != 0 {
+			t.Fatalf("run %d: %v, calls %v", i, err, vaults.calls)
+		}
+	}
+	if snapshot(r.f, `F:\`) != before {
+		t.Fatal("vault changed")
+	}
+}
+
+// Plan B2 §4.6: an operation whose lock is held is running, not
+// interrupted: every mode says so in code 1 and writes nothing.
+func TestARunningSyncIsNotAnInterruptedOne(t *testing.T) {
+	r := crashAt(t, "CreateDir games/synthetic-game/staging/"+op1, true)
+	holder := newFakeVaults(r.f)
+	session, err := holder.Open(vaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"games", "games/synthetic-game"} {
+		if err := session.Hold(dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := session.Lock("games/synthetic-game/sync.lock"); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(r.f, `F:\`)
+	if err := planError(r.f, manifest(), vaultPath); err == nil || !strings.Contains(err.Error(), "another sync is running") {
+		t.Fatalf("plan: %v", err)
+	}
+	if _, err := recoverPlan(r.f); err == nil || !strings.Contains(err.Error(), "another sync is running") {
+		t.Fatalf("recover plan: %v", err)
+	}
+	second := &run{f: r.f, vaults: holder, clock: &fakeClock{now: at}}
+	second.again(vaultPath)
+	var intervention *sync.InterventionError
+	if second.err == nil || errors.As(second.err, &intervention) || !strings.Contains(second.err.Error(), "another sync is running") ||
+		second.result.Effect != sync.EffectNone {
+		t.Fatalf("apply: %+v, %v", second.result, second.err)
+	}
+	if result, err := recoverWith(r.f, holder); err == nil || errors.As(err, &intervention) || result.Effect != sync.EffectNone {
+		t.Fatalf("recover: %+v, %v", result, err)
+	}
+	if snapshot(r.f, `F:\`) != before {
+		t.Fatal("vault changed")
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if rec, err := recoverPlan(r.f); err != nil || rec.Action != sync.RecoverAbandon {
+		t.Fatalf("once the lock is free: %+v, %v", rec, err)
+	}
+}
+
+// I3: a run that leaves its operation open says so: code 3, recover.
+func TestAnOpenOperationIsAnIntervention(t *testing.T) {
+	journal := "games/synthetic-game/journal/" + op1 + "/"
+	for name, failing := range map[string]func(call string) bool{
+		"planned record not committed": func(call string) bool { return call == "Close "+journal+"001-planned.rec.tmp-1" },
+		"failure not recorded": func(call string) bool {
+			return strings.HasPrefix(call, "Write games/synthetic-game/staging/") || strings.HasPrefix(call, "Close "+journal+"003-failed")
+		},
+	} {
+		f := world()
+		vaults := newFakeVaults(f)
+		vaults.failWrite = func(call string) error {
+			if failing(call) {
+				return errors.New("disk full")
+			}
+			return nil
+		}
+		r := &run{f: f, vaults: vaults, clock: &fakeClock{now: at}}
+		r.again(vaultPath)
+		var intervention *sync.InterventionError
+		if !errors.As(r.err, &intervention) || r.result.Effect != sync.EffectIntervention || !strings.Contains(r.err.Error(), "run sync --recover") {
+			t.Fatalf("%s: %+v, %v", name, r.result, r.err)
+		}
+		if _, err := recoverWith(f, newFakeVaults(f)); err != nil {
+			t.Fatalf("%s: recovery: %v", name, err)
+		}
+		terminal(t, name, f)
 	}
 }

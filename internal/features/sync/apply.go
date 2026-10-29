@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"strings"
 	"time"
 
 	"github.com/savewarden/savewarden-cli/internal/entities/backup"
@@ -137,11 +136,17 @@ type operation struct {
 	// cancellation is deferred until the switch is complete (ADR 0006 §7).
 	critical bool
 	// terminal is set once a terminal record is committed: nothing follows.
+	// open is set once this run left an operation that is not terminal:
+	// its operation directory, or for recovery any write.
 	terminal bool
-	planned  *backup.Planned
-	planSum  [32]byte
-	staging  backup.FileID
-	intentAt time.Time
+	open     bool
+	// recovering marks a --recover run: its first write leaves the
+	// operation open until a terminal record.
+	recovering bool
+	planned    *backup.Planned
+	planSum    [32]byte
+	staging    backup.FileID
+	intentAt   time.Time
 }
 
 // Apply plans, then copies, verifies and publishes a first generation
@@ -199,15 +204,27 @@ func (s *Service) begin(ctx context.Context, plan Plan, w Writer) (*operation, e
 
 // run performs the first publication; the caller closes the session.
 func (o *operation) run() error {
-	if err := o.initialize(); err != nil {
-		return err
-	}
-	for _, phase := range []func() error{o.stage, o.recheck, o.verify, o.publish} {
-		if err := phase(); err != nil {
-			return o.fail(err)
+	err := o.initialize()
+	if err == nil {
+		for _, phase := range []func() error{o.stage, o.recheck, o.verify, o.publish} {
+			if err = phase(); err != nil {
+				err = o.fail(err)
+				break
+			}
 		}
 	}
-	return nil
+	return o.unfinished(err)
+}
+
+// unfinished turns the error of a run that leaves an operation open into an
+// intervention: the vault then needs sync --recover (ADR 0007).
+func (o *operation) unfinished(err error) error {
+	var intervention *InterventionError
+	if err == nil || !o.open || o.terminal || errors.As(err, &intervention) {
+		return err
+	}
+	o.effect = EffectIntervention
+	return &InterventionError{Operation: o.op, Cause: oneLine(err.Error()) + "; the operation is not closed, run sync --recover"}
 }
 
 func (o *operation) result() Result {
@@ -288,8 +305,10 @@ func (o *operation) initialize() error {
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
 		return errVault(o.plan.Vault, "operation directory: %w", err)
 	}
-	o.effect = EffectStaged
+	o.effect, o.open = EffectStaged, true
 	// I9: the planned record, which starts the operation.
+	// The plan starts at the date of its own record (plan B2 §4.7).
+	o.started = o.now()
 	planned, err := o.plannedContent()
 	if err != nil {
 		return o.fail(err)
@@ -309,13 +328,17 @@ func (o *operation) underLock() error {
 	}
 	before := o.plan.observed
 	changed := v.state != VaultInitialized || len(v.interventions) > 0 || len(v.pending) > 0 ||
-		v.current != before.current || v.currentLink != before.currentLink || len(v.receipts) != len(before.receipts)
+		v.current != before.current || v.currentLink != before.currentLink ||
+		!sameOperations(v.receipts, before.receipts) || len(v.invalid) != len(before.invalid)
 	if changed {
 		return errVault(o.plan.Vault, "vault-changed: the vault changed since the plan; run sync again")
 	}
 	volume, err := o.s.volumes.Describe(o.plan.Vault)
 	if err != nil {
 		return errVault(o.plan.Vault, "volume cannot be described: %w", err)
+	}
+	if err := qualify(o.plan.Vault, volume); err != nil {
+		return err
 	}
 	if volume.Available < o.plan.Needed {
 		return &BlockedError{Code: CodeInsufficientSpace,
@@ -372,7 +395,12 @@ func (o *operation) ensureDir(dir string) error {
 // record commits the next record of the journal (ADR 0006 §3).
 func (o *operation) record(step backup.Step, values backup.StepValues) error {
 	seq := o.seq + 1
-	r, err := backup.NewRecord(seq, step, o.op, o.now(), o.prev, values)
+	at := o.now()
+	if step == backup.StepPlanned {
+		// The plan was dated when it was built; its record carries that date.
+		at = o.started
+	}
+	r, err := backup.NewRecord(seq, step, o.op, at, o.prev, values)
 	if err != nil {
 		return err
 	}
@@ -410,6 +438,9 @@ func (o *operation) commitFile(final string, data []byte, used map[int]bool, cre
 	file, err := o.vault.NewFile(temporary, time.Time{})
 	if err != nil {
 		return err
+	}
+	if o.recovering {
+		o.open = true
 	}
 	if created != nil {
 		created()
@@ -462,11 +493,7 @@ func (o *operation) fail(err error) error {
 	if errors.As(err, &intervention) || o.seq == 0 || o.critical || o.terminal {
 		return err
 	}
-	reason := strings.ReplaceAll(err.Error(), "\n", " ")
-	if len(reason) > 1000 {
-		reason = reason[:1000]
-	}
-	if recordErr := o.record(backup.StepFailed, backup.StepValues{Text: reason}); recordErr != nil {
+	if recordErr := o.record(backup.StepFailed, backup.StepValues{Text: oneLine(err.Error())}); recordErr != nil {
 		return errors.Join(err, fmt.Errorf("the failure could not be recorded, operation %s needs recovery: %w", o.op, recordErr))
 	}
 	return err
@@ -484,8 +511,26 @@ func (s *Service) observe(vaultPath, volume string, segments []string, gameID st
 	if err != nil {
 		return nil, err
 	}
-	if err := v.read(scope, vaultPath, segments, gameID); err != nil {
+	// This run holds the lock: it must not take its own lock for another's.
+	if err := v.readProbing(scope, vaultPath, segments, gameID, false); err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+// sameOperations compares two sets of receipts by operation.
+func sameOperations(a, b []backup.Receipt) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, r := range a {
+		seen[r.Operation] = true
+	}
+	for _, r := range b {
+		if !seen[r.Operation] {
+			return false
+		}
+	}
+	return true
 }
