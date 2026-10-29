@@ -1,11 +1,13 @@
 # Sécurité
 
-Savewarden est en développement, version `dev`, lot B2a : aucune release
-supportée n'est disponible. `inspect` inventorie des sources en lecture seule
-et `sync` planifie leur copie vers un coffre, en lecture seule aussi. Le
-modèle de sécurité est décrit dans [docs/safety-model.md](docs/safety-model.md),
-le protocole de publication et de récupération qui gouvernera les écritures
-dans [ADR 0006](docs/adr/0006-publication-recovery-protocol.md).
+Savewarden est en développement, version `dev`, lot B2b : aucune release
+supportée n'est disponible. `inspect` inventorie des sources en lecture seule ;
+`sync` planifie leur copie vers un coffre et, avec `--apply`, y publie une
+première génération vérifiée, sans jamais écrire dans une source. Le modèle de
+sécurité est décrit dans [docs/safety-model.md](docs/safety-model.md), le
+protocole de publication et de récupération qui gouverne les écritures dans
+[ADR 0006](docs/adr/0006-publication-recovery-protocol.md), le seul package
+autorisé à écrire dans [ADR 0005](docs/adr/0005-write-allowed-package.md).
 
 ## Signaler un problème
 

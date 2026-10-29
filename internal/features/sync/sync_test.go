@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -53,7 +52,7 @@ func world() *fakeFS {
 }
 
 func service(f *fakeFS, m game.Manifest) *sync.Service {
-	return sync.New(fakeManifests{m}, inspect.New(nil, inspectFS{f}), syncFiles{f})
+	return sync.New(fakeManifests{m}, inspect.New(nil, inspectFS{f}), syncFiles{f}, fakeVolumes{f})
 }
 
 func plan(t *testing.T, f *fakeFS, m game.Manifest, vault string) sync.Plan {
@@ -156,17 +155,49 @@ func publish(t *testing.T, f *fakeFS, m game.Manifest, op, previous string) {
 
 func windows(volume string, segments []string) string { return volume + strings.Join(segments, `\`) }
 
+// stepValues gives each step of a synthetic first publication the values
+// the protocol would record.
+func stepValues(t *testing.T, step backup.Step) backup.StepValues {
+	t.Helper()
+	plan := &backup.Planned{
+		ToolVersion: "dev", GameID: "synthetic-game", GameName: "Synthetic Game", StartedAt: at,
+		Sources: []backup.ReceiptSource{{ID: "saves", Kind: "save", Required: true, State: backup.SourceMissing, Path: installPath + `\saves`}},
+	}
+	content, err := backup.ContentDigest(plan.Sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := backup.FileID{Volume: 1, Index: 1}
+	switch step {
+	case backup.StepPlanned:
+		return backup.StepValues{Plan: plan}
+	case backup.StepStaged:
+		return backup.StepValues{Staging: staging, Digest: content}
+	case backup.StepVerified:
+		return backup.StepValues{Digest: content}
+	case backup.StepPublishIntent:
+		return backup.StepValues{Staging: staging}
+	case backup.StepUnpublishIntent:
+		return backup.StepValues{Current: staging}
+	case backup.StepPublished:
+		return backup.StepValues{Digest: sha256.Sum256([]byte("receipt"))}
+	case backup.StepFailed, backup.StepAbandoned, backup.StepRollbackFailed:
+		return backup.StepValues{Text: "synthetic"}
+	}
+	return backup.StepValues{}
+}
+
 // writeJournal commits the given steps of op, as the protocol would.
 func writeJournal(t *testing.T, f *fakeFS, op string, steps ...backup.Step) {
 	t.Helper()
 	dir := f.mkdir(vaultPath + `\games\synthetic-game\journal\` + op)
 	prev := ""
 	for i, step := range steps {
-		fields := map[string]json.RawMessage{}
-		if step == backup.StepPlanned {
-			fields["previous"] = json.RawMessage("null")
+		r, err := backup.NewRecord(i+1, step, op, at, prev, stepValues(t, step))
+		if err != nil {
+			t.Fatal(err)
 		}
-		data, err := backup.EncodeRecord(backup.Record{Seq: i + 1, Step: step, Op: op, At: at, Prev: prev, Fields: fields})
+		data, err := backup.EncodeRecord(r)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -584,4 +615,45 @@ func TestVaultStatesThatFailClosed(t *testing.T) {
 			t.Fatalf("plan = %+v", p)
 		}
 	})
+}
+
+// D11: only local NTFS volumes are qualified; the plan refuses the others
+// before anything else, in code 1.
+func TestVaultVolumeIsQualified(t *testing.T) {
+	for _, volume := range []backup.Volume{
+		{FileSystem: "ReFS", Drive: backup.DriveFixed, Available: 1 << 40},
+		{FileSystem: "FAT32", Drive: backup.DriveRemovable, Available: 1 << 40},
+		{FileSystem: "exFAT", Drive: backup.DriveRemovable, Available: 1 << 40},
+		{FileSystem: "NTFS", Drive: backup.DriveRemote, Available: 1 << 40},
+		{FileSystem: "NTFS", Drive: backup.DriveRAM, Available: 1 << 40},
+		{FileSystem: "NTFS", Drive: backup.DriveUnknown, Available: 1 << 40},
+		{FileSystem: "ntfs", Drive: backup.DriveFixed, Available: 1 << 40},
+	} {
+		f := world()
+		f.volumeOf[`F:\`] = volume
+		if err := planError(f, manifest(), vaultPath); err == nil || !strings.Contains(err.Error(), "qualified") {
+			t.Errorf("%+v: %v", volume, err)
+		}
+	}
+	f := world()
+	f.volumeOf[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveRemovable, Available: 1 << 40}
+	if p := plan(t, f, manifest(), vaultPath); p.Volume.Drive != backup.DriveRemovable || p.Needed != 6+64<<20 {
+		t.Fatalf("removable NTFS: %+v", p)
+	}
+}
+
+// V2: the plan needs the full new generation plus max(64 MiB, 5 %) of
+// space available to the user.
+func TestSpaceIsCheckedAtPlan(t *testing.T) {
+	f := world()
+	f.volumeOf[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 6 + 64<<20 - 1}
+	p := plan(t, f, manifest(), vaultPath)
+	expectFindings(t, p, "blocking insufficient-space  "+vaultPath)
+	if !strings.Contains(p.Findings[0].Detail, "67108870 bytes needed, 67108869 available") {
+		t.Fatalf("detail %q", p.Findings[0].Detail)
+	}
+	f.volumeOf[`F:\`] = backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 6 + 64<<20}
+	if p := plan(t, f, manifest(), vaultPath); p.Outcome() != "changes" || p.Needed != 6+64<<20 {
+		t.Fatalf("exact space: %q, %d", p.Outcome(), p.Needed)
+	}
 }

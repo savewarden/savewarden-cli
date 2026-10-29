@@ -24,11 +24,23 @@ var externalModules = map[string][]string{
 	"internal/platform/manifests": {"go.yaml.in/yaml/v3"},
 }
 
+// externalPackages lists, per package directory and without sub-packages on
+// either side, third-party packages allowed one by one. x/sys/windows serves
+// the only package that writes (ADR 0005); none of its sibling packages.
+var externalPackages = map[string][]string{
+	"internal/platform/vault": {"golang.org/x/sys/windows"},
+}
+
 func isStandardLibrary(path string) bool {
 	return !strings.Contains(strings.Split(path, "/")[0], ".") && path != "C"
 }
 
 func allowedExternal(source, target string) bool {
+	for _, allowed := range externalPackages[source] {
+		if target == allowed {
+			return true
+		}
+	}
 	for layer, modules := range externalModules {
 		if !inPackage(source, layer) {
 			continue
@@ -178,6 +190,26 @@ func TestArchitectureImportRules(t *testing.T) {
 		{"internal/features/sync", "syscall", false},
 		{"internal/features/sync", "github.com/spf13/cobra", false},
 		{"internal/cli", modulePath + "internal/features/sync", true},
+		// ADR 0005: x/sys/windows in internal/platform/vault alone.
+		{"internal/platform/vault", "golang.org/x/sys/windows", true},
+		{"internal/platform/vault", "syscall", true},
+		{"internal/platform/vault", modulePath + "internal/entities/backup", true},
+		{"internal/platform/vault", "golang.org/x/sys/windows/registry", false},
+		{"internal/platform/vault", "golang.org/x/sys/windows/svc", false},
+		{"internal/platform/vault", "golang.org/x/sys/unix", false},
+		{"internal/platform/vault", "golang.org/x/sys", false},
+		{"internal/platform/vault", modulePath + "internal/features/sync", false},
+		{"internal/platform/vault", modulePath + "internal/cli", false},
+		{"internal/platform/vault", "github.com/spf13/cobra", false},
+		{"internal/platform/vault/inner", "golang.org/x/sys/windows", false},
+		{"internal/platform/vaultx", "golang.org/x/sys/windows", false},
+		{"internal/platform/filesystem", "golang.org/x/sys/windows", false},
+		{"internal/platform/manifests", "golang.org/x/sys/windows", false},
+		{"internal/features/sync", "golang.org/x/sys/windows", false},
+		{"internal/entities/backup", "golang.org/x/sys/windows", false},
+		{"internal/app", "golang.org/x/sys/windows", false},
+		{"internal/cli", "golang.org/x/sys/windows", false},
+		{"cmd/savewarden", "golang.org/x/sys/windows", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.source+"->"+tt.target, func(t *testing.T) {

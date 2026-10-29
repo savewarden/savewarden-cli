@@ -1,10 +1,13 @@
 # `savewarden sync`
 
-Planifie, en lecture seule, la copie des sources d'un
+Planifie, publie ou récupère la copie des sources d'un
 [manifeste v1](../manifest-v1.md) vers un [coffre](../vault.md).
 
 ```powershell
 savewarden sync --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre'
+savewarden sync --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre' --apply
+savewarden sync --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre' --recover
+savewarden sync --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre' --recover --apply
 ```
 
 `--manifest` et `--vault` sont obligatoires. `--vault` est un chemin Windows
@@ -12,18 +15,32 @@ absolu avec lettre de lecteur, selon la grammaire du manifeste : chemins UNC,
 relatifs ou avec variables refusés, rien n'est nettoyé ni complété. Fermez le
 jeu et son launcher avant de planifier.
 
-**Cette version planifie seulement.** `--apply`, qui copiera et publiera, et
-`--recover`, qui reprendra une opération interrompue, arrivent avec les lots
-B2b et B2c ; aujourd'hui ce sont des flags inconnus, refusés en code 1. Le
-contrat complet de la commande est fixé par
-[ADR 0007](../adr/0007-sync-contract-receipt-v1.md).
+| Mode | Effet |
+| --- | --- |
+| Sans flag | Plan seulement : rien n'est écrit, pas même le coffre |
+| `--apply` | Copie, vérifie et publie la **première** génération du jeu ; un `current` existant et différent est refusé, `current-exists`, code 2 |
+| `--recover` | Montre comment une opération interrompue serait récupérée, sans rien écrire |
+| `--recover --apply` | Exécute cette récupération |
+
+Remplacer une génération existante, `--allow-removals` et
+`--accept-missing-source` arrivent avec le lot B2c ; aujourd'hui ces flags
+sont inconnus, refusés en code 1. Le contrat complet de la commande est fixé
+par [ADR 0007](../adr/0007-sync-contract-receipt-v1.md), le protocole
+d'écriture par [ADR 0006](../adr/0006-publication-recovery-protocol.md).
 
 ## Garanties
 
-- **Aucune écriture.** Le plan ne crée, ne modifie, ne déplace, ne supprime
+- **Le plan n'écrit rien.** Il ne crée, ne modifie, ne déplace, ne supprime
   et n'exécute rien : ni dans les sources, ni dans le coffre, qui n'est même
   pas créé s'il n'existe pas. Le vrai binaire est testé avec l'écriture
   refusée par ACL sur tout l'arbre, empreinte complète inchangée.
+- **`--apply` n'écrit que dans le coffre**, en créations exclusives : aucun
+  fichier existant n'est ouvert en écriture, remplacé, tronqué ni supprimé,
+  et un renommage n'écrase jamais rien. Les sources ne sont que lues ; le
+  vrai binaire publie avec l'écriture refusée par ACL sur l'installation.
+- **Vérifié avant publication.** Chaque fichier est haché pendant la copie,
+  la source est inventoriée une seconde fois, et le staging est relu depuis
+  le disque avant de devenir `current`.
 - **Aucun lien suivi.** Les sources sont inventoriées par le parcours
   d'[`inspect`](inspect.md) ; le coffre est lu de la même façon. Liens,
   jonctions, points d'analyse et placeholders sont signalés, jamais traversés.
@@ -45,7 +62,7 @@ manifest: D:\Manifests\synthetic-game.yaml
 game: synthetic-game (Synthetic Game)
 vault: D:\Vault (will be created)
 destination: D:\Vault\games\synthetic-game\current
-volume: not checked by this build
+volume: NTFS, fixed drive, 67108870 bytes needed
 current: none
 pending: none
 mode: plan only, nothing written
@@ -65,7 +82,7 @@ findings: 0 blocking, 1 info
 | --- | --- |
 | `vault` | Chemin et état : `will be created`, `empty, will be initialized`, `initialized` ou `initialization interrupted` |
 | `destination` | Emplacement de la génération courante du jeu dans le coffre |
-| `volume` | Le type de volume, NTFS local exigé, sera contrôlé à partir de B2b |
+| `volume` | Système de fichiers et type de lecteur du coffre, contrôlés avant tout : NTFS sur un lecteur local fixe ou amovible, sinon code 1 ; puis l'espace nécessaire, la taille complète de la nouvelle génération plus max(64 Mio, 5 %). L'espace disponible n'est pas affiché : il varierait d'un plan à l'autre |
 | `current` | Opération qui a produit la génération courante, `none`, ou `not checked, intervention required` quand une intervention arrête le plan |
 | `pending` | Opérations interrompues, avec leur dernière étape validée, ou `unknown, ambiguous journal` |
 | `plan` | `changes`, `up to date`, `blocked` ou `intervention required` |
@@ -81,7 +98,7 @@ bloc `interventions` précède les anomalies :
 
 ```text
 interventions: 1
-  pending-operation  20261105T101500-1a2b3c4d  last committed step publish-intent; recovery needed, --recover is available from B2b
+  pending-operation  20261105T101500-1a2b3c4d  last committed step verified; run sync --recover to see how it would be recovered
 ```
 
 ## Anomalies
@@ -97,6 +114,7 @@ interventions: 1
 | `current-modified` | bloquante | La génération courante ne correspond plus exactement à son receipt, n'en a pas, ou le receipt n'a plus de génération |
 | `long-path` | information | Chemin au-delà de 259 caractères dans le coffre |
 | `same-volume` | information | Coffre et source sur le même volume : ce n'est pas une sauvegarde hors disque |
+| `insufficient-space` | bloquante | Espace disponible pour l'utilisateur, quotas compris, inférieur à l'espace nécessaire ; ou taille qui déborderait 64 bits |
 
 Les anomalies du parcours d'`inspect` s'appliquent aussi : `link-not-followed`,
 `unreadable`, `changed-during-read`, `case-collision`, etc. Une anomalie sans
@@ -104,32 +122,111 @@ source porte `-` à sa place.
 
 | Intervention | Signification |
 | --- | --- |
-| `pending-operation` | Une opération s'est interrompue ; la récupération explicite arrive avec B2b |
-| `initialization-interrupted` | La création du coffre s'est interrompue ; seule la récupération explicite pourra la reprendre |
+| `pending-operation` | Une opération s'est interrompue ; `--recover` montre sa récupération, `--recover --apply` l'exécute |
+| `initialization-interrupted` | La création du coffre s'est interrompue ; seul `--recover --apply` la reprend |
 | `unexpected-entry` | Une entrée n'a pas sa place dans le coffre, ou un staging, une génération conservée n'est expliqué par aucun journal ni receipt |
 | `journal-ambiguous` | Un journal est incomplet, corrompu ou incohérent, ou deux opérations sont en attente |
 
 Voir le [guide du coffre](../vault.md) pour chacun de ces cas.
 
+## Publier : `--apply`
+
+`--apply` refait le plan, puis, s'il n'a aucune anomalie bloquante :
+
+1. crée le coffre et son marqueur s'il le faut, puis `games\<id>`, et prend
+   le verrou `sync.lock` : une seconde synchronisation du même jeu échoue,
+   `another sync is running` ;
+2. relit le coffre sous verrou, qui doit être tel que planifié, sinon
+   `vault-changed`, code 1 ; revérifie l'espace, sinon `insufficient-space`,
+   code 2 ;
+3. ouvre un journal d'opération, `journal\<op>`, dont chaque étape est
+   validée avant l'action qu'elle protège ;
+4. copie chaque fichier vers `staging\<op>`, en le hachant, et refuse tout
+   fichier source changé depuis le plan, `changed-during-sync`, code 2 ;
+5. inventorie la source une seconde fois, puis relit le staging depuis le
+   disque, `verification-mismatch` en cas d'écart, code 2 ;
+6. renomme `staging\<op>` en `current`, avec contrôle d'identité avant et
+   après, écrit le receipt, puis clôt le journal.
+
+Un plan déjà à jour n'écrit rien et sort en code 0. Après le plan, stdout
+ajoute, par exemple :
+
+```text
+operation: 20261105T101500-1a2b3c4d
+verification: 2 files, 6 bytes, SHA-256 verified
+published: F:\Coffre\games\synthetic-game\current
+receipt: F:\Coffre\games\synthetic-game\receipts\20261105T101500-1a2b3c4d.json
+```
+
+La dernière ligne de stderr dit ce que contient le coffre, quel que soit le
+code de sortie :
+
+| Ligne | Sens |
+| --- | --- |
+| `savewarden: vault: not modified` | Rien n'a été écrit |
+| `savewarden: vault: metadata only; nothing staged or published` | Seuls le coffre, son marqueur, `games`, le dossier du jeu ou le verrou ont été créés |
+| `savewarden: vault: current unchanged; operation <op> kept in staging` | L'opération a échoué et est close ; son staging reste en place |
+| `savewarden: vault: published <op>` | La génération est publiée, même si le code est 1 parce que stdout n'a pas pu être écrit |
+| `savewarden: vault: rolled back <op>; current unchanged` | Le renommage a échoué et rien n'a bougé |
+| `savewarden: vault: intervention required for <op>: <cause>` | L'opération attend une récupération, code 3 |
+
+Le renommage n'est retenté que si le dossier est momentanément utilisé,
+erreurs Windows 32 et 33, pendant cinq secondes au plus. Un fichier ouvert
+dans le staging, par exemple par l'Explorateur ou un antivirus, fait échouer
+le renommage aussitôt, erreur 5 : fermez les programmes qui utilisent le
+coffre, puis relancez.
+
+## Récupérer : `--recover`
+
+Une opération interrompue, par une coupure, un arrêt du processus ou une
+erreur, bloque le plan en code 3 avec `pending-operation`. `--recover`
+montre ce qui sera fait, sans rien écrire :
+
+```text
+manifest: D:\Manifests\synthetic-game.yaml
+game: synthetic-game (Synthetic Game)
+vault: F:\Coffre (initialized)
+volume: NTFS, fixed drive
+operation: 20261105T101500-1a2b3c4d
+last committed step: publish-intent
+observed: current new, staging absent
+action: verify current against the plan, then commit its receipt and published; if it differs, move it back to staging
+mode: recovery plan only, nothing written
+```
+
+`--recover --apply` l'exécute, sous verrou, après avoir relu le coffre :
+même opération, même observation, même action, sinon rien. Les actions sont
+décrites dans le [guide du coffre](../vault.md#récupérer-une-opération-interrompue).
+Toute situation que le protocole n'explique pas sort en code 3 sans rien
+écrire, à chaque exécution, avec le même diagnostic.
+
 ## Codes de sortie
 
 | Code | Signification | stderr |
 | --- | --- | --- |
-| `0` | Plan sans anomalie bloquante, ou déjà à jour | Vide |
-| `1` | Invocation, manifeste ou coffre invalide, coffre qui chevauche l'installation, sources qui se chevauchent sous un autre nom, volume indisponible, erreur de lecture, interruption ; ou plan impossible à écrire en entier, auquel cas stdout peut contenir un **préfixe tronqué** | Un diagnostic |
-| `2` | Plan complet avec au moins une anomalie bloquante | `savewarden: plan blocked: N blocking finding(s)` |
-| `3` | Le coffre demande une intervention avant tout plan | `savewarden: intervention required: <cause> <sujet>` |
+| `0` | Plan sans anomalie bloquante ; publication vérifiée ; déjà à jour ; récupération menée à son terme ; rien à récupérer | Vide pour le plan ; sinon la ligne d'état |
+| `1` | Invocation, manifeste ou coffre invalide, coffre qui chevauche l'installation, sources qui se chevauchent sous un autre nom, volume indisponible ou non qualifié : ReFS, FAT32, exFAT, réseau, optique, RAM, erreur de lecture ou d'écriture, verrou pris, `vault-changed`, renommage refusé, interruption ; ou rapport impossible à écrire en entier, auquel cas stdout peut contenir un **préfixe tronqué** | Un diagnostic, puis la ligne d'état avec `--apply` ou `--recover` |
+| `2` | Rapport complet avec au moins une anomalie bloquante, ou `current-exists`, `insufficient-space`, `changed-during-sync`, `verification-mismatch` : cette exécution n'a rien publié | `savewarden: plan blocked: N blocking finding(s)` ou la cause, puis la ligne d'état avec `--apply` |
+| `3` | Le coffre demande une intervention : opération en attente, initialisation interrompue, journal ambigu, observation contradictoire, rollback impossible, enveloppe de récupération épuisée | Le diagnostic, puis la ligne d'état avec `--apply` ou `--recover` |
 
-Fiez-vous au code de sortie, jamais à la seule présence d'une sortie.
+Fiez-vous au code de sortie pour le résultat de la commande, et à la ligne
+d'état, au receipt ou au plan pour l'état du coffre.
 
 ## Limites
 
 - **Windows seulement**, comme `inspect`.
-- **Plan seulement.** Rien n'est copié avant B2b.
-- **Pas un instantané atomique** : le plan repose sur le même parcours au
-  mieux qu'`inspect`.
-- **Volume non contrôlé** dans cette version : NTFS local sera exigé pour
-  écrire, à partir de B2b.
+- **Première publication seulement.** Remplacer un `current` existant est
+  la rotation du lot B2c.
+- **Pas un instantané atomique** : chaque fichier publié est exactement celui
+  qui a été haché, et aucun changement n'a été vu pendant la fenêtre ; un
+  changement suivi d'un retour à l'identique entre deux lectures reste
+  possible. Fermez le jeu et son launcher.
+- **Durabilité** : chaque fichier est vidé sur disque avant validation, mais
+  Windows ne garantit pas qu'un renommage de dossier survive à une coupure de
+  courant ; la récupération repose sur l'observation, jamais sur une
+  supposition (ADR 0006 §6).
+- **NTFS local seulement.** ReFS, y compris un Dev Drive, n'est pas encore
+  qualifié ; FAT32, exFAT et les lecteurs réseau sont refusés.
 - **Même disque physique** : deux volumes d'un même disque ne sont pas
   détectés ; un lecteur `subst` n'est pas reconnu comme redirection.
 - **Confidentialité.** La sortie contient des chemins locaux ; anonymisez-la

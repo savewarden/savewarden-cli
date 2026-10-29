@@ -3,7 +3,6 @@ package backup_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -16,6 +15,70 @@ const op = "20261105T101500-1a2b3c4d"
 
 var at = time.Date(2026, 11, 5, 10, 15, 0, 0, time.UTC)
 
+const previousOp = "20261020T080000-0badc0de"
+
+var (
+	stagingID = backup.FileID{Volume: 0x1a2b3c4d, Index: 2}
+	oldID     = backup.FileID{Volume: 0x1a2b3c4d, Index: 3}
+)
+
+// testPlan is the plan of the synthetic operation; a rotation names the
+// generation it replaces.
+func testPlan(rotation bool) *backup.Planned {
+	p := &backup.Planned{
+		ToolVersion: "dev", GameID: "synthetic-game", GameName: "Synthetic Game", StartedAt: at,
+		Changes: backup.ChangeCounts{Added: 1},
+		Sources: []backup.ReceiptSource{{
+			ID: "saves", Kind: "save", Required: true, State: backup.SourceCopied, Path: `D:\Games\Synthetic Game\saves`,
+			Directories: []string{}, Entries: []backup.Entry{{Path: "1.save", Size: 3, ModTime: at, SHA256: sha256.Sum256([]byte("one"))}},
+		}},
+	}
+	if rotation {
+		p.Previous = previousOp
+	}
+	return p
+}
+
+// valuesFor gives each step the values the protocol would record.
+func valuesFor(t *testing.T, step backup.Step, rotation bool) backup.StepValues {
+	t.Helper()
+	plan := testPlan(rotation)
+	content, err := backup.ContentDigest(plan.Sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch step {
+	case backup.StepPlanned:
+		return backup.StepValues{Previous: plan.Previous, Plan: plan}
+	case backup.StepStaged:
+		return backup.StepValues{Staging: stagingID, Digest: content}
+	case backup.StepVerified:
+		return backup.StepValues{Digest: content}
+	case backup.StepPublishIntent, backup.StepPromoteIntent:
+		return backup.StepValues{Staging: stagingID}
+	case backup.StepUnpublishIntent, backup.StepUnpromoteIntent:
+		return backup.StepValues{Current: stagingID}
+	case backup.StepRetireIntent:
+		return backup.StepValues{Current: oldID}
+	case backup.StepRestoreIntent:
+		return backup.StepValues{Retained: oldID}
+	case backup.StepPublished:
+		return backup.StepValues{Digest: sha256.Sum256([]byte("receipt"))}
+	case backup.StepRollbackFailed, backup.StepFailed, backup.StepAbandoned:
+		return backup.StepValues{Text: "synthetic " + string(step)}
+	}
+	return backup.StepValues{}
+}
+
+func record(t *testing.T, seq int, step backup.Step, rotation bool, prev string, at time.Time) []byte {
+	t.Helper()
+	r, err := backup.NewRecord(seq, step, op, at, prev, valuesFor(t, step, rotation))
+	if err != nil {
+		t.Fatalf("record %s: %v", step, err)
+	}
+	return mustEncode(t, r)
+}
+
 // journalFiles commits steps in order, as the protocol would, and returns
 // the directory listing and contents of journal\<op>.
 func journalFiles(t *testing.T, rotation bool, steps ...backup.Step) ([]string, map[string][]byte) {
@@ -24,18 +87,7 @@ func journalFiles(t *testing.T, rotation bool, steps ...backup.Step) ([]string, 
 	contents := map[string][]byte{}
 	prev := ""
 	for i, step := range steps {
-		fields := map[string]json.RawMessage{}
-		if step == backup.StepPlanned {
-			previous := json.RawMessage("null")
-			if rotation {
-				previous = json.RawMessage(`"20261020T080000-0badc0de"`)
-			}
-			fields["previous"] = previous
-		}
-		data, err := backup.EncodeRecord(backup.Record{Seq: i + 1, Step: step, Op: op, At: at.Add(time.Duration(i) * time.Second), Prev: prev, Fields: fields})
-		if err != nil {
-			t.Fatalf("encode %s: %v", step, err)
-		}
+		data := record(t, i+1, step, rotation, prev, at.Add(time.Duration(i)*time.Second))
 		name := backup.RecordName(i+1, step)
 		names = append(names, name)
 		contents[name] = data
@@ -151,14 +203,14 @@ func TestTerminalOperationsNeedNoRecovery(t *testing.T) {
 	}
 }
 
-// withTemporaries adds temporaries of the record following steps.
+// withTemporaries adds temporaries of the record following steps. As the
+// writer does, each takes the next attempt number of that record, whatever
+// its step.
 func withTemporaries(t *testing.T, rotation bool, steps []backup.Step, prepared ...backup.Step) backup.Journal {
 	t.Helper()
 	names, contents := journalFiles(t, rotation, steps...)
-	attempt := map[backup.Step]int{}
-	for _, step := range prepared {
-		attempt[step]++
-		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(len(steps)+1, step), attempt[step]))
+	for k, step := range prepared {
+		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(len(steps)+1, step), k+1))
 	}
 	j, err := backup.ParseJournal(op, names, contents)
 	if err != nil {
@@ -228,6 +280,35 @@ func TestRecoveryEnvelopeE1(t *testing.T) {
 		if action, err := backup.Classify(withTemporaries(t, false, publishing, prepared...), obs(n, a, a)); !errors.Is(err, backup.ErrEnvelopeExhausted) {
 			t.Fatalf("%s: %q, %v", name, action, err)
 		}
+	}
+}
+
+// Abandoned temporaries of a committed number never consume the envelope of
+// the next one, and do not reopen a closed operation.
+func TestAbandonedTemporariesDoNotConsumeTheEnvelope(t *testing.T) {
+	publishing := steps(pre, backup.StepPublishIntent)
+	names, contents := journalFiles(t, false, publishing...)
+	for k := 1; k < backup.MaxTemporaries; k++ {
+		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(5, backup.StepPublishIntent), k))
+	}
+	for k := 1; k < backup.MaxTemporaries; k++ {
+		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(6, backup.StepPublished), k))
+	}
+	j, err := backup.ParseJournal(op, names, contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action, err := backup.Classify(j, obs(n, a, a)); err != nil || action != backup.ActionVerifyThenPublish {
+		t.Fatalf("eight prepared beside eight abandoned: %q, %v", action, err)
+	}
+
+	names, contents = journalFiles(t, false, steps(publishing, backup.StepPublished)...)
+	names = append(names, backup.RecordName(5, backup.StepPublishIntent)+".tmp-1", backup.RecordName(6, backup.StepPublished)+".tmp-1")
+	if j, err = backup.ParseJournal(op, names, contents); err != nil {
+		t.Fatal(err)
+	}
+	if action, err := backup.Classify(j, obs(n, a, a)); err != nil || action != backup.ActionNone {
+		t.Fatalf("published with abandoned temporaries: %q, %v", action, err)
 	}
 }
 

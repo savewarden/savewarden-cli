@@ -75,6 +75,14 @@ vrais dossiers temporaires avec jonctions et verrous sous Windows ; binaire
 réel lancé avec un environnement isolé et l'écriture refusée, suivi d'une
 comparaison d'empreinte complète de l'arborescence.
 
+`sync` est testé sur un faux coffre qui reproduit la sémantique de
+`platform/vault` sur les trois OS, avec crash avant et après chaque appel au
+coffre et pendant la récupération ; `platform/vault` est testé sur de vrais
+dossiers Windows, jonctions et liens compris ; le binaire réel publie avec
+l'écriture refusée sur l'installation, et est tué pendant un staging puis
+récupéré, ce qui prend une quinzaine de secondes. Toute API d'écriture ajoutée
+au garde exige un amendement d'ADR 0005.
+
 Pour les futures fonctions : fixtures synthétiques, tempfiles, failure
 injection, chemins absents/identiques/chevauchants, destination non vide,
 collisions, Unicode, permissions, fichiers vides/verrouillés, grandes listes,

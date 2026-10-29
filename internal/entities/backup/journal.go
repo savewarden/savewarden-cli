@@ -71,8 +71,8 @@ type Record struct {
 	// for the first record.
 	Prev string
 	// Fields carries the values proper to the step, such as identities or
-	// the plan of 001-planned. They are validated by the code that writes
-	// them; this package only checks that they are JSON.
+	// the plan of 001-planned, under the "fields" key. Their contract is
+	// fixed per step and checked by Values.
 	Fields map[string]json.RawMessage
 }
 
@@ -216,11 +216,23 @@ type Journal struct {
 	Records []Record
 	// Prepared counts, for each step, the temporaries of the record that
 	// would follow the last committed one: intentions written but never
-	// committed.
+	// committed. Temporaries of a committed number are abandoned attempts:
+	// accepted, never counted, never read.
 	Prepared map[Step]int
 	// Previous is the operation whose generation a rotation replaces, empty
 	// for a first publication or before the planned record.
 	Previous string
+	// Values holds the decoded fields of each record, in order.
+	Values []StepValues
+	// Plan and PlanSHA256 come from the planned record; Plan is nil before it.
+	Plan       *Planned
+	PlanSHA256 [32]byte
+	// Staging is the identity of the staging directory recorded by staged;
+	// Old, that of the current generation recorded by retire-intent.
+	Staging, Old FileID
+	// Taken holds the attempt numbers k already used by temporaries of the
+	// next record: the writer takes the smallest k not in it.
+	Taken map[int]bool
 }
 
 // Last returns the step of the last committed record, empty if none.
@@ -238,28 +250,6 @@ func (j Journal) Terminal() bool { return j.Last().Terminal() }
 // planned record names the previous generation.
 func (j Journal) Rotation() bool { return j.Previous != "" }
 
-// plannedPrevious reads the "previous" field of a planned record: null for
-// a first publication, or the operation id of the generation to replace.
-// Rotation and first publication follow different automata, so the field is
-// validated here rather than left to the writer.
-func plannedPrevious(r Record) (string, error) {
-	raw, ok := r.Fields["previous"]
-	if !ok {
-		return "", errors.New(`planned record lacks the field "previous"`)
-	}
-	if string(raw) == "null" {
-		return "", nil
-	}
-	var previous string
-	if err := json.Unmarshal(raw, &previous); err != nil {
-		return "", errors.New(`planned record: "previous" must be null or an operation id`)
-	}
-	if err := ValidOperationID(previous); err != nil || previous == r.Op {
-		return "", fmt.Errorf(`planned record: "previous" %q is not another operation id`, previous)
-	}
-	return previous, nil
-}
-
 var (
 	finalName     = regexp.MustCompile(`^([0-9]{3})-([a-z-]+)\.rec$`)
 	temporaryName = regexp.MustCompile(`^([0-9]{3})-([a-z-]+)\.rec\.tmp-([1-9])$`)
@@ -275,8 +265,8 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		return Journal{}, ambiguous("journal directory: %v", err)
 	}
 	type temporary struct {
-		seq  int
-		step Step
+		seq, k int
+		step   Step
 	}
 	var finals []string
 	var temporaries []temporary
@@ -287,7 +277,8 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		}
 		if m := temporaryName.FindStringSubmatch(name); m != nil {
 			seq, _ := strconv.Atoi(m[1])
-			temporaries = append(temporaries, temporary{seq, Step(m[2])})
+			k, _ := strconv.Atoi(m[3])
+			temporaries = append(temporaries, temporary{seq: seq, k: k, step: Step(m[2])})
 			continue
 		}
 		return Journal{}, ambiguous("unexpected entry %q in the journal", name)
@@ -300,7 +291,7 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		}
 		numbers[name[:3]] = true
 	}
-	j := Journal{Op: op, Prepared: map[Step]int{}}
+	j := Journal{Op: op, Prepared: map[Step]int{}, Taken: map[int]bool{}}
 	var previous []byte
 	for i, name := range finals {
 		m := finalName.FindStringSubmatch(name)
@@ -328,31 +319,99 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		if !allowed(j.steps(), r.Step, j.Rotation()) {
 			return Journal{}, ambiguous("record %s: transition from %q to %q is not allowed", name, j.Last(), r.Step)
 		}
-		if r.Step == StepPlanned {
-			if j.Previous, err = plannedPrevious(r); err != nil {
-				return Journal{}, ambiguous("record %s: %v", name, err)
-			}
+		values, err := r.Values()
+		if err != nil {
+			return Journal{}, ambiguous("record %s: %v", name, err)
+		}
+		if err := j.coherent(r, values); err != nil {
+			return Journal{}, ambiguous("record %s: %v", name, err)
 		}
 		j.Records = append(j.Records, r)
+		j.Values = append(j.Values, values)
 		previous = data
 	}
+	// The nine names k = 1..9 of a record number are shared by all its
+	// steps (envelope E1): the writer takes the smallest k that no
+	// temporary of that number carries, and a committed record was renamed
+	// from one of them, so at most eight remain beside it.
 	next := len(j.Records) + 1
+	used := map[[2]int]bool{}
+	abandoned := map[int]int{}
 	for _, t := range temporaries {
-		switch {
-		case j.Terminal():
-			return Journal{}, ambiguous("temporary record after the terminal step %q", j.Last())
-		case t.seq != next:
-			return Journal{}, ambiguous("temporary record %03d-%s does not follow the last committed record", t.seq, t.step)
-		case !allowed(j.steps(), t.step, j.Rotation()):
-			return Journal{}, ambiguous("temporary record %03d-%s is not an allowed next step", t.seq, t.step)
+		if used[[2]int{t.seq, t.k}] {
+			return Journal{}, ambiguous("temporaries of record %03d share the attempt number %d", t.seq, t.k)
 		}
-		j.Prepared[t.step]++
+		used[[2]int{t.seq, t.k}] = true
+		switch {
+		case t.seq == next && j.Terminal():
+			return Journal{}, ambiguous("temporary record after the terminal step %q", j.Last())
+		case t.seq == next:
+			if !allowed(j.steps(), t.step, j.Rotation()) {
+				return Journal{}, ambiguous("temporary record %03d-%s is not an allowed next step", t.seq, t.step)
+			}
+			j.Prepared[t.step]++
+			j.Taken[t.k] = true
+		case t.seq >= 1 && t.seq < next:
+			// An attempt abandoned before the record of its number was
+			// committed, possibly under another step: it must have been an
+			// allowed step at that number.
+			if !allowed(j.steps()[:t.seq-1], t.step, j.Rotation()) {
+				return Journal{}, ambiguous("abandoned temporary %03d-%s was not an allowed step at that number", t.seq, t.step)
+			}
+			if abandoned[t.seq]++; abandoned[t.seq] >= MaxTemporaries {
+				return Journal{}, ambiguous("record %03d is committed beside nine temporaries; at most eight may remain", t.seq)
+			}
+		default:
+			return Journal{}, ambiguous("temporary record %03d-%s does not follow the last committed record", t.seq, t.step)
+		}
 	}
 	return j, nil
 }
 
+// coherent checks the values of the next record against the records
+// before it, and keeps what later records refer to.
+func (j *Journal) coherent(r Record, v StepValues) error {
+	switch step := r.Step; step {
+	case StepPlanned:
+		// The plan starts at the date of its record (plan B2 §4.7).
+		if !v.Plan.StartedAt.Equal(r.At) {
+			return fmt.Errorf("plan started_at %s differs from the date of its record %s", formatUTC(v.Plan.StartedAt), formatUTC(r.At))
+		}
+		j.Previous, j.Plan, j.PlanSHA256 = v.Previous, v.Plan, v.PlanSHA256
+	case StepStaged, StepVerified:
+		want, err := ContentDigest(j.Plan.Sources)
+		if err != nil {
+			return err
+		}
+		if v.Digest != want {
+			return fmt.Errorf("%s digest does not match the content of the plan", step)
+		}
+		if step == StepStaged {
+			j.Staging = v.Staging
+		}
+	case StepPublishIntent, StepPromoteIntent:
+		if v.Staging != j.Staging {
+			return fmt.Errorf("staging identity %s differs from %s recorded by staged", v.Staging, j.Staging)
+		}
+	case StepUnpublishIntent, StepUnpromoteIntent:
+		// What was published or promoted is the staging directory.
+		if v.Current != j.Staging {
+			return fmt.Errorf("current identity %s differs from the staging identity %s", v.Current, j.Staging)
+		}
+	case StepRetireIntent:
+		j.Old = v.Current
+	case StepRestoreIntent:
+		if v.Retained != j.Old {
+			return fmt.Errorf("retained identity %s differs from %s recorded by retire-intent", v.Retained, j.Old)
+		}
+	}
+	return nil
+}
+
 // Attempts counts the temporaries of the record that would follow the last
 // committed one, whatever their step (envelope E1, counted per number).
+// Abandoned temporaries of committed numbers do not count: their number is
+// never written again.
 func (j Journal) Attempts() int {
 	total := 0
 	for _, count := range j.Prepared {

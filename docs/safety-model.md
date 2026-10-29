@@ -1,16 +1,21 @@
 # Modèle de sécurité
 
-## Garantie actuelle (B2a)
+## Garantie actuelle (B2b)
 
-Le produit n'a toujours qu'une capacité : **lire**. `inspect` lit un
-manifeste désigné par l'utilisateur et les fichiers des sources qu'il
-déclare. `sync`, en mode plan, lit en plus le coffre désigné par `--vault`,
-s'il existe. Aucune découverte d'installation, création de lien, de coffre
-ou mutation de configuration.
+`inspect` lit un manifeste désigné par l'utilisateur et les fichiers des
+sources qu'il déclare. `sync`, en mode plan, lit en plus le coffre désigné
+par `--vault`, s'il existe. `sync --apply` et `sync --recover --apply`
+écrivent, mais **seulement dans ce coffre**, et seulement par créations
+exclusives et renommages qui ne remplacent rien. Aucune découverte
+d'installation, création de lien ou mutation de configuration ; aucune
+écriture dans une source.
 
 | Garantie | Mécanisme | Preuve |
 | --- | --- | --- |
-| Aucune écriture applicative ni exécution | Aucun appel d'écriture dans le code ; garde statique contre les API d'écriture, d'exécution, de réseau et de chargement dynamique | `readonly_test.go` ; binaire lancé deux fois avec environnement isolé, écriture refusée par ACL ou `chmod`, empreinte complète de l'arborescence identique |
+| Écritures confinées, aucune exécution | Seul `platform/vault` écrit, avec les API nommées par [ADR 0005](adr/0005-write-allowed-package.md) ; garde statique contre toute autre API d'écriture, d'exécution, de réseau et de chargement dynamique, dans tous les packages | `readonly_test.go` et ses listes attendues indépendantes ; `inspect` et le plan lancés deux fois avec l'écriture refusée par ACL ou `chmod`, empreinte identique ; `--apply` avec l'écriture refusée sur l'installation, source identique |
+| Rien n'est remplacé ni supprimé | `CREATE_NEW`, `CreateDirectory`, `MoveFileEx` avec le littéral `0` ; aucun fichier existant rouvert en écriture ; temporaires jamais supprimés | Tests Windows réels : création et renommage refusés sur cible existante, erreur 183 ; garde AST des drapeaux |
+| Publication vérifiée | Copie hachée, source inventoriée deux fois, staging relu depuis le disque, identité du staging contrôlée avant et après le renommage | Fautes injectées : source changée, écriture refusée, octet altéré, course sur le renommage |
+| Interruption récupérable, jamais devinée | Journal validé par renommage avant chaque action, contrat strict des champs, récupération explicite selon les tableaux d'ADR 0006 ; ambiguïté ou enveloppe épuisée : code 3 sans écriture | Crash avant et après chaque appel au coffre, puis récupération ; crash pendant la récupération ; processus tué pendant le staging |
 | Aucun lien suivi, parents compris | Contrôle de chaque composant depuis la racine du volume ; ouverture Windows avec `FILE_FLAG_OPEN_REPARSE_POINT` et contrôle des attributs sur le handle ; refus des placeholders | Faux système de fichiers sur trois OS ; vraies jonctions Windows dans la portée, en ancre, et substituées après `Lstat` ; lien symbolique relatif qu'`os.Root` seul aurait suivi |
 | Pas de substitution pendant l'inspection | Dossiers traversés gardés ouverts sans partage de suppression jusqu'à la fin | Renommage refusé tant que la portée est ouverte, accepté après fermeture |
 | Fichier inventorié = fichier lu | Identité, taille et date contrôlées avant, à l'ouverture et après la lecture | Remplacement, croissance, modification et disparition injectés à des instants précis |
@@ -54,10 +59,10 @@ exécuté par lui.
 
 B1 et B2a implémentent les invariants 1 à 3 pour la lecture : source
 déclarée par l'utilisateur, chemins canoniques sans `..` ni chevauchement,
-coffre distinct de l'installation, liens jamais suivis, rien d'exécuté. Les
-invariants 4 à 7 concernent les écritures : leur protocole normatif est
-[ADR 0006](adr/0006-publication-recovery-protocol.md), implémenté à partir de
-B2b.
+coffre distinct de l'installation, liens jamais suivis, rien d'exécuté. B2b
+implémente les invariants 4 à 6 pour la première publication, selon
+[ADR 0006](adr/0006-publication-recovery-protocol.md) ; le 7 relève des
+snapshots de B3.
 
 ## Windows et remplacement de current
 
@@ -79,9 +84,10 @@ conserver l'incomplet identifié et diagnostiquer depuis le receipt. Une
 restauration B4 crée un dossier distinct et vérifié ; elle ne change jamais
 la sauvegarde active du jeu.
 
-En B2a, le rollback consiste encore à reverter la PR du lot sur la release
-branch : ni `inspect` ni le plan de `sync` n'écrivent, il n'existe aucun état
-de sauvegarde à récupérer.
+En B2b, le rollback du code consiste à reverter la PR du lot sur la release
+branch. Les coffres déjà écrits restent lisibles et ne sont jamais réécrits :
+une génération publiée, un staging conservé ou un journal clos restent en
+place ; un nouveau coffre est toujours possible.
 
 ## Preuves et confidentialité
 

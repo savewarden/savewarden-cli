@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -32,11 +34,21 @@ type vault struct {
 	exists        bool
 	interventions []Intervention
 	// Game directory content.
+	games, game bool // games and games\<id> exist
+	lock        bool // sync.lock exists
 	current     bool // a plain current directory exists
 	currentLink bool // current exists but is a link, a file or a reparse point
 	receipts    []backup.Receipt
 	invalid     []string // receipts that do not decode
 	pending     []Pending
+	// What recovery needs: the parsed journal of each operation, the
+	// SHA-256 of its last record file, and the attempt numbers taken by
+	// temporaries of the marker and of each receipt.
+	journals     map[string]backup.Journal
+	lastRecord   map[string]string
+	rootTaken    map[int]bool
+	receiptTaken map[string]map[int]bool
+	receiptSum   map[string][32]byte // SHA-256 of each valid receipt file, by operation
 }
 
 func (v *vault) intervene(cause Cause, subject, detail string) {
@@ -45,7 +57,7 @@ func (v *vault) intervene(cause Cause, subject, detail string) {
 
 // errVault reports a vault the plan must refuse outright: exit code 1.
 func errVault(vaultPath, format string, args ...any) error {
-	return fmt.Errorf("vault %s: %s", vaultPath, fmt.Sprintf(format, args...))
+	return fmt.Errorf("vault %s: "+format, append([]any{vaultPath}, args...)...)
 }
 
 // resolveVault checks every component of the vault path without following
@@ -75,6 +87,14 @@ func resolveVault(scope Scope, vaultPath string, segments []string) (*vault, err
 // read classifies an existing vault and, when it is initialized, reads the
 // marker, the game directory, its journals and receipts.
 func (v *vault) read(scope Scope, vaultPath string, segments []string, gameID string) error {
+	return v.readProbing(scope, vaultPath, segments, gameID, true)
+}
+
+// readProbing reads the vault; with probe, a pending operation whose lock
+// is held by another process is reported as a running sync, code 1, rather
+// than as an interrupted one. A run that holds the lock itself does not
+// probe it.
+func (v *vault) readProbing(scope Scope, vaultPath string, segments []string, gameID string, probe bool) error {
 	if !v.exists {
 		return nil
 	}
@@ -92,6 +112,7 @@ func (v *vault) read(scope Scope, vaultPath string, segments []string, gameID st
 		}
 	}
 	classified := backup.ClassifyVaultRoot(entries)
+	v.rootTaken = classified.Taken
 	switch classified.State {
 	case backup.RootEmpty:
 		v.state = VaultEmpty
@@ -100,7 +121,7 @@ func (v *vault) read(scope Scope, vaultPath string, segments []string, gameID st
 		return errVault(vaultPath, "not empty and not a Savewarden vault; choose a new or empty directory, an existing directory is never adopted")
 	case backup.RootInterrupted:
 		v.state = VaultInterrupted
-		detail := "vault initialization was interrupted; only --recover --apply may resume it, available from B2b"
+		detail := "vault initialization was interrupted; only sync --recover --apply may resume it"
 		if classified.Temporaries >= backup.MaxTemporaries {
 			detail = backup.ErrEnvelopeExhausted.Error() + ": " + detail
 		}
@@ -118,10 +139,24 @@ func (v *vault) read(scope Scope, vaultPath string, segments []string, gameID st
 	for _, name := range classified.Unexpected {
 		v.intervene(CauseUnexpectedEntry, name, "has no place at the vault root")
 	}
-	return v.readGame(scope, vaultPath, root, gameID, hasEntry(entries, gamesDir))
+	if err := v.readGame(scope, vaultPath, root, gameID, hasEntry(entries, gamesDir)); err != nil {
+		return err
+	}
+	if probe && v.lock && len(v.pending) > 0 {
+		lock, err := scope.OpenRegular(join(root, gamesDir+"/"+gameID+"/"+lockFile))
+		var busy interface{ Busy() bool }
+		if errors.As(err, &busy) && busy.Busy() {
+			return errVault(vaultPath, "another sync is running on this game; run it again once it ends")
+		}
+		if err == nil {
+			_ = lock.Close()
+		}
+	}
+	return nil
 }
 
 func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool) error {
+	v.games = games
 	if !games {
 		return nil
 	}
@@ -134,7 +169,7 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 	for _, entry := range entries {
 		switch {
 		case entry.Name == gameID && entry.Kind == backup.KindDirectory:
-			found = true
+			found, v.game = true, true
 		case entry.Name == gameID:
 			return errVault(vaultPath, `games\%s is a link, a file or a reparse point; not followed`, gameID)
 		case strings.EqualFold(entry.Name, gameID):
@@ -157,6 +192,7 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 		present[entry.Name] = true
 		switch {
 		case entry.Name == lockFile && entry.Kind == backup.KindRegular:
+			v.lock = true
 		case entry.Name == currentDir && entry.Kind == backup.KindDirectory:
 			v.current = true
 		case entry.Name == currentDir:
@@ -218,44 +254,60 @@ func (v *vault) readJournals(scope Scope, name, subject string, found map[string
 			continue
 		}
 		found[entry.Name] = true
-		journal, err := readJournal(scope, join(name, entry.Name), entry.Name)
+		journal, last, err := readJournal(scope, join(name, entry.Name), entry.Name)
 		if err != nil {
 			// Unreadable or inconsistent, the journal is ambiguous either way.
 			v.intervene(CauseJournalAmbiguous, entry.Name, err.Error())
 			continue
 		}
+		if v.journals == nil {
+			v.journals, v.lastRecord = map[string]backup.Journal{}, map[string]string{}
+		}
+		v.journals[entry.Name], v.lastRecord[entry.Name] = journal, last
 		if !journal.Terminal() {
 			v.pending = append(v.pending, Pending{Operation: entry.Name, Last: journal.Last()})
-			last := journal.Last()
-			if last == "" {
-				last = "none"
+			step := string(journal.Last())
+			if step == "" {
+				step = "none"
 			}
-			v.intervene(CausePendingOperation, entry.Name, fmt.Sprintf("last committed step %s; recovery needed, --recover is available from B2b", last))
+			detail := fmt.Sprintf("last committed step %s; run sync --recover to see how it would be recovered", step)
+			if journal.Last() == backup.StepPublishIntent && v.current {
+				detail = "pending recovery: current published, receipt missing; run sync --recover"
+			}
+			v.intervene(CausePendingOperation, entry.Name, detail)
 		}
 	}
 }
 
-func readJournal(scope Scope, name, op string) (backup.Journal, error) {
+// readJournal parses one operation journal and returns the SHA-256 of its
+// last record file, empty if none.
+func readJournal(scope Scope, name, op string) (backup.Journal, string, error) {
 	entries, err := list(scope, name)
 	if err != nil {
-		return backup.Journal{}, err
+		return backup.Journal{}, "", err
 	}
 	names := make([]string, 0, len(entries))
 	contents := map[string][]byte{}
 	for _, entry := range entries {
 		if entry.Kind != backup.KindRegular {
-			return backup.Journal{}, &backup.AmbiguityError{Op: op, Reason: fmt.Sprintf("entry %q is not a regular file", entry.Name)}
+			return backup.Journal{}, "", &backup.AmbiguityError{Op: op, Reason: fmt.Sprintf("entry %q is not a regular file", entry.Name)}
 		}
 		names = append(names, entry.Name)
 		if strings.HasSuffix(entry.Name, ".rec") {
 			data, err := readFile(scope, join(name, entry.Name), recordReadLimit)
 			if err != nil {
-				return backup.Journal{}, err
+				return backup.Journal{}, "", err
 			}
 			contents[entry.Name] = data
 		}
 	}
-	return backup.ParseJournal(op, names, contents)
+	journal, err := backup.ParseJournal(op, names, contents)
+	if err != nil || len(journal.Records) == 0 {
+		return journal, "", err
+	}
+	last := journal.Records[len(journal.Records)-1]
+	sum := sha256.Sum256(contents[backup.RecordName(last.Seq, last.Step)])
+	return journal, hex.EncodeToString(sum[:]), nil
 }
 
 var receiptName = regexp.MustCompile(`^([0-9]{8}T[0-9]{6}-[0-9a-f]{8})\.json(\.tmp-[1-9])?$`)
@@ -274,6 +326,13 @@ func (v *vault) readReceipts(scope Scope, vaultPath, name, subject, gameID strin
 			v.intervene(CauseUnexpectedEntry, subject+"/"+entry.Name, "is not a receipt")
 			continue
 		case m[2] != "":
+			if v.receiptTaken == nil {
+				v.receiptTaken = map[string]map[int]bool{}
+			}
+			if v.receiptTaken[m[1]] == nil {
+				v.receiptTaken[m[1]] = map[int]bool{}
+			}
+			v.receiptTaken[m[1]][int(m[2][len(m[2])-1]-'0')] = true
 			continue
 		}
 		data, err := readFile(scope, join(name, entry.Name), recordReadLimit)
@@ -287,6 +346,10 @@ func (v *vault) readReceipts(scope Scope, vaultPath, name, subject, gameID strin
 		}
 		found[r.Operation] = true
 		v.receipts = append(v.receipts, r)
+		if v.receiptSum == nil {
+			v.receiptSum = map[string][32]byte{}
+		}
+		v.receiptSum[r.Operation] = sha256.Sum256(data)
 	}
 	return nil
 }

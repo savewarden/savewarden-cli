@@ -289,3 +289,69 @@ func TestEncryptedFilesAreReported(t *testing.T) {
 	}
 	_ = file.Close()
 }
+
+// Identity reads the volume serial number and file index without following
+// anything; a rename keeps it.
+func TestIdentitySurvivesARename(t *testing.T) {
+	anchor := tempAnchor(t)
+	write(t, filepath.Join(anchor, "staging", "op", "1.save"), "one")
+	junction(t, filepath.Join(anchor, "jn"), filepath.Join(anchor, "staging"))
+	scope := open(t, anchor)
+	before, err := scope.Identity("staging/op")
+	if err != nil || before.Index == 0 {
+		t.Fatalf("identity %v, %v", before, err)
+	}
+	if _, err := scope.Identity("jn"); !notFollowed(err) {
+		t.Fatalf("junction: %v", err)
+	}
+	if _, err := scope.Identity("jn/op"); !notFollowed(err) {
+		t.Fatalf("through a junction: %v", err)
+	}
+	if err := scope.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(anchor, "staging", "op"), filepath.Join(anchor, "current")); err != nil {
+		t.Fatal(err)
+	}
+	scope = open(t, anchor)
+	after, err := scope.Identity("current")
+	if err != nil || after != before {
+		t.Fatalf("after rename %v, %v; want %v", after, err, before)
+	}
+	file, err := scope.Identity("current/1.save")
+	if err != nil || file == before {
+		t.Fatalf("file identity %v, %v", file, err)
+	}
+	if _, err := scope.Identity("missing"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing: %v", err)
+	}
+}
+
+// A file held without any sharing, like the lock of a running sync or a
+// save locked by its game, is still described, and still never read.
+func TestLockedFileIsDescribed(t *testing.T) {
+	anchor := tempAnchor(t)
+	path := filepath.Join(anchor, "sync.lock")
+	write(t, path, "")
+	name, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := syscall.CreateFile(name, syscall.GENERIC_READ, 0, nil, syscall.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.CloseHandle(handle) }()
+	scope := open(t, anchor)
+	info, err := scope.Lstat("sync.lock")
+	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 {
+		t.Fatalf("lstat of a locked file: %v, %v", info, err)
+	}
+	entries, err := scope.ReadDir(".")
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("listing: %v, %v", entries, err)
+	}
+	if _, err := scope.OpenRegular("sync.lock"); err == nil || !strings.Contains(err.Error(), "locked by another process") {
+		t.Fatalf("open of a locked file: %v", err)
+	}
+}

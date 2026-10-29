@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +22,7 @@ func TestRecordRoundTrip(t *testing.T) {
 	if len(lines) != 2 || !strings.HasPrefix(lines[1], "sha256 ") {
 		t.Fatalf("record layout:\n%s", data)
 	}
-	if !strings.HasPrefix(lines[0], `{"at":"2026-11-05T10:15:01Z","fields":{},"op":"`+op+`","prev":"`) {
+	if !strings.HasPrefix(lines[0], `{"at":"2026-11-05T10:15:01Z","fields":{"staging":"staging/`+op+`"},"op":"`+op+`","prev":"`) {
 		t.Fatalf("keys must be sorted: %s", lines[0])
 	}
 	r, err := backup.DecodeRecord(data)
@@ -57,7 +59,14 @@ func TestJournalAmbiguities(t *testing.T) {
 			return append(names, other)
 		}, "duplicate record number 002"},
 		{"broken chain", func(names []string, c map[string][]byte) []string {
-			c[names[0]] = mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: op, At: at.Add(time.Hour), Fields: map[string]json.RawMessage{"previous": json.RawMessage("null")}})
+			// A valid planned record, but not the one record 002 chains to.
+			values := valuesFor(t, backup.StepPlanned, false)
+			values.Plan.GameName = "Another Game"
+			r, err := backup.NewRecord(1, backup.StepPlanned, op, at, "", values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c[names[0]] = mustEncode(t, r)
 			return names
 		}, "chain broken"},
 		{"forbidden transition", func(names []string, c map[string][]byte) []string {
@@ -150,15 +159,19 @@ func TestFirstPublicationAndRotationDoNotMix(t *testing.T) {
 			t.Errorf("rotation %v, %v: %v", tt.rotation, tt.steps, err)
 		}
 	}
-	for _, previous := range []string{``, `42`, `"yesterday"`, `"` + op + `"`} {
-		fields := map[string]json.RawMessage{}
-		if previous != "" {
-			fields["previous"] = json.RawMessage(previous)
+	for _, previous := range []string{``, `42`, `"yesterday"`, `"` + op + `"`, `"` + previousOp + `"`} {
+		r, err := backup.NewRecord(1, backup.StepPlanned, op, at, "", valuesFor(t, backup.StepPlanned, false))
+		if err != nil {
+			t.Fatal(err)
 		}
-		data := mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: op, At: at, Fields: fields})
+		delete(r.Fields, "previous")
+		if previous != "" {
+			r.Fields["previous"] = json.RawMessage(previous)
+		}
+		data := mustEncode(t, r)
 		name := backup.RecordName(1, backup.StepPlanned)
 		var ambiguity *backup.AmbiguityError
-		if _, err := backup.ParseJournal(op, []string{name}, map[string][]byte{name: data}); !errors.As(err, &ambiguity) {
+		if _, err := backup.ParseJournal(op, []string{name}, map[string][]byte{name: data}); !errors.As(err, &ambiguity) || !strings.Contains(err.Error(), "previous") {
 			t.Errorf("previous %s: %v", previous, err)
 		}
 	}
@@ -187,6 +200,128 @@ func TestRecordBeyondTheEnvelope(t *testing.T) {
 	contents[name] = append(line, []byte("sha256 "+hex.EncodeToString(own[:])+"\n")...)
 	var ambiguity *backup.AmbiguityError
 	if _, err := backup.ParseJournal(op, append(names, name), contents); !errors.As(err, &ambiguity) || !strings.Contains(err.Error(), "outside 1..11") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func tmp(seq int, step backup.Step, k int) string {
+	return fmt.Sprintf("%s.tmp-%d", backup.RecordName(seq, step), k)
+}
+
+// A temporary left by an interrupted attempt stays beside the record that a
+// later attempt committed, possibly under another step: Savewarden never
+// deletes it. Such states come from the protocol and must stay readable.
+func TestAbandonedTemporariesAreAccepted(t *testing.T) {
+	tests := []struct {
+		name     string
+		rotation bool
+		steps    []backup.Step
+		extra    []string
+		prepared map[backup.Step]int
+	}{
+		{"operation abandoned before its first record (I8)", false,
+			[]backup.Step{backup.StepAbandoned},
+			[]string{tmp(1, backup.StepPlanned, 1)}, nil},
+		{"intent only prepared, then abandoned (A1)", false,
+			steps(pre, backup.StepAbandoned),
+			[]string{tmp(5, backup.StepPublishIntent, 1), tmp(5, backup.StepPublishIntent, 2)}, nil},
+		{"published record committed on a second attempt (A6)", false,
+			steps(pre, backup.StepPublishIntent, backup.StepPublished),
+			[]string{tmp(6, backup.StepPublished, 1)}, nil},
+		{"eight abandoned attempts beside a record", false,
+			steps(pre[:2]),
+			[]string{tmp(2, backup.StepStagingIntent, 1), tmp(2, backup.StepStagingIntent, 2), tmp(2, backup.StepFailed, 3),
+				tmp(2, backup.StepAbandoned, 4), tmp(2, backup.StepStagingIntent, 5), tmp(2, backup.StepStagingIntent, 6),
+				tmp(2, backup.StepStagingIntent, 7), tmp(2, backup.StepStagingIntent, 8)}, nil},
+		{"abandoned attempts on several numbers, then a prepared intent", false,
+			pre,
+			[]string{tmp(1, backup.StepPlanned, 1), tmp(3, backup.StepStaged, 1), tmp(3, backup.StepFailed, 2),
+				tmp(5, backup.StepPublishIntent, 1)},
+			map[backup.Step]int{backup.StepPublishIntent: 1}},
+		{"rotation: an abandoned retire intent", true,
+			steps(pre, backup.StepRetireIntent),
+			[]string{tmp(5, backup.StepRetireIntent, 1)}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			names, contents := journalFiles(t, tt.rotation, tt.steps...)
+			j, err := backup.ParseJournal(op, append(names, tt.extra...), contents)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := tt.prepared
+			if want == nil {
+				want = map[backup.Step]int{}
+			}
+			attempts := 0
+			for _, count := range want {
+				attempts += count
+			}
+			if len(j.Records) != len(tt.steps) || !reflect.DeepEqual(j.Prepared, want) || j.Attempts() != attempts ||
+				len(j.Taken) != attempts {
+				t.Fatalf("records %d, prepared %v, attempts %d, taken %v", len(j.Records), j.Prepared, j.Attempts(), j.Taken)
+			}
+		})
+	}
+}
+
+// Only the states the protocol can produce are accepted: anything else
+// about temporaries stays an ambiguity.
+func TestIncoherentTemporariesAreAmbiguous(t *testing.T) {
+	nine := func(seq int, step backup.Step) []string {
+		var out []string
+		for k := 1; k <= backup.MaxTemporaries; k++ {
+			out = append(out, tmp(seq, step, k))
+		}
+		return out
+	}
+	tests := []struct {
+		name     string
+		rotation bool
+		steps    []backup.Step
+		extra    []string
+		want     string
+	}{
+		{"step not allowed at its number", false, pre,
+			[]string{tmp(2, backup.StepPublished, 1)}, "not an allowed step at that number"},
+		{"first-publication step in a rotation", true, steps(pre, backup.StepRetireIntent),
+			[]string{tmp(5, backup.StepPublishIntent, 1)}, "not an allowed step at that number"},
+		{"rotation step in a first publication", false, steps(pre, backup.StepPublishIntent),
+			[]string{tmp(5, backup.StepRetireIntent, 1)}, "not an allowed step at that number"},
+		{"nine temporaries beside a committed record", false, pre,
+			nine(3, backup.StepStaged), "beside nine temporaries"},
+		{"attempt number shared by two steps of a committed record", false, pre,
+			[]string{tmp(2, backup.StepStagingIntent, 1), tmp(2, backup.StepFailed, 1)}, "share the attempt number 1"},
+		{"attempt number shared by two prepared steps", false, pre,
+			[]string{tmp(5, backup.StepPublishIntent, 2), tmp(5, backup.StepFailed, 2)}, "share the attempt number 2"},
+		{"temporary numbered 000", false, pre,
+			[]string{tmp(0, backup.StepPlanned, 1)}, "does not follow"},
+		{"temporary beyond the next record", false, pre,
+			[]string{tmp(6, backup.StepPublished, 1)}, "does not follow"},
+		{"next record prepared after a terminal step", false, steps(pre, backup.StepAbandoned),
+			[]string{tmp(5, backup.StepPublishIntent, 1), tmp(6, backup.StepPublished, 1)}, "terminal"},
+		{"unknown step", false, pre,
+			[]string{tmp(2, "teleport", 1)}, "not an allowed step at that number"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			names, contents := journalFiles(t, tt.rotation, tt.steps...)
+			_, err := backup.ParseJournal(op, append(names, tt.extra...), contents)
+			var ambiguity *backup.AmbiguityError
+			if !errors.As(err, &ambiguity) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want an ambiguity mentioning %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// Plan B2 §4.7: the plan starts at the date of its own record.
+func TestPlanStartsAtItsRecord(t *testing.T) {
+	data := record(t, 1, backup.StepPlanned, false, "", at.Add(time.Second))
+	name := backup.RecordName(1, backup.StepPlanned)
+	var ambiguity *backup.AmbiguityError
+	if _, err := backup.ParseJournal(op, []string{name}, map[string][]byte{name: data}); !errors.As(err, &ambiguity) ||
+		!strings.Contains(err.Error(), "started_at") {
 		t.Fatalf("error = %v", err)
 	}
 }

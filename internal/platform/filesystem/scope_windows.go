@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 )
 
 // Attributes and flags missing from package syscall.
@@ -91,6 +93,12 @@ func (s *Scope) Lstat(name string) (fs.FileInfo, error) {
 		return nil, err
 	}
 	info, err := s.root.Lstat(s.native(name))
+	if errors.Is(err, errorSharingViolation) {
+		// A file held without sharing, such as a save locked by its game or
+		// the lock of a running sync, cannot be opened. Its directory entry
+		// is read instead, through parents that are pinned and verified.
+		info, err = os.Lstat(longPath(s.absolute(name)))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +150,29 @@ func (s *Scope) OpenRegular(name string) (fs.File, error) {
 		return nil, err
 	}
 	return os.NewFile(uintptr(handle), path), nil
+}
+
+// Identity returns the volume serial number and file index of name,
+// read on a handle opened without following it and closed at once. A link,
+// junction, reparse point or placeholder is refused.
+func (s *Scope) Identity(name string) (backup.FileID, error) {
+	info, err := s.Lstat(name)
+	if err != nil {
+		return backup.FileID{}, err
+	}
+	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+		return backup.FileID{}, &NotFollowedError{Name: name, Reason: "link, junction, reparse point or placeholder"}
+	}
+	handle, err := openNoFollow(name, s.absolute(name), info.IsDir())
+	if err != nil {
+		return backup.FileID{}, err
+	}
+	defer func() { _ = syscall.CloseHandle(handle) }()
+	var data syscall.ByHandleFileInformation
+	if err := syscall.GetFileInformationByHandle(handle, &data); err != nil {
+		return backup.FileID{}, &fs.PathError{Op: "identity", Path: name, Err: err}
+	}
+	return backup.FileID{Volume: data.VolumeSerialNumber, Index: uint64(data.FileIndexHigh)<<32 | uint64(data.FileIndexLow)}, nil
 }
 
 // SameFile compares volume serial numbers and file indexes.
@@ -220,11 +251,21 @@ func describe(err error) error {
 		case errorInvalidDrive, errorNotReady:
 			return fmt.Errorf("volume not available: %w", fs.ErrNotExist)
 		case errorSharingViolation:
-			return fmt.Errorf("locked by another process: %w", err)
+			return &lockedError{err}
 		}
 	}
 	return err
 }
+
+// lockedError reports a file held by another process without sharing,
+// such as a save locked by its game or the lock of a running sync.
+type lockedError struct{ err error }
+
+func (e *lockedError) Error() string { return "locked by another process: " + e.err.Error() }
+func (e *lockedError) Unwrap() error { return e.err }
+
+// Busy marks the error for callers that cannot import this package.
+func (e *lockedError) Busy() bool { return true }
 
 // longPath prefixes \\?\ so CreateFile reads the clean absolute path
 // literally, beyond MAX_PATH and without Win32 normalisation.

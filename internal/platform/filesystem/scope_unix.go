@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
+
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 )
 
 // Scope is a read-only view below an anchor directory. On Unix it exists to
@@ -147,3 +149,20 @@ func (s *Scope) SameFile(a, b fs.FileInfo) bool { return os.SameFile(a, b) }
 
 // Close releases the anchor.
 func (s *Scope) Close() error { return s.root.Close() }
+
+// Identity returns the device and inode of name, without following it.
+func (s *Scope) Identity(name string) (backup.FileID, error) {
+	info, err := s.Lstat(name)
+	if err != nil {
+		return backup.FileID{}, err
+	}
+	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+		return backup.FileID{}, &NotFollowedError{Name: name, Reason: "symbolic link or irregular file"}
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return backup.FileID{}, &fs.PathError{Op: "identity", Path: name, Err: errors.New("file identity unavailable")}
+	}
+	//nolint:gosec // G115: the device number is truncated to a volume id, as Windows serial numbers are 32 bits.
+	return backup.FileID{Volume: uint32(stat.Dev), Index: uint64(stat.Ino)}, nil
+}

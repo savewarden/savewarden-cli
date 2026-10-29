@@ -14,11 +14,46 @@ Aucun tag ni release n'est publié par le bootstrap.
   distinct de l'installation, par nom et par identité ; dossier non vide sans
   marqueur refusé, jamais adopté ; `current` comparé exactement à son receipt ;
   source absente jamais interprétée comme une suppression. Windows seulement.
+  Le plan qualifie le volume du coffre, NTFS sur lecteur local fixe ou
+  amovible, sinon code 1, et exige l'espace de la génération complète plus
+  max(64 Mio, 5 %) disponible pour l'utilisateur, sinon `insufficient-space`.
+- Commande `sync --apply`, `--recover` et `--recover --apply`, avec la ligne
+  d'état du coffre en dernière ligne de stderr (ADR 0007).
+- Première publication par la feature `sync` : initialisation du coffre I2 à I9 en créations exclusives, verrou,
+  état et espace relus sous verrou, journal validé par renommage avec
+  l'enveloppe E1 et les retries bornés sur les erreurs 32 et 33, copie hachée
+  avec détection de changement de la source, second inventaire, relecture du
+  staging, bascule contrôlée par identité avant et après le renommage,
+  receipt puis `published`. Un `current` existant et différent est refusé,
+  `current-exists`. Énumération des crashs avant et après chaque appel au
+  coffre.
+- Récupération d'une première publication interrompue par la feature
+  `sync` : plan de récupération sans
+  écriture, observation des identités de `current` et du staging,
+  classement d'ADR 0006, puis exécution sous verrou après relecture ;
+  marqueur repris, `abandoned`, `rolled-back`, `current` revérifié puis
+  receipt reconstruit et `published`, ou remis en staging ; `rollback-failed`
+  enregistré une seule fois. Toute ambiguïté et tout dépassement de
+  l'enveloppe arrêtent en code 3 sans écriture. La portée de lecture
+  fournit l'identité d'un fichier sans le suivre.
 - Protocole de publication et de récupération (ADR 0006), référence de
   sécurité des écritures à venir, et frontières de `sync` (ADR 0004).
+- Écritures autorisées dans le seul package `internal/platform/vault`
+  (ADR 0005) : garde statique assoupli pour ce répertoire exact, API de
+  création exclusive nommées une à une, `MoveFileEx` seulement avec le
+  littéral `0`, accès en écriture d'un `CreateFile` seulement avec
+  `CREATE_NEW` ; interdits renforcés partout, vault compris, dont tout
+  `MOVEFILE_*`, `ReplaceFile`, `Unlink`, `Rmdir`, `SetFileInformationByHandle`,
+  `NtCreateFile`, `FILE_FLAG_DELETE_ON_CLOSE`, le chargement dynamique et les
+  imports `unsafe` et `reflect`. `golang.org/x/sys/windows` n'est permis que
+  dans ce package.
 - Package `entities/backup` : types d'inventaire partagés, receipt v1 et
   marqueur du coffre relus strictement, journal d'opération chaîné et son
   automate, classement des observations de récupération, tous sans I/O.
+  L'enveloppe E1 compte neuf temporaires par numéro d'enregistrement, toutes
+  étapes confondues ; un temporaire abandonné à côté d'un enregistrement
+  validé est accepté aux conditions exactes d'ADR 0006, au lieu de rendre le
+  journal ambigu.
 - `inspect` expose l'inventaire sans suivi d'un dossier quelconque ; sa
   sortie ne change pas. Les fichiers chiffrés par EFS sont signalés à `sync`.
 - Documentation du [coffre](docs/vault.md), du [receipt v1](docs/receipt-v1.md)
@@ -36,6 +71,15 @@ Aucun tag ni release n'est publié par le bootstrap.
   si identité, taille et date sont stables autour de la lecture.
 - Garde statique de lecture seule du code de production, liste blanche des
   dépendances par couche, `errorlint` et `gosec`.
+- Adaptateur `platform/vault`, Windows seulement, pas encore câblé à une
+  commande : session de coffre en création seule, dossiers et fichiers
+  `CREATE_NEW`, flush, date à 100 ns, renommage `MoveFileEx` sans drapeau,
+  identité volume + index, verrou exclusif, type de volume et espace
+  disponible pour l'appelant ; chaque dossier traversé ou créé est épinglé
+  sans suivi de lien. Tests Windows réels, dont le renommage d'un enfant sous
+  un parent épinglé et les codes d'erreur consignés dans ADR 0006.
+- Dépendance `golang.org/x/sys` v0.49.0, package `windows` seul, limitée à
+  `platform/vault`.
 - Dépendance `go.yaml.in/yaml/v3` v3.0.5, limitée à `platform/manifests`.
 - Bootstrap B0 Go/Cobra : aide par défaut, `--help`, `help`, `version` et
   `--version`, version de développement `dev` et codes de sortie 0/1.
@@ -55,8 +99,11 @@ Aucun tag ni release n'est publié par le bootstrap.
 
 ### Limits
 
-- `sync` ne fait que planifier : `--apply` et `--recover` arrivent avec B2b
-  et B2c ; le type de volume du coffre n'est pas encore contrôlé.
+- `sync --apply` publie la première génération d'un jeu seulement : la
+  rotation de `current`, `--allow-removals` et `--accept-missing-source`
+  arrivent avec B2c ; ReFS n'est pas encore qualifié ; la durabilité d'un
+  renommage après une coupure de courant n'est pas garantie par Windows, la
+  récupération repose sur l'observation.
 - snapshot, restore et doctor restent à implémenter ; pas de sortie JSON de
   la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et

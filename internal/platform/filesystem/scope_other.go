@@ -5,6 +5,8 @@ package filesystem
 import (
 	"errors"
 	"io/fs"
+
+	"github.com/savewarden/savewarden-cli/internal/entities/backup"
 )
 
 // Scope is unavailable on this platform.
@@ -20,6 +22,9 @@ func (*Scope) ReadDir(string) ([]fs.DirEntry, error) { return nil, errors.ErrUns
 
 // OpenRegular is unavailable on this platform.
 func (*Scope) OpenRegular(string) (fs.File, error) { return nil, errors.ErrUnsupported }
+
+// Identity is unavailable on this platform.
+func (*Scope) Identity(string) (backup.FileID, error) { return backup.FileID{}, errors.ErrUnsupported }
 
 // SameFile is unavailable on this platform.
 func (*Scope) SameFile(fs.FileInfo, fs.FileInfo) bool { return false }

@@ -135,34 +135,6 @@ func EncodeReceipt(r Receipt) ([]byte, error) {
 	if err := r.validate(); err != nil {
 		return nil, err
 	}
-	type entry struct {
-		Path    string `json:"path"`
-		Size    int64  `json:"size"`
-		ModTime string `json:"mod_time"`
-		SHA256  string `json:"sha256"`
-	}
-	type source struct {
-		ID          string   `json:"id"`
-		Kind        string   `json:"kind"`
-		Required    bool     `json:"required"`
-		Status      string   `json:"status"`
-		Accepted    bool     `json:"accepted"`
-		Path        string   `json:"path"`
-		Files       int      `json:"files"`
-		Bytes       int64    `json:"bytes"`
-		Directories []string `json:"directories"`
-		Entries     []entry  `json:"entries"`
-	}
-	sources := make([]source, 0, len(r.Sources))
-	for _, s := range r.Sources {
-		entries := make([]entry, 0, len(s.Entries))
-		for _, e := range s.Entries {
-			entries = append(entries, entry{e.Path, e.Size, formatUTC(e.ModTime), hex.EncodeToString(e.SHA256[:])})
-		}
-		directories := append([]string{}, s.Directories...)
-		sources = append(sources, source{s.ID, s.Kind, s.Required, string(s.State), s.Accepted, s.Path,
-			len(s.Entries), s.Bytes(), directories, entries})
-	}
 	out := struct {
 		Schema          string         `json:"schema"`
 		SchemaVersion   int            `json:"schema_version"`
@@ -177,7 +149,7 @@ func EncodeReceipt(r Receipt) ([]byte, error) {
 		Previous        *string        `json:"previous"`
 		PlanSHA256      string         `json:"plan_sha256"`
 		Changes         map[string]int `json:"changes"`
-		Sources         []source       `json:"sources"`
+		Sources         []sourceOut    `json:"sources"`
 	}{
 		Schema: ReceiptSchema, SchemaVersion: ReceiptSchemaVersion,
 		Operation: r.Operation, ToolVersion: r.ToolVersion, RecoveredBy: stringOrNil(r.RecoveredBy),
@@ -187,13 +159,49 @@ func EncodeReceipt(r Receipt) ([]byte, error) {
 		Previous: stringOrNil(r.Previous), PlanSHA256: hex.EncodeToString(r.PlanSHA256[:]),
 		Changes: map[string]int{"added": r.Changes.Added, "modified": r.Changes.Modified,
 			"removed": r.Changes.Removed, "unchanged": r.Changes.Unchanged},
-		Sources: sources,
+		Sources: encodeSources(r.Sources),
 	}
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+type entryOut struct {
+	Path    string `json:"path"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+	SHA256  string `json:"sha256"`
+}
+
+type sourceOut struct {
+	ID          string     `json:"id"`
+	Kind        string     `json:"kind"`
+	Required    bool       `json:"required"`
+	Status      string     `json:"status"`
+	Accepted    bool       `json:"accepted"`
+	Path        string     `json:"path"`
+	Files       int        `json:"files"`
+	Bytes       int64      `json:"bytes"`
+	Directories []string   `json:"directories"`
+	Entries     []entryOut `json:"entries"`
+}
+
+// encodeSources gives the JSON form of sources shared by receipts and the
+// planned record.
+func encodeSources(in []ReceiptSource) []sourceOut {
+	sources := make([]sourceOut, 0, len(in))
+	for _, s := range in {
+		entries := make([]entryOut, 0, len(s.Entries))
+		for _, e := range s.Entries {
+			entries = append(entries, entryOut{e.Path, e.Size, formatUTC(e.ModTime), hex.EncodeToString(e.SHA256[:])})
+		}
+		directories := append([]string{}, s.Directories...)
+		sources = append(sources, sourceOut{s.ID, s.Kind, s.Required, string(s.State), s.Accepted, s.Path,
+			len(s.Entries), s.Bytes(), directories, entries})
+	}
+	return sources
 }
 
 func stringOrNil(s string) *string {
@@ -450,8 +458,18 @@ func (r Receipt) validate() error {
 	if r.Changes.Added < 0 || r.Changes.Modified < 0 || r.Changes.Removed < 0 || r.Changes.Unchanged < 0 {
 		return fail("changes: counts must not be negative")
 	}
+	if err := validateSources(r.Sources); err != nil {
+		return fail("%v", err)
+	}
+	return nil
+}
+
+// validateSources applies the rules shared by receipts and plans: unique
+// ids, known states, sorted unique relative paths.
+func validateSources(sources []ReceiptSource) error {
+	fail := fmt.Errorf
 	ids := map[string]bool{}
-	for i, s := range r.Sources {
+	for i, s := range sources {
 		field := fmt.Sprintf("sources[%d]", i)
 		if s.ID == "" || ids[s.ID] {
 			return fail("%s.id: must be unique and not empty", field)

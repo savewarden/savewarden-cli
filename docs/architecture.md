@@ -4,13 +4,14 @@ Décision propre à Savewarden : **FSD-inspired, Go-idiomatic**, documentée dan
 [ADR 0001](adr/0001-fsd-inspired-go.md). Mosaera est une inspiration de
 conception, pas une spécification à laquelle le produit prétend être conforme.
 
-## Existant B2a
+## Existant B2b
 
 ```text
 cmd/savewarden → app ─┬─► cli ─┬─► features/inspect ──► entities/game, entities/backup
                       │        └─► features/sync ─────► entities/game, entities/backup
                       ├─► platform/manifests ──► entities/game, go.yaml.in/yaml/v3
-                      └─► platform/filesystem ─► bibliothèque standard, syscall
+                      ├─► platform/filesystem ─► bibliothèque standard, syscall       (lecture seule)
+                      └─► platform/vault ──────► bibliothèque standard, x/sys/windows (seul package qui écrit)
 ```
 
 `main` fournit contexte, arguments, version et streams. `app.Run` assemble à
@@ -18,17 +19,20 @@ chaque invocation les services `inspect` et `sync` avec leurs adaptateurs,
 construit l'arborescence CLI et traduit les erreurs en code de sortie, dont
 le code 2 d'[ADR 0003](adr/0003-inspect-exit-codes.md) et les codes 2 et 3
 d'[ADR 0007](adr/0007-sync-contract-receipt-v1.md). `cli` possède les flags,
-le rendu texte et l'`ExitError`. Aucune découverte de configuration. Tout le
-code de production est encore en lecture seule.
+le rendu texte, l'`ExitError` et la ligne d'état du coffre. Aucune
+découverte de configuration. Seul `platform/vault` écrit, en création seule
+([ADR 0005](adr/0005-write-allowed-package.md)) ; `app` ne donne son
+`Writer` qu'à `--apply` et `--recover --apply`, jamais au plan.
 
 | Package | Rôle |
 | --- | --- |
 | `entities/game` | Manifeste, jeu, installation, sources ; validation pure et grammaire des chemins et noms Windows, indépendante de l'hôte |
 | `entities/backup` | Types partagés : `Entry`, `Directory`, `Finding` ; différence pure ; receipt v1 et marqueur du coffre stricts ; journal d'opération, son automate et le classement des observations d'[ADR 0006](adr/0006-publication-recovery-protocol.md) ; aucune I/O |
 | `features/inspect` | Inventaire en lecture seule ; ports `ManifestReader`, `FileSystem` et `Scope` ; `Report` typé ; `Directory`, inventaire sans suivi d'un dossier quelconque |
-| `features/sync` | Plan de synchronisation en lecture seule ; ports `ManifestReader`, `Inventories` et `Files` ; `Plan` typé |
+| `features/sync` | Plan, première publication et récupération selon [ADR 0006](adr/0006-publication-recovery-protocol.md) ; ports `ManifestReader`, `Inventories`, `Files`, `Volumes`, et pour écrire `Vaults` et `Clock` ; `Plan`, `Result` et `Recovery` typés |
 | `platform/manifests` | Lecture stricte du YAML vers `game.Manifest`, [ADR 0002](adr/0002-manifest-v1-strict-yaml.md) |
-| `platform/filesystem` | Portée ancrée sans suivi de liens ; implémentation Windows supportée, Unix pour les tests du contrat ; fichiers EFS signalés |
+| `platform/filesystem` | Portée ancrée sans suivi de liens ; implémentation Windows supportée, Unix pour les tests du contrat ; fichiers EFS signalés ; identité de fichier ; un fichier tenu sans partage est décrit, jamais ouvert |
+| `platform/vault` | Session de coffre en création seule, Windows seulement : dossiers et fichiers `CREATE_NEW`, flush, date, `MoveFileEx` sans drapeau, identité, verrou, type de volume et espace disponible ; dossiers épinglés sans suivi de lien |
 
 Les ports `Scope` des deux features n'utilisent que des types de la
 bibliothèque standard (`fs.FileInfo`, `fs.DirEntry`, `fs.File`) :
@@ -73,18 +77,23 @@ sont contrôlés pour le code de production dans `internal/app/architecture_test
 y compris pour les fichiers réservés à un OS :
 
 - dépendances tierces autorisées par couche seulement : Cobra dans `cli`,
-  `go.yaml.in/yaml/v3` dans `platform/manifests`, aucune ailleurs ;
+  `go.yaml.in/yaml/v3` dans `platform/manifests`, et le seul package
+  `golang.org/x/sys/windows` dans `platform/vault` exactement, aucune ailleurs ;
 - `syscall` réservé aux adaptateurs `platform/*`.
 
 `internal/app/readonly_test.go` refuse en plus, dans tout le code de
 production, les API connues d'écriture, d'exécution, de réseau et de chargement
 dynamique, ainsi que les modes d'ouverture en écriture. C'est un garde
 statique, pas une preuve : les tests dynamiques de non-mutation le complètent.
-B2b l'assouplira pour le seul package `platform/vault`, avec l'ADR 0005 ;
-B2a le laisse inchangé.
+[ADR 0005](adr/0005-write-allowed-package.md) l'assouplit pour le seul
+package `internal/platform/vault`, ni ses sous-packages ni un nom voisin :
+création exclusive `CREATE_NEW`, dossiers créés un par un, flush, date,
+`MoveFileEx` appelé avec le littéral `0`. Suppression, remplacement,
+troncature et tout drapeau `MOVEFILE_*` restent refusés partout, `vault`
+compris.
 
-Ne créer `platform/vault`, `features/snapshot` et les autres packages que
-lorsqu'un fichier utile existe. Aucun `shared` n'est nécessaire. Les détails propres à un
+Ne créer `features/snapshot` et les autres packages que lorsqu'un fichier
+utile existe. Aucun `shared` n'est nécessaire. Les détails propres à un
 OS sont isolés par build tags.
 
 ## Contrats à stabiliser
@@ -95,17 +104,18 @@ OS sont isolés par build tags.
 - B2 : en trois PR. B2a, livré : plan en lecture seule, [documenté](commands/sync.md),
   [coffre](vault.md), [receipt v1](receipt-v1.md), protocole de publication et
   de récupération d'[ADR 0006](adr/0006-publication-recovery-protocol.md),
-  contrat d'[ADR 0007](adr/0007-sync-contract-receipt-v1.md). B2b : première
-  publication et sa récupération. B2c : rotation de `current` et récupération
-  complète.
+  contrat d'[ADR 0007](adr/0007-sync-contract-receipt-v1.md). B2b, livré :
+  écritures confinées à `platform/vault` ([ADR 0005](adr/0005-write-allowed-package.md)),
+  première publication et sa récupération. B2c : rotation de `current` et
+  récupération complète.
 - B3 : identifiants uniques, snapshot `.incomplete` avant validation,
   contenu publié immuable et indépendant de `current`.
 - B4 : restauration vers dossier séparé, préflight et `--dry-run`, aucun
   écrasement ni restauration en place.
 - B5 : diagnostic read-only et campagne pilote.
 
-Les contrats encore futurs ne sont pas implémentés : aucun moteur de copie
-n'existe dans B2a, et la CLI n'a pas de sortie JSON. Les erreurs futures utilisent contexte et
+Les contrats encore futurs ne sont pas implémentés : la copie de B2b ne
+publie qu'une première génération, et la CLI n'a pas de sortie JSON. Les erreurs futures utilisent contexte et
 `errors.Is/As` lorsqu'un consommateur doit les distinguer. Les chemins utilisent
 `filepath`, les contenus `io.Reader` et les opérations `context.Context`.
 

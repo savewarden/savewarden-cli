@@ -41,8 +41,12 @@ cmd/savewarden ──► app ─┬─► cli ─┬─► features/inspect ─�
   - `Files`, portée de lecture sans suivi, pour lire le coffre et comparer
     des identités ; `app` le satisfait avec `platform/filesystem`.
   
-  B2b ajoutera `Vaults`, `Volumes` et `Clock`, par amendement de cet ADR si
-  leur forme s'écarte du plan.
+  B2b ajoute, par l'amendement ci-dessous :
+  - `Volumes`, requête en lecture seule du système de fichiers, du type de
+    lecteur et de l'espace disponible pour l'appelant ; le mode plan la reçoit ;
+  - `Vaults` et `Vault`, session de coffre en création seule, que seuls
+    `--apply` et `--recover` reçoivent ;
+  - `Clock`, date des opérations et attente des retries bornés.
 - **`internal/platform/vault`**, créé en B2b, est le seul adaptateur
   autorisé à écrire (ADR 0005). `golang.org/x/sys/windows`, en version
   exacte, n'y sera permis que là, par le test d'imports.
@@ -74,3 +78,25 @@ est visible et vérifiée. Les types d'inventaire migrent vers
 `entities/backup`, prouvé par une sortie `inspect` identique octet pour
 octet. Une future feature, `snapshot` ou `restore`, réutilisera
 `entities/backup` et le même principe de port.
+
+## Amendement B2b
+
+29 octobre 2026. Les ports d'écriture s'écartent de la forme indicative du
+plan B2 §3.2, sans changer les frontières :
+
+- `Vaults.Open(path)` ouvre une session sur le chemin du coffre, sans
+  exécuter l'initialisation : le protocole I1 à I9 d'ADR 0006 est de
+  l'orchestration et vit dans `features/sync`, testé sur faux coffre sur les
+  trois OS. L'adaptateur n'offre que des primitives.
+- `Vault` expose `CreateDir`, `Hold`, `Release`, `NewFile`, `Move`,
+  `Identity`, `Lock` et `Close`. Il n'y a pas de `Commit` : un enregistrement
+  est validé par `NewFile` sur son temporaire puis `Move`, et c'est
+  `features/sync` qui choisit le `k`, applique l'enveloppe E1 et les retries
+  du §7 d'ADR 0006. `Hold` et `Release` épinglent un dossier ou le libèrent
+  avant une bascule.
+- La création de fichier s'appelle `NewFile` : le garde d'ADR 0005 contrôle
+  les arguments de tout appel `CreateFile`, et un port de ce nom serait
+  refusé dans `features/sync`.
+- `Volumes.Describe(path)` reçoit un dossier existant, le coffre ou son
+  parent, et rapporte les octets disponibles pour l'utilisateur.
+

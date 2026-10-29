@@ -1,7 +1,8 @@
 # ADR 0006 — Protocole de publication et de récupération
 
 Date : 29 octobre 2026. Statut : accepté pour B2, contenu normatif du plan B2
-v0.2 §5, validé par le propriétaire le 29 octobre 2026 après revue intégrale.
+v0.2 §5, validé par le propriétaire le 29 octobre 2026 après revue intégrale ;
+amendé le même jour avant les premières écritures de B2b (voir Amendements).
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -59,23 +60,55 @@ une opération compte au plus 11 enregistrements validés (enveloppe E2,
 §9) : `NNN` va de `001` à `011`, et un numéro supérieur est une ambiguïté.
 
 ```text
-{"at":"2026-11-05T10:15:04Z","op":"20261105T101500-1a2b3c4d","prev":"<sha256 de l'enregistrement précédent>","schema":"savewarden.journal","schema_version":1,"seq":5,"step":"publish-intent", …}
+{"at":"2026-11-05T10:15:04Z","fields":{…},"op":"20261105T101500-1a2b3c4d","prev":"<sha256 de l'enregistrement précédent>","schema":"savewarden.journal","schema_version":1,"seq":5,"step":"publish-intent"}
 sha256 <SHA-256 hexadécimal des octets de la première ligne, LF compris>
 ```
 
 - Première ligne : JSON canonique, clés triées, UTF-8 sans BOM, une seule ligne.
 - `prev` : SHA-256 du fichier de l'enregistrement précédent ; `null` pour `001`.
   La chaîne fixe l'ordre et interdit toute substitution.
-- Champs propres à l'étape : identités volume + index de fichier attendues
-  avant et après, chemins relatifs, empreinte du plan ; `001-planned` contient
-  le plan complet et la version de l'outil.
+- Champs propres à l'étape, **sous la clé `fields`**, objet JSON présent même
+  vide ; les propriétés communes ci-dessus restent à la racine. Ce sont les
+  identités volume + index de fichier attendues avant et après, chemins
+  relatifs, empreinte du plan ; `001-planned` contient le plan complet et la
+  version de l'outil. Le contrat de chaque étape fixe ses champs ; ils sont
+  validés strictement à la lecture : champs obligatoires, types, valeurs,
+  identités et cohérence avec l'observation. Un champ inconnu ou manquant est
+  une ambiguïté, jamais ignoré.
+
+**Contrat des champs**, tous obligatoires, aucun autre accepté. Une identité
+s'écrit `vvvvvvvv-iiiiiiiiiiiiiiii`, numéro de série du volume puis index de
+fichier en hexadécimal minuscule ; une empreinte, 64 chiffres hexadécimaux
+minuscules ; un texte, une ligne de 1 à 1 024 octets.
+
+| Étape | Champs | Cohérence vérifiée à la lecture |
+| --- | --- | --- |
+| `planned` | `previous` : `null` ou identifiant d'opération ; `plan` : objet strict, version de l'outil, jeu, `started_at`, `changes` et `sources` au format du receipt v1 ; `plan_sha256` | `plan_sha256` est le SHA-256 de `plan` ; `previous` égal à celui du plan |
+| `staging-intent` | `staging` : `staging/<op>` | Nom fixé par l'opération |
+| `staged` | `staging_identity` ; `copied_sha256` | `copied_sha256` est l'empreinte du contenu du plan |
+| `verified` | `verified_sha256` | Idem |
+| `publish-intent`, `promote-intent` | `staging_identity` | Égale à celle de `staged` |
+| `unpublish-intent`, `unpromote-intent` | `current_identity` | Égale à celle de `staged`, puisque c'est le staging qui a été publié ou promu |
+| `retire-intent` | `current_identity` : l'ancien `current` | — |
+| `restore-intent` | `retained_identity` | Égale à celle de `retire-intent` |
+| `rollback-failed` | `error` | — |
+| `published` | `receipt_sha256` : SHA-256 du receipt validé | Comparée au receipt observé |
+| `failed`, `abandoned` | `reason` | — |
+| `rolled-back` | aucun | — |
+
+L'empreinte du contenu est le SHA-256 de la forme JSON canonique des
+`sources` du plan : identifiants, chemins, tailles, dates et SHA-256 de
+chaque fichier, dossiers. Le receipt reprend `plan_sha256` et les `sources`
+du plan.
 
 **Validation d'un enregistrement, dans cet ordre :**
 
 1. créer `NNN-<étape>.rec.tmp-<k>` en `CREATE_NEW`, avec le plus petit `k`
-   libre de 1 à 9 (enveloppe E1, §9), pour qu'un temporaire laissé par un
-   crash n'empêche pas une nouvelle tentative ; si les neuf noms existent,
-   aucun essai : code 3, enveloppe épuisée ;
+   de 1 à 9 qu'aucun temporaire du numéro `NNN` ne porte, **quelle que soit
+   son étape** (enveloppe E1, §9), pour qu'un temporaire laissé par un crash
+   n'empêche pas une nouvelle tentative ; un changement d'étape n'ouvre aucun
+   budget supplémentaire ; si les neuf `k` sont pris, aucun essai : code 3,
+   `recovery envelope exhausted`, aucune mutation ;
 2. écrire les deux lignes en entier ;
 3. `FlushFileBuffers`, puis fermer ;
 4. renommer vers `NNN-<étape>.rec` par `MoveFileEx` sans drapeau, avec les
@@ -85,7 +118,10 @@ sha256 <SHA-256 hexadécimal des octets de la première ligne, LF compris>
 
 Aucune action protégée par un enregistrement ne commence avant sa validation.
 Un temporaire n'est jamais supprimé, jamais réutilisé, jamais lu comme
-enregistrement. Receipts et marqueur suivent le même procédé.
+enregistrement. Receipts et marqueur suivent le même procédé, chacun avec
+ses neuf `k` pour sa destination logique : chaque `receipts\<op>.json` d'une
+part, `savewarden-vault.json` de l'autre. Un temporaire qui subsiste à côté
+de son fichier validé est un essai abandonné, ignoré.
 
 **Ce que prouve un enregistrement.** Trois niveaux, jamais confondus :
 
@@ -110,6 +146,40 @@ Un ou plusieurs temporaires du numéro **suivant le dernier validé** signalent
 une intention préparée : l'observation doit montrer l'état d'avant cette
 intention, sinon ambiguïté.
 
+**Temporaires abandonnés.** Un essai interrompu laisse son temporaire ; un
+essai suivant peut ensuite valider le même numéro, sous la même étape ou
+sous une autre : `005-publish-intent.rec.tmp-1` reste ainsi à côté de
+`005-abandoned.rec` après une reprise A1, `006-published.rec.tmp-1` à côté de
+`006-published.rec` après une reprise A6. Comme rien n'est supprimé, cet état
+est produit par le protocole et doit rester lisible. Pour un journal de `c`
+enregistrements validés, un temporaire `NNN-<étape>.rec.tmp-<k>` est accepté
+si et seulement si :
+
+1. son nom suit la grammaire : `NNN` sur trois chiffres, étape en minuscules,
+   `k` de 1 à 9 ; tout autre nom est une entrée inattendue ;
+2. aucun autre temporaire du même numéro ne porte le même `k`, quelle que
+   soit son étape ;
+3. et, selon son numéro :
+   - `NNN` ≤ `c`, **temporaire abandonné** : son étape était admise par
+     l'automate après les enregistrements `001` à `NNN-1`, dans le mode de
+     l'opération, première publication ou rotation, et le numéro `NNN` compte
+     au plus huit temporaires, puisque son enregistrement provient du
+     renommage de l'un des neuf noms. Il est accepté même après un état
+     terminal ;
+   - `NNN` = `c+1`, **intention préparée** : l'opération n'est pas terminale
+     et son étape est une suite admise du dernier enregistrement ;
+   - tout autre numéro, dont `000` : ambiguïté.
+
+Le contenu d'un temporaire n'est jamais lu, qu'il soit vide, tronqué ou
+complet. Un temporaire abandonné ne contraint pas l'observation et ne compte
+pas dans l'enveloppe : son numéro ne sera plus jamais écrit. Seuls les
+temporaires du numéro suivant comptent pour E1. Les `k` ne sont pas exigés
+contigus : une absence ne prouve rien, et aucune décision ne repose sur elle.
+Le lecteur n'exige pas non plus que l'étape abandonnée soit l'une de celles
+que la reprise aurait pu remplacer à ce numéro : cette combinaison ne change
+aucune décision, qui ne repose que sur les enregistrements validés,
+l'observation et les temporaires du numéro suivant.
+
 **Ambiguïtés, toutes fail-closed, code 3, rien déplacé, rien écrit :**
 
 | Cas | Pourquoi |
@@ -117,7 +187,8 @@ intention, sinon ambiguïté.
 | Enregistrement final illisible, somme fausse ou JSON tronqué | Impossible par le protocole sauf corruption : jamais ignoré |
 | Numéro manquant ou dupliqué, chaîne rompue, numéro supérieur à `011` | Ordre ou contenu non prouvé, enveloppe E2 dépassée |
 | Étape inconnue, schéma inconnu, transition interdite | Automate non reconnu |
-| Temporaire d'un autre numéro que le suivant ; neuf temporaires du numéro suivant | Historique incohérent ; enveloppe E1 épuisée |
+| Temporaire d'un numéro supérieur au suivant ou `000` ; temporaire d'une étape que l'automate n'admettait pas à son numéro ; deux temporaires d'un même numéro portant le même `k` ; neuf temporaires à côté d'un enregistrement validé ; temporaire du numéro suivant après un état terminal | Historique incohérent : le protocole ne produit pas cet état |
+| Neuf temporaires du numéro suivant quand la reprise doit l'écrire | Enveloppe E1 épuisée |
 | Second `rollback-failed` pour la même intention | Enveloppe E3 dépassée |
 | Enregistrement d'une autre opération dans le dossier | Mélange d'opérations |
 | Deux opérations non terminales pour un jeu | Exclusivité violée |
@@ -196,7 +267,7 @@ Récupération `--recover --apply` d'une première publication :
 
 | Dernier validé | Observation (`C`, `S`) | Action |
 | --- | --- | --- |
-| Aucun : dossier d'opération vide ou temporaires `001` seuls | (—, —) | `001-abandoned` |
+| Aucun : dossier d'opération vide ou temporaires `001` seuls | (—, —), ou un `current` publié par une opération antérieure : seul `staging\<op>` doit manquer (I8) | `001-abandoned` |
 | `planned` | (—, —) | `abandoned` |
 | `staging-intent` | (—, —), ou (—, dossier ordinaire sans point d'analyse) | `abandoned` ; staging laissé en place, ni lu ni déplacé |
 | `staged`, `verified` | (—, `new`) | `abandoned` ; staging laissé en place |
@@ -353,6 +424,13 @@ récupération répétée (plan B2 §9.3).
   les programmes qui utilisent le coffre. Toute autre erreur : échec immédiat.
 - La liste 32 et 33 est fermée pour B2 ; l'étendre exigerait une décision du
   propriétaire et un amendement d'ADR 0006.
+- Codes observés sur Windows 11 et NTFS par les tests réels de
+  `platform/vault` : un dossier tenu ouvert sans `FILE_SHARE_DELETE`, comme
+  par une portée de lecture, refuse son renommage en 32, retenté ; un fichier
+  ouvert à l'intérieur du dossier le refuse en 5, jamais retenté : la
+  bascule échoue aussitôt et le diagnostic invite à fermer les programmes
+  qui utilisent le coffre. Une cible existante, fichier ou dossier, est
+  refusée en 183 ; `CREATE_NEW` sur un nom de dossier existant, en 5.
 - Backoff exponentiel par horloge injectée, nombre de tentatives borné,
   **5 secondes au plus** au total par renommage ; jamais de boucle infinie.
 - Pendant la section critique, de `publish-intent` ou `retire-intent` jusqu'à
@@ -385,7 +463,7 @@ la même opération, lors de son propre rollback.
 
 | # | Limite | Justification |
 | --- | --- | --- |
-| E1 | Au plus 9 temporaires par fichier validé par renommage : enregistrement, receipt, marqueur | Une relance n'en consomme un que si elle est interrompue pendant l'écriture de ce fichier ; aucun temporaire n'est supprimé |
+| E1 | Au plus 9 temporaires par destination logique validée par renommage : par numéro d'enregistrement, toutes étapes confondues ; par receipt ; pour le marqueur | Une relance n'en consomme un que si elle est interrompue pendant l'écriture de ce fichier ; aucun temporaire n'est supprimé ni réutilisé ; changer d'étape à un numéro n'ouvre pas de nouveau budget |
 | E2 | Au plus 11 enregistrements validés par opération | L'automate est acyclique ; son plus long chemin est la rotation dépromue puis restaurée, avec un `rollback-failed` par intention : `001` à `011` |
 | E3 | Au plus un `rollback-failed` par intention de rollback | Un nouvel échec du même déplacement n'ajoute rien au journal et sort en code 3 |
 | E4 | Retries de renommage sur 32 et 33 seulement, 5 secondes au plus | §7 |
@@ -439,3 +517,29 @@ relève de son propriétaire.
   code qui en dépend ; un écart amende cet ADR d'abord.
 - B3 et B4 publieront snapshots et restaurations selon ce protocole, ou
   l'amenderont.
+
+## Amendements
+
+- **29 octobre 2026, avant les premières écritures de B2b**, sur décision du
+  propriétaire : enveloppe E1 au sens strict, neuf temporaires par numéro
+  d'enregistrement toutes étapes confondues, et une enveloppe propre à chaque
+  receipt et au marqueur ; champs propres à l'étape sous la clé `fields`,
+  validés strictement par étape ; conditions exactes d'acceptation des
+  temporaires abandonnés à côté d'un enregistrement validé (§3), que le
+  lecteur de B2a refusait à tort et qui auraient rendu irrécupérable un état
+  produit par le protocole. Tests : `TestAbandonedTemporariesAreAccepted`,
+  `TestIncoherentTemporariesAreAmbiguous`,
+  `TestAbandonedTemporariesDoNotConsumeTheEnvelope`.
+- **29 octobre 2026, champs d'étape** : contrat fermé et typé de chaque
+  étape, cohérence entre enregistrements vérifiée à la lecture (§3) ;
+  `TestStepFieldsAreStrict`, `TestRecordsAreCoherent`.
+- Ces amendements prévalent sur le §5 du plan B2 v0.2, qui reste inchangé
+  comme document validé : notamment sur « Temporaire d'un autre numéro que le
+  suivant », désormais précisé au §3, et sur l'enveloppe E1, désormais par
+  destination logique.
+- **29 octobre 2026, adaptateur `platform/vault`** : l'hypothèse du §4,
+  qu'un parent épinglé n'empêche pas de renommer un enfant, est confirmée par
+  `TestParentPinsDoNotBlockChildRename`, identité conservée par le
+  renommage ; codes d'erreur observés consignés au §7
+  (`TestOpenHandlesBlockTheRename`, `TestMoveNeverReplaces`). Aucun écart au
+  protocole.

@@ -49,3 +49,25 @@ func TestFifoIsNeverOpenedForReading(t *testing.T) {
 		t.Fatal("a named pipe was opened as a regular file")
 	}
 }
+
+func TestIdentityOnUnix(t *testing.T) {
+	anchor := tempAnchor(t)
+	write(t, filepath.Join(anchor, "staging", "1.save"), "one")
+	if err := os.Symlink("staging", filepath.Join(anchor, "link")); err != nil {
+		t.Fatal(err)
+	}
+	scope := open(t, anchor)
+	before, err := scope.Identity("staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scope.Identity("link"); err == nil {
+		t.Fatal("symbolic link identified")
+	}
+	if err := os.Rename(filepath.Join(anchor, "staging"), filepath.Join(anchor, "current")); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := scope.Identity("current"); err != nil || after != before {
+		t.Fatalf("after rename %v, %v; want %v", after, err, before)
+	}
+}

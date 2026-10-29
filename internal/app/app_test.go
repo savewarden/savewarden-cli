@@ -19,13 +19,20 @@ func TestCLIContract(t *testing.T) {
 		code int
 		out  string
 		err  string
+		// state: the run ends with the vault state line, after its error.
+		state bool
 	}{
-		{name: "default help", out: "inspects declared save sources and plans their synchronisation"},
+		{name: "default help", out: "inspects declared save sources, plans their synchronisation"},
 		{name: "help lists inspect", args: []string{"--help"}, out: "inspect     Inventory the save sources of a manifest, read-only"},
-		{name: "help lists sync", args: []string{"--help"}, out: "sync        Plan the copy of a manifest's sources into a vault, read-only"},
-		{name: "sync help", args: []string{"sync", "--help"}, out: "Exit codes: 0 plan without blocking findings"},
+		{name: "help lists sync", args: []string{"--help"}, out: "sync        Plan, apply or recover the copy of a manifest's sources into a vault"},
+		{name: "sync help", args: []string{"sync", "--help"}, out: "Exit codes: 0 success: plan without blocking findings, published"},
 		{name: "sync without flags", args: []string{"sync"}, code: 1, err: `required flag(s) "manifest", "vault" not set`},
-		{name: "sync apply is not available", args: []string{"sync", "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply"}, code: 1, err: "unknown flag: --apply"},
+		{name: "sync apply missing manifest", args: []string{"sync", "--manifest", "missing-manifest.yaml", "--vault", `D:\Vault`, "--apply"},
+			code: 1, err: "missing-manifest.yaml", state: true},
+		{name: "sync recover missing manifest", args: []string{"sync", "--manifest", "missing-manifest.yaml", "--vault", `D:\Vault`, "--recover"},
+			code: 1, err: "missing-manifest.yaml", state: true},
+		{name: "sync removals are not available", args: []string{"sync", "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply", "--allow-removals"},
+			code: 1, err: "unknown flag: --allow-removals"},
 		{name: "sync missing manifest", args: []string{"sync", "--manifest", "missing-manifest.yaml", "--vault", `D:\Vault`}, code: 1, err: "missing-manifest.yaml"},
 		{name: "inspect help", args: []string{"inspect", "--help"}, out: "Exit codes: 0 complete inventory"},
 		{name: "inspect without manifest", args: []string{"inspect"}, code: 1, err: `required flag(s) "manifest" not set`},
@@ -53,7 +60,14 @@ func TestCLIContract(t *testing.T) {
 				if stdout.Len() != 0 || !strings.Contains(stderr.String(), tt.err) {
 					t.Fatalf("stdout = %q; stderr = %q", stdout.String(), stderr.String())
 				}
-				if strings.Count(stderr.String(), "savewarden:") != 1 || strings.Contains(stderr.String(), "Usage:") {
+				lines := 1
+				if tt.state {
+					lines = 2
+					if !strings.HasSuffix(stderr.String(), "\nsavewarden: vault: not modified\n") {
+						t.Fatalf("no vault state line last: %q", stderr.String())
+					}
+				}
+				if strings.Count(stderr.String(), "savewarden:") != lines || strings.Contains(stderr.String(), "Usage:") {
 					t.Fatalf("error printed more than once or with usage: %q", stderr.String())
 				}
 			} else if stderr.Len() != 0 || !strings.Contains(stdout.String(), tt.out) {

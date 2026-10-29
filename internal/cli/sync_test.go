@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,23 +18,51 @@ import (
 )
 
 type fakePlanner struct {
-	plan    sync.Plan
-	err     error
-	request sync.Request
+	plan     sync.Plan
+	result   sync.Result
+	recovery sync.Recovery
+	err      error
+	request  sync.Request
+	called   string
 }
 
 func (f *fakePlanner) Plan(_ context.Context, request sync.Request) (sync.Plan, error) {
-	f.request = request
+	f.request, f.called = request, "plan"
 	return f.plan, f.err
 }
 
-func runSync(t *testing.T, planner cli.Planner, args ...string) (string, error) {
+func (f *fakePlanner) Apply(_ context.Context, request sync.Request) (sync.Result, error) {
+	f.request, f.called = request, "apply"
+	return f.result, f.err
+}
+
+func (f *fakePlanner) RecoverPlan(_ context.Context, request sync.Request) (sync.Recovery, error) {
+	f.request, f.called = request, "recover plan"
+	return f.recovery, f.err
+}
+
+func (f *fakePlanner) Recover(_ context.Context, request sync.Request) (sync.Result, error) {
+	f.request, f.called = request, "recover"
+	return f.result, f.err
+}
+
+func runSync(t *testing.T, planner cli.Syncer, args ...string) (string, error) {
 	t.Helper()
-	var stdout, stderr bytes.Buffer
-	root := cli.NewRootCommand("dev", &stdout, &stderr, nil, planner)
+	stdout, _, err := runSyncAll(t, planner, &bytes.Buffer{}, args...)
+	return stdout, err
+}
+
+func runSyncAll(t *testing.T, planner cli.Syncer, stdout io.Writer, args ...string) (string, string, error) {
+	t.Helper()
+	var stderr bytes.Buffer
+	root := cli.NewRootCommand("dev", stdout, &stderr, nil, planner)
 	root.SetArgs(append([]string{"sync"}, args...))
 	err := root.ExecuteContext(context.Background())
-	return stdout.String(), err
+	out := ""
+	if b, ok := stdout.(*bytes.Buffer); ok {
+		out = b.String()
+	}
+	return out, stderr.String(), err
 }
 
 func firstPlan() sync.Plan {
@@ -46,6 +75,8 @@ func firstPlan() sync.Plan {
 		Game:         game.Game{ID: "synthetic-game", Name: "Synthetic Game"},
 		Vault:        `D:\Vault`,
 		VaultState:   sync.VaultAbsent,
+		Volume:       backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed, Available: 1 << 40},
+		Needed:       6 + 64<<20,
 		Destination:  `D:\Vault\games\synthetic-game\current`,
 		Sources: []sync.SourcePlan{{
 			Source:  game.Source{ID: "saves", Kind: game.KindSave, Required: true},
@@ -73,7 +104,7 @@ func TestRenderFirstPlan(t *testing.T) {
 game: synthetic-game (Synthetic Game)
 vault: D:\Vault (will be created)
 destination: D:\Vault\games\synthetic-game\current
-volume: not checked by this build
+volume: NTFS, fixed drive, 67108870 bytes needed
 current: none
 pending: none
 mode: plan only, nothing written
@@ -157,8 +188,8 @@ func TestSyncInvocationErrors(t *testing.T) {
 	}{
 		{"no flags", nil, `required flag(s) "manifest", "vault" not set`},
 		{"no vault", []string{"--manifest", "m.yaml"}, `required flag(s) "vault" not set`},
-		{"apply does not exist yet", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply"}, "unknown flag: --apply"},
-		{"recover does not exist yet", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "--recover"}, "unknown flag: --recover"},
+		{"removals are not available", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "--allow-removals"}, "unknown flag: --allow-removals"},
+		{"missing sources cannot be accepted", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "--accept-missing-source", "saves"}, "unknown flag: --accept-missing-source"},
 		{"positional argument", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "extra"}, "unknown command"},
 		{"service error", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`}, failure.Error()},
 	}
@@ -212,6 +243,116 @@ func TestRenderHeaderOnAnIntervention(t *testing.T) {
 	for _, want := range []string{"current: not checked, intervention required\n", "pending: unknown, ambiguous journal\n"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+const applyOp = "20261105T101500-1a2b3c4d"
+
+func published() sync.Result {
+	return sync.Result{Plan: firstPlan(), Operation: applyOp, Effect: sync.EffectPublished, Files: 2, Bytes: 6,
+		Receipt: `D:\Vault\games\synthetic-game\receipts\` + applyOp + `.json`}
+}
+
+func TestApplyReportsAndAnnouncesTheVault(t *testing.T) {
+	planner := &fakePlanner{result: published()}
+	stdout, stderr, err := runSyncAll(t, planner, &bytes.Buffer{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply")
+	if err != nil || planner.called != "apply" {
+		t.Fatalf("err %v, called %q", err, planner.called)
+	}
+	for _, want := range []string{
+		"mode: apply: copy, verify and publish\n",
+		"\noperation: " + applyOp + "\nverification: 2 files, 6 bytes, SHA-256 verified\npublished: D:\\Vault\\games\\synthetic-game\\current\nreceipt: D:\\Vault\\games\\synthetic-game\\receipts\\" + applyOp + ".json\n",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+	if stderr != "savewarden: vault: published "+applyOp+"\n" {
+		t.Fatalf("stderr %q", stderr)
+	}
+}
+
+func TestApplyExitCodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		result sync.Result
+		err    error
+		code   int
+		stderr string
+	}{
+		{"blocked", sync.Result{Plan: firstPlan()}, &sync.BlockedError{Code: sync.CodeCurrentExists, Detail: "already there"}, 2,
+			"savewarden: current-exists: already there\nsavewarden: vault: not modified\n"},
+		{"failed", sync.Result{Plan: firstPlan(), Operation: applyOp, Effect: sync.EffectStaged}, errors.New("disk full"), 1,
+			"savewarden: disk full\nsavewarden: vault: current unchanged; operation " + applyOp + " kept in staging\n"},
+		{"intervention", sync.Result{Plan: firstPlan(), Operation: applyOp, Effect: sync.EffectIntervention, Cause: "receipt missing"},
+			&sync.InterventionError{Operation: applyOp, Cause: "receipt missing"}, 3,
+			"savewarden: intervention required for " + applyOp + ": receipt missing\nsavewarden: vault: intervention required for " + applyOp + ": receipt missing\n"},
+		{"no plan", sync.Result{}, errors.New("manifest invalid"), 1, "savewarden: manifest invalid\nsavewarden: vault: not modified\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := runSyncAll(t, &fakePlanner{result: tt.result, err: tt.err}, &bytes.Buffer{},
+				"--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply")
+			var exit *cli.ExitError
+			if !errors.As(err, &exit) || exit.Code != tt.code || !exit.Reported || stderr != tt.stderr {
+				t.Fatalf("err %v, stderr %q", err, stderr)
+			}
+			if (tt.result.Plan.ManifestPath == "") != (stdout == "") {
+				t.Fatalf("stdout %q", stdout)
+			}
+		})
+	}
+}
+
+// ADR 0007: a publication that succeeded but could not be reported exits 1,
+// and the state line still says it was published.
+func TestPublishedButStdoutFailed(t *testing.T) {
+	_, stderr, err := runSyncAll(t, &fakePlanner{result: published()}, failingWriter{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply")
+	var exit *cli.ExitError
+	if !errors.As(err, &exit) || exit.Code != 1 || !strings.HasSuffix(stderr, "savewarden: vault: published "+applyOp+"\n") ||
+		!strings.Contains(stderr, "stdout is closed") {
+		t.Fatalf("err %v, stderr %q", err, stderr)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("stdout is closed") }
+
+func TestRecoverModes(t *testing.T) {
+	recovery := sync.Recovery{
+		ManifestPath: "m.yaml", Game: game.Game{ID: "synthetic-game", Name: "Synthetic Game"}, Vault: `D:\Vault`,
+		VaultState: sync.VaultInitialized, Volume: backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed},
+		Operation: applyOp, Last: backup.StepPublishIntent,
+		Observed: &backup.Observation{Current: backup.New, Staging: backup.Absent}, Action: sync.RecoverVerifyPublish,
+	}
+	want := "manifest: m.yaml\ngame: synthetic-game (Synthetic Game)\nvault: D:\\Vault (initialized)\nvolume: NTFS, fixed drive\n" +
+		"operation: " + applyOp + "\nlast committed step: publish-intent\nobserved: current new, staging absent\n" +
+		"action: " + string(sync.RecoverVerifyPublish) + "\n"
+	planner := &fakePlanner{recovery: recovery}
+	stdout, stderr, err := runSyncAll(t, planner, &bytes.Buffer{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--recover")
+	if err != nil || planner.called != "recover plan" || stdout != want+"mode: recovery plan only, nothing written\n" ||
+		stderr != "savewarden: vault: not modified\n" {
+		t.Fatalf("recover plan: %v %q\n%s\n%q", err, planner.called, stdout, stderr)
+	}
+	planner = &fakePlanner{result: sync.Result{Operation: applyOp, Effect: sync.EffectPublished, Recovery: &recovery}}
+	stdout, stderr, err = runSyncAll(t, planner, &bytes.Buffer{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--recover", "--apply")
+	if err != nil || planner.called != "recover" || stdout != want+"mode: recovery\n" || stderr != "savewarden: vault: published "+applyOp+"\n" {
+		t.Fatalf("recover: %v %q\n%s\n%q", err, planner.called, stdout, stderr)
+	}
+	planner = &fakePlanner{recovery: recovery, err: &sync.InterventionError{Operation: applyOp, Cause: "observation does not match"}}
+	_, stderr, err = runSyncAll(t, planner, &bytes.Buffer{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--recover")
+	var exit *cli.ExitError
+	if !errors.As(err, &exit) || exit.Code != 3 || !strings.HasSuffix(stderr, "savewarden: vault: intervention required for "+applyOp+": observation does not match\n") {
+		t.Fatalf("ambiguous: %v %q", err, stderr)
+	}
+}
+
+func TestRemovalFlagsAreNotAvailable(t *testing.T) {
+	for _, flag := range []string{"--allow-removals", "--accept-missing-source=saves"} {
+		if _, err := runSync(t, &fakePlanner{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply", flag); err == nil {
+			t.Errorf("%s accepted", flag)
 		}
 	}
 }

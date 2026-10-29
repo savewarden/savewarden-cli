@@ -27,16 +27,18 @@ type Request struct {
 	VaultPath    string
 }
 
-// Service plans synchronisations through injected adapters.
+// Service plans synchronisations through injected adapters, all of them
+// read-only. Writing needs a Writer, given to --apply and --recover only.
 type Service struct {
 	manifests   ManifestReader
 	inventories Inventories
 	files       Files
+	volumes     Volumes
 }
 
 // New returns a Service using the given adapters.
-func New(manifests ManifestReader, inventories Inventories, files Files) *Service {
-	return &Service{manifests: manifests, inventories: inventories, files: files}
+func New(manifests ManifestReader, inventories Inventories, files Files, volumes Volumes) *Service {
+	return &Service{manifests: manifests, inventories: inventories, files: files, volumes: volumes}
 }
 
 // Plan computes what a synchronisation would copy, without writing
@@ -67,6 +69,7 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 		Game:         manifest.Game,
 		Vault:        request.VaultPath,
 		Destination:  windowsPath(vaultVolume, append(append([]string{}, gameSegments...), currentDir)),
+		manifest:     manifest, vaultVolume: vaultVolume, vaultSegments: vaultSegments,
 	}
 
 	scope, err := s.files.OpenScope(vaultVolume)
@@ -79,6 +82,9 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	defer func() { _ = scope.Close() }()
 	v, err := resolveVault(scope, request.VaultPath, vaultSegments)
 	if err != nil {
+		return Plan{}, err
+	}
+	if plan.Volume, err = s.describe(request.VaultPath, vaultVolume, vaultSegments, v.exists); err != nil {
 		return Plan{}, err
 	}
 	if strings.EqualFold(vaultVolume, installVolume) {
@@ -96,7 +102,7 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return Plan{}, fmt.Errorf("plan interrupted: %w", err)
 	}
-	plan.VaultState, plan.Pending = v.state, v.pending
+	plan.VaultState, plan.Pending, plan.observed = v.state, v.pending, v
 	if len(v.interventions) > 0 {
 		plan.Interventions, plan.CurrentUnchecked = v.interventions, v.current || v.currentLink
 		sort.SliceStable(plan.Interventions, func(a, b int) bool { return plan.Interventions[a].Subject < plan.Interventions[b].Subject })
@@ -121,6 +127,7 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 			plan.add(backup.Info, CodeSameVolume, source.ID, vaultVolume, "vault and source share a volume; not an off-disk backup")
 		}
 	}
+	plan.checkSpace()
 	if previous != nil {
 		for _, old := range previous.Sources {
 			if !declared(manifest, old.ID) {
@@ -131,6 +138,40 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	}
 	plan.sortFindings(manifest)
 	return plan, nil
+}
+
+// describe qualifies the vault's volume, read through the vault itself or,
+// while it does not exist, through its parent.
+func (s *Service) describe(vaultPath, volume string, segments []string, exists bool) (backup.Volume, error) {
+	existing := segments
+	if !exists {
+		existing = segments[:len(segments)-1]
+	}
+	described, err := s.volumes.Describe(windowsPath(volume, existing))
+	if err != nil {
+		return backup.Volume{}, errVault(vaultPath, "volume cannot be described: %v", err)
+	}
+	return described, qualify(vaultPath, described)
+}
+
+// checkSpace compares the space a publication needs with the space the
+// user may still write (plan B2 §4.2, V2). It is checked again under lock.
+func (p *Plan) checkSpace() {
+	var sizes []int64
+	for _, source := range p.Sources {
+		sizes = append(sizes, source.Bytes)
+	}
+	needed, err := spaceNeeded(sizes)
+	switch {
+	case err != nil:
+		p.add(backup.Blocking, CodeInsufficientSpace, "", p.Vault, err.Error())
+	case p.Volume.Available < needed:
+		p.Needed = needed
+		p.add(backup.Blocking, CodeInsufficientSpace, "", p.Vault,
+			fmt.Sprintf("%d bytes needed, %d available to this user", needed, p.Volume.Available))
+	default:
+		p.Needed = needed
+	}
 }
 
 // checkSources refuses sources that resolve to overlapping directories by
@@ -273,7 +314,7 @@ func relativeTo(p string) string {
 
 // planSource applies plan B2 §4.4 to one source.
 func (p *Plan) planSource(source game.Source, path string, dir backup.Directory, previous *backup.Receipt) {
-	result := SourcePlan{Source: source, Path: path}
+	result := SourcePlan{Source: source, Path: path, inventory: dir}
 	var old backup.ReceiptSource
 	hadOld := false
 	if previous != nil {

@@ -17,6 +17,9 @@ const (
 	CodeCurrentModified backup.Code = "current-modified"
 	CodeLongPath        backup.Code = "long-path"
 	CodeSameVolume      backup.Code = "same-volume"
+	// CodeInsufficientSpace: the space available to the user is below the
+	// full size of the new generation plus its margin.
+	CodeInsufficientSpace backup.Code = "insufficient-space"
 )
 
 const (
@@ -80,6 +83,9 @@ type SourcePlan struct {
 	Changes backup.Changes // against the current generation; empty unless planned
 	Files   int
 	Bytes   int64
+	// inventory is the full inventory of a planned source: what --apply
+	// copies and must find again.
+	inventory backup.Directory
 }
 
 // Plan is the typed result of a read-only sync plan, independent of
@@ -89,7 +95,12 @@ type Plan struct {
 	Game         game.Game
 	Vault        string
 	VaultState   VaultState
-	Destination  string // Windows path of the current generation
+	// Volume describes the vault's volume, qualified as local NTFS.
+	Volume backup.Volume
+	// Needed is the space a publication requires: the full new generation
+	// plus max(64 MiB, 5 %); zero when an intervention stops the plan.
+	Needed      uint64
+	Destination string // Windows path of the current generation
 	// Current is the operation that produced the current generation, empty
 	// when the vault holds none for this game.
 	Current string
@@ -101,6 +112,12 @@ type Plan struct {
 	Sources       []SourcePlan
 	Interventions []Intervention
 	Findings      []backup.Finding
+
+	// What --apply needs to execute exactly this plan.
+	manifest      game.Manifest
+	vaultVolume   string
+	vaultSegments []string
+	observed      *vault
 }
 
 // Blocking counts the blocking findings.
