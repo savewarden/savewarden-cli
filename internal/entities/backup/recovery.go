@@ -6,10 +6,12 @@ import "fmt"
 // directory: current, retained\<prev-op> or staging\<op>.
 type Presence int
 
-// Presences. Old is the identity of current recorded by retire-intent, New
-// the identity of the staging recorded by staged. Unidentified is a plain
-// directory whose identity was not yet recorded; Other is anything else: a
-// different identity, a link, a file.
+// Presences. Old is the replaced current, by the identity planned fixed;
+// before any record, the previous generation recognised by its whole proof
+// chain (ADR 0006 §4). New is the identity of the staging recorded by
+// staged. Unidentified is a plain directory whose identity was not yet
+// recorded, never Old; Other is anything else: a different identity, a
+// link, a file.
 const (
 	Absent Presence = iota
 	Old
@@ -25,10 +27,18 @@ func (p Presence) String() string {
 // Observation is the state of the three names that publication moves.
 type Observation struct {
 	Current, Retained, Staging Presence
+	// Expected is set when the game has a receipt, valid or not, or a
+	// journal terminal in published: a published generation should then
+	// exist. Only an operation without any record consults it (rule M3).
+	Expected bool
 }
 
 func (o Observation) String() string {
-	return fmt.Sprintf("(current %s, retained %s, staging %s)", o.Current, o.Retained, o.Staging)
+	s := fmt.Sprintf("(current %s, retained %s, staging %s)", o.Current, o.Retained, o.Staging)
+	if o.Expected {
+		s += " with a published generation expected"
+	}
+	return s
 }
 
 // Action is what --recover --apply does for one interrupted operation, per
@@ -101,7 +111,7 @@ func preparedFor(step Step, j Journal, o Observation) bool {
 		}
 		switch {
 		case len(j.Records) == 0:
-			return o.Current == Absent || o.Current == Old || o.Current == Unidentified
+			return unstarted(o)
 		case rotation:
 			return o.Current == Old
 		}
@@ -145,6 +155,17 @@ func preparedFor(step Step, j Journal, o Observation) bool {
 	return false
 }
 
+// unstarted applies rule M3 of ADR 0006 §4 to current: with no published
+// generation expected, current must be absent; with one expected, it must
+// be that generation, recognised. A missing current where a generation is
+// expected is a contradiction, never a normal absence.
+func unstarted(o Observation) bool {
+	if o.Expected {
+		return o.Current == Old
+	}
+	return o.Current == Absent
+}
+
 func contains(presences []Presence, p Presence) bool {
 	for _, candidate := range presences {
 		if candidate == p {
@@ -164,11 +185,9 @@ func displayStep(s Step) Step {
 func classify(j Journal, o Observation) (Action, bool) {
 	last := j.Last()
 	if last == "" {
-		// Operation not started (step I8): nothing but its own directory
-		// exists. Whether a current exists is irrelevant, a staging is not.
-		ok := o.Staging == Absent && o.Retained == Absent &&
-			(o.Current == Absent || o.Current == Old || o.Current == Unidentified)
-		return ActionAbandon, ok
+		// Operation not started (step I8): it fixed neither plan nor
+		// identity, so only rule M3 may close it.
+		return ActionAbandon, o.Staging == Absent && o.Retained == Absent && unstarted(o)
 	}
 	if last == StepRollbackFailed {
 		// The failed intent's rows apply again (ADR 0006).

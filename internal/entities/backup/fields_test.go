@@ -21,34 +21,43 @@ var allSteps = []backup.Step{
 
 // Each step's values survive the record format unchanged.
 func TestStepValuesRoundTrip(t *testing.T) {
-	for _, step := range allSteps {
-		seq, prev := 2, strings.Repeat("0", 64)
-		if step == backup.StepPlanned {
-			seq, prev = 1, ""
+	for _, rotation := range []bool{false, true} {
+		for _, step := range allSteps {
+			roundTrip(t, step, rotation)
 		}
-		want := valuesFor(t, step, false)
-		r, err := backup.NewRecord(seq, step, op, at, prev, want)
+	}
+}
+
+// roundTrip encodes and decodes the values of one step, a rotation's
+// planned record carrying current_identity.
+func roundTrip(t *testing.T, step backup.Step, rotation bool) {
+	t.Helper()
+	seq, prev := 2, strings.Repeat("0", 64)
+	if step == backup.StepPlanned {
+		seq, prev = 1, ""
+	}
+	want := valuesFor(t, step, rotation)
+	r, err := backup.NewRecord(seq, step, op, at, prev, want)
+	if err != nil {
+		t.Fatalf("%s: %v", step, err)
+	}
+	decoded, err := backup.DecodeRecord(mustEncode(t, r))
+	if err != nil {
+		t.Fatalf("%s: %v", step, err)
+	}
+	got, err := decoded.Values()
+	if err != nil {
+		t.Fatalf("%s: %v", step, err)
+	}
+	if step == backup.StepPlanned {
+		_, sum, err := want.Plan.Encode()
 		if err != nil {
-			t.Fatalf("%s: %v", step, err)
+			t.Fatal(err)
 		}
-		decoded, err := backup.DecodeRecord(mustEncode(t, r))
-		if err != nil {
-			t.Fatalf("%s: %v", step, err)
-		}
-		got, err := decoded.Values()
-		if err != nil {
-			t.Fatalf("%s: %v", step, err)
-		}
-		if step == backup.StepPlanned {
-			_, sum, err := want.Plan.Encode()
-			if err != nil {
-				t.Fatal(err)
-			}
-			want.PlanSHA256 = sum
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s: values %+v, want %+v", step, got, want)
-		}
+		want.PlanSHA256 = sum
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s: values %+v, want %+v", step, got, want)
 	}
 }
 
@@ -160,7 +169,7 @@ func TestRecordsAreCoherent(t *testing.T) {
 			func(v *backup.StepValues) { v.Current = other }, "differs from the staging identity"},
 		{"promote another directory", true, rotation, backup.StepPromoteIntent, func(v *backup.StepValues) { v.Staging = other }, "differs from"},
 		{"unpromote another directory", true, rotation, backup.StepUnpromoteIntent, func(v *backup.StepValues) { v.Current = other }, "differs from the staging identity"},
-		{"restore another generation", true, rotation, backup.StepRestoreIntent, func(v *backup.StepValues) { v.Retained = other }, "recorded by retire-intent"},
+		{"restore another generation", true, rotation, backup.StepRestoreIntent, func(v *backup.StepValues) { v.Retained = other }, "recorded by planned"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

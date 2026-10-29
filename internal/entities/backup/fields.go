@@ -21,7 +21,8 @@ type StepValues struct {
 	Plan       *Planned
 	PlanSHA256 [32]byte
 	// Identities of the staging directory, of current, of the retained
-	// generation, as each intent expects them.
+	// generation, as each intent expects them. For planned, Current is the
+	// current a rotation replaces, zero for a first publication.
 	Staging, Current, Retained FileID
 	// Digest: copied_sha256 of staged, verified_sha256 of verified,
 	// receipt_sha256 of published.
@@ -44,9 +45,10 @@ const (
 	fieldText
 )
 
-// stepContract names, for every step, its only fields; all are required.
+// stepContract names, for every step, its only fields; all are required,
+// except the current_identity of planned, required for a rotation only.
 var stepContract = map[Step]map[string]fieldKind{
-	StepPlanned:         {"previous": fieldPrevious, "plan": fieldPlan, "plan_sha256": fieldPlanSHA256},
+	StepPlanned:         {"previous": fieldPrevious, "plan": fieldPlan, "plan_sha256": fieldPlanSHA256, plannedCurrent: fieldCurrent},
 	StepStagingIntent:   {"staging": fieldStagingName},
 	StepStaged:          {"staging_identity": fieldStaging, "copied_sha256": fieldDigest},
 	StepVerified:        {"verified_sha256": fieldDigest},
@@ -66,6 +68,11 @@ var stepContract = map[Step]map[string]fieldKind{
 // maxText bounds the free text of a record.
 const maxText = 1024
 
+// plannedCurrent is the identity of the current a rotation replaces, taken
+// under lock before the planned record (ADR 0006 §5, A1): required when
+// previous is not null, forbidden otherwise. B2b never wrote it.
+const plannedCurrent = "current_identity"
+
 // StagingName is the staging directory of op, relative to the game
 // directory, as the staging-intent record names it.
 func StagingName(op string) string { return "staging/" + op }
@@ -77,8 +84,14 @@ func NewRecord(seq int, step Step, op string, at time.Time, prev string, v StepV
 	if !ok {
 		return Record{}, fmt.Errorf("unknown step %q", step)
 	}
+	if step == StepPlanned && v.Previous != "" && v.Current == (FileID{}) {
+		return Record{}, fmt.Errorf("planned record of a rotation: %s of the replaced current required", plannedCurrent)
+	}
 	fields := map[string]json.RawMessage{}
 	for name, kind := range contract {
+		if step == StepPlanned && name == plannedCurrent && v.Previous == "" {
+			continue
+		}
 		var value any
 		switch kind {
 		case fieldPrevious:
@@ -154,6 +167,9 @@ func (r Record) Values() (StepValues, error) {
 	var planSum [32]byte
 	for _, name := range names {
 		raw, ok := r.Fields[name]
+		if !ok && r.Step == StepPlanned && name == plannedCurrent {
+			continue // checked against previous below
+		}
 		if !ok {
 			return StepValues{}, fail("missing field %q", name)
 		}
@@ -221,6 +237,13 @@ func (r Record) Values() (StepValues, error) {
 		}
 		if v.Plan.Previous != v.Previous {
 			return StepValues{}, fail(`"previous" differs from the plan`)
+		}
+		_, recorded := r.Fields[plannedCurrent]
+		switch {
+		case v.Previous != "" && !recorded:
+			return StepValues{}, fail(`missing field %q: a rotation records the current it replaces`, plannedCurrent)
+		case v.Previous == "" && recorded:
+			return StepValues{}, fail(`%q is forbidden for a first publication`, plannedCurrent)
 		}
 	}
 	return v, nil
