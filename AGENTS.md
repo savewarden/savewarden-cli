@@ -4,9 +4,9 @@
 
 - Lire le plan demandé intégralement et inspecter statut, branche, remote et
   fichiers existants avant toute écriture. Ne pas écraser du travail existant.
-- Lot courant : **B2a**, plan de `sync` en lecture seule, selon
+- Lot courant : **B2b**, première publication sécurisée de `sync`, selon
   `.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md`, plan directeur de B2
-  validé par le propriétaire, et ADR 0004, 0006 et 0007. B2 est livré en trois
+  validé par le propriétaire, et ADR 0004 à 0007. B2 est livré en trois
   PR successives : B2a, B2b, B2c, chacune après un GO distinct ; puis Human GO
   et plan accepté avant chaque lot suivant, B3 à B5.
 - Ne jamais déclarer une CI verte sans run terminé sur le commit concerné.
@@ -41,8 +41,8 @@
   implicite de symlink/junction, relocation ou restauration en place.
 - Le code de production reste en lecture seule tant qu'un lot n'autorise pas
   d'écriture : `internal/app/readonly_test.go` ne s'assouplit que par package,
-  avec un ADR ; B2b le fera pour `internal/platform/vault` seulement
-  (ADR 0005). `os.Root` confine mais suit les liens internes ; ne jamais en
+  avec un ADR ; B2b le fait pour `internal/platform/vault` seulement
+  (ADR 0005), avec les API nommées par cet ADR et elles seules. `os.Root` confine mais suit les liens internes ; ne jamais en
   faire l'unique garantie de non-suivi.
 - Toute publication ou récupération suit ADR 0006, référence de sécurité :
   créations exclusives, renommage sans remplacement, journal write-ahead,

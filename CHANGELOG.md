@@ -16,6 +16,13 @@ Aucun tag ni release n'est publié par le bootstrap.
   source absente jamais interprétée comme une suppression. Windows seulement.
 - Protocole de publication et de récupération (ADR 0006), référence de
   sécurité des écritures à venir, et frontières de `sync` (ADR 0004).
+- Écritures autorisées dans le seul package `internal/platform/vault`
+  (ADR 0005) : garde statique assoupli pour ce répertoire exact, API de
+  création exclusive nommées une à une, `MoveFileEx` seulement avec le
+  littéral `0` ; interdits renforcés partout, vault compris, dont tout
+  `MOVEFILE_*`, `ReplaceFile`, `SetFileInformationByHandle`, `NtCreateFile`
+  et `FILE_FLAG_DELETE_ON_CLOSE`. `golang.org/x/sys/windows` n'est permis
+  que dans ce package.
 - Package `entities/backup` : types d'inventaire partagés, receipt v1 et
   marqueur du coffre relus strictement, journal d'opération chaîné et son
   automate, classement des observations de récupération, tous sans I/O.

@@ -73,15 +73,20 @@ sont contrôlés pour le code de production dans `internal/app/architecture_test
 y compris pour les fichiers réservés à un OS :
 
 - dépendances tierces autorisées par couche seulement : Cobra dans `cli`,
-  `go.yaml.in/yaml/v3` dans `platform/manifests`, aucune ailleurs ;
+  `go.yaml.in/yaml/v3` dans `platform/manifests`, et le seul package
+  `golang.org/x/sys/windows` dans `platform/vault` exactement, aucune ailleurs ;
 - `syscall` réservé aux adaptateurs `platform/*`.
 
 `internal/app/readonly_test.go` refuse en plus, dans tout le code de
 production, les API connues d'écriture, d'exécution, de réseau et de chargement
 dynamique, ainsi que les modes d'ouverture en écriture. C'est un garde
 statique, pas une preuve : les tests dynamiques de non-mutation le complètent.
-B2b l'assouplira pour le seul package `platform/vault`, avec l'ADR 0005 ;
-B2a le laisse inchangé.
+[ADR 0005](adr/0005-write-allowed-package.md) l'assouplit pour le seul
+package `internal/platform/vault`, ni ses sous-packages ni un nom voisin :
+création exclusive `CREATE_NEW`, dossiers créés un par un, flush, date,
+`MoveFileEx` appelé avec le littéral `0`. Suppression, remplacement,
+troncature et tout drapeau `MOVEFILE_*` restent refusés partout, `vault`
+compris.
 
 Ne créer `platform/vault`, `features/snapshot` et les autres packages que
 lorsqu'un fichier utile existe. Aucun `shared` n'est nécessaire. Les détails propres à un
