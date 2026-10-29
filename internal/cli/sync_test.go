@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -97,7 +98,7 @@ func TestRenderFirstPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if planner.request != (sync.Request{ManifestPath: `D:\Manifests\synthetic-game.yaml`, VaultPath: `D:\Vault`}) {
+	if !reflect.DeepEqual(planner.request, sync.Request{ManifestPath: `D:\Manifests\synthetic-game.yaml`, VaultPath: `D:\Vault`}) {
 		t.Fatalf("request = %+v", planner.request)
 	}
 	want := `manifest: D:\Manifests\synthetic-game.yaml

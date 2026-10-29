@@ -410,7 +410,7 @@ func (o *operation) plannedContent() (*backup.Planned, error) {
 			p.Changes.Removed += source.Changes.Removed
 			p.Changes.Unchanged += source.Changes.Unchanged
 		case SourceMissing:
-			rs.State, rs.Directories = backup.SourceMissing, []string{}
+			rs.State, rs.Directories, rs.Accepted = backup.SourceMissing, []string{}, source.Accepted
 		default:
 			return nil, fmt.Errorf("source %s is %s; nothing can be published", source.Source.ID, source.Status)
 		}

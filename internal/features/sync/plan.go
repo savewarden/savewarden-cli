@@ -77,12 +77,15 @@ const (
 
 // SourcePlan is the plan of one declared source.
 type SourcePlan struct {
-	Source  game.Source
-	Path    string // Windows path of the source directory
-	Status  SourceStatus
-	Changes backup.Changes // against the current generation; empty unless planned
-	Files   int
-	Bytes   int64
+	Source game.Source
+	Path   string // Windows path of the source directory
+	Status SourceStatus
+	// Accepted marks a missing source that --accept-missing-source names:
+	// its receipt entry says missing and accepted.
+	Accepted bool
+	Changes  backup.Changes // against the current generation; empty unless planned
+	Files    int
+	Bytes    int64
 	// inventory is the full inventory of a planned source: what --apply
 	// copies and must find again.
 	inventory backup.Directory
@@ -108,6 +111,9 @@ type Plan struct {
 	// intervention stopped the plan before it could be checked.
 	CurrentUnchecked bool
 	Pending          []Pending
+	// AllowRemovals is the --allow-removals of the request: removed files
+	// are then information, not blocking.
+	AllowRemovals bool
 	// Sources are planned only when no intervention is required.
 	Sources       []SourcePlan
 	Interventions []Intervention
@@ -149,6 +155,10 @@ func (p Plan) upToDate() bool {
 				return false
 			}
 		case SourceMissing:
+			// An accepted absence drops files that current holds.
+			if source.Accepted {
+				return false
+			}
 		default:
 			return false
 		}
