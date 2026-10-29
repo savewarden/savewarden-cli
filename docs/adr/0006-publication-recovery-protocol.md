@@ -259,9 +259,16 @@ de preuve tient, observation comprise :
 Un dossier présent dont l'une de ces preuves manque est `unidentified` ou
 `other`, jamais `old`. La règle vaut pour une génération publiée par B2b
 comme par une rotation de B2c, et pour un receipt reconstruit par la
-récupération, dont le journal porte les mêmes identités. Conséquence
-assumée : une copie du coffre vers un autre volume change les identités ;
-sa génération n'y est plus reconnue, et un nouveau coffre reste possible.
+récupération, dont le journal porte les mêmes identités.
+
+**Coffre copié ou déplacé.** Une copie ou un déplacement manuel du coffre
+peut changer les identités NTFS sans altérer les données. B2 ne prend pas en
+charge ce cas : la génération n'est plus reconnue, code 3, rien écrit. Le
+diagnostic constate un écart d'identité, sans prétendre à une corruption ni
+à une compromission ; aucune identité n'est adoptée ni réécrite
+automatiquement. La portabilité d'un coffre relève d'une procédure future,
+explicite, de requalification ou d'import contrôlé, qui ne pourra pas
+affaiblir la récupération fail-closed.
 
 **Opération non commencée (règle M3).** Un dossier d'opération sans aucun
 enregistrement validé, vide ou ne contenant que des temporaires `001-…`, n'a
@@ -439,9 +446,13 @@ l'ancien `current` est relevée une fois, sous verrou, et ne change plus :
    receipt `<prev-op>`, identité égale à `current_identity`. Tout écart,
    dont un `current` réapparu ou un `retained` modifié, est une
    contradiction : code 3, **rien n'est enregistré ni déplacé**, ni
-   promotion, ni restauration d'une génération altérée. Le journal reste à
-   `retire-intent` ; sa récupération suit la ligne (—, `old`, `new`) du
-   tableau ci-dessous, sans rien déduire.
+   promotion, ni restauration d'une génération altérée. Un objet apparu
+   sous `current` n'a pas de provenance démontrée : il n'est ni lu comme une
+   génération, ni déplacé, ni écrasé, et l'ancienne génération reste dans
+   `retained\<prev-op>`, momentanément indisponible sous son nom courant ;
+   le diagnostic nomme l'ambiguïté. Le journal reste à `retire-intent` ; sa
+   récupération suit la ligne (—, `old`, `new`) du tableau ci-dessous, sans
+   rien déduire.
 
 **Fenêtres résiduelles.** `sync.lock` n'exclut qu'une autre opération
 Savewarden : il n'empêche pas un autre processus d'écrire dans `current` ou
@@ -676,5 +687,11 @@ relève de son propriétaire.
   sans promotion ni restauration d'une génération altérée (P1, §5) ;
   fenêtres résiduelles du verrou explicitées (P1, §5) ; mode plan aligné,
   `unexpected-entry` pour un `current` d'une autre identité que celle
-  publiée ;
-  `current-exists` conservé comme règle de B2b (§4).
+  publiée ; `current-exists` conservé comme règle de B2b (§4).
+- **29 octobre 2026, arbitrage des effets de la revue** par le
+  propriétaire : coffre copié ou déplacé refusé en code 3 sans écriture ni
+  adoption d'identité, diagnostic sans présomption de corruption,
+  portabilité renvoyée à une procédure future de requalification ou
+  d'import contrôlé (§4) ; règle M3 plus stricte que le code B2b validée ;
+  `current` réapparu entre M1 et M2 : code 3, ni promotion ni restauration,
+  objets conservés en place (§5).
