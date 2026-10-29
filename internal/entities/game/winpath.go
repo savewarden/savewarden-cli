@@ -82,6 +82,13 @@ func splitSegments(path string) ([]string, error) {
 	return segments, nil
 }
 
+// CheckWindowsName applies the segment rules of this grammar to one file or
+// directory name found on disk: control characters, characters Windows
+// refuses, a trailing dot or space that Win32 strips, reserved device names
+// and names longer than 255 UTF-16 units. Such a name could not be copied
+// back faithfully through ordinary Windows tools.
+func CheckWindowsName(name string) error { return checkSegment(name) }
+
 func checkSegment(segment string) error {
 	switch segment {
 	case "":
