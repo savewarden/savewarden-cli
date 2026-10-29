@@ -19,10 +19,12 @@ Aucun tag ni release n'est publié par le bootstrap.
 - Écritures autorisées dans le seul package `internal/platform/vault`
   (ADR 0005) : garde statique assoupli pour ce répertoire exact, API de
   création exclusive nommées une à une, `MoveFileEx` seulement avec le
-  littéral `0` ; interdits renforcés partout, vault compris, dont tout
-  `MOVEFILE_*`, `ReplaceFile`, `SetFileInformationByHandle`, `NtCreateFile`
-  et `FILE_FLAG_DELETE_ON_CLOSE`. `golang.org/x/sys/windows` n'est permis
-  que dans ce package.
+  littéral `0`, accès en écriture d'un `CreateFile` seulement avec
+  `CREATE_NEW` ; interdits renforcés partout, vault compris, dont tout
+  `MOVEFILE_*`, `ReplaceFile`, `Unlink`, `Rmdir`, `SetFileInformationByHandle`,
+  `NtCreateFile`, `FILE_FLAG_DELETE_ON_CLOSE`, le chargement dynamique et les
+  imports `unsafe` et `reflect`. `golang.org/x/sys/windows` n'est permis que
+  dans ce package.
 - Package `entities/backup` : types d'inventaire partagés, receipt v1 et
   marqueur du coffre relus strictement, journal d'opération chaîné et son
   automate, classement des observations de récupération, tous sans I/O.

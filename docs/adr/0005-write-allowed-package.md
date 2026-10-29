@@ -24,10 +24,12 @@ le garde de B1, auquel s'ajoutent les interdits renforcés ci-dessous.
 
 | Règle | Portée |
 | --- | --- |
-| Imports interdits `os/exec`, `net`, `net/http`, `plugin` | Partout, `platform/vault` compris |
+| Imports interdits `os/exec`, `net` et tout `net/…`, `crypto/tls`, `plugin`, `unsafe`, `reflect` | Partout, `platform/vault` compris |
+| Directive `//go:linkname` ; sources assembleur, cgo ou objets (`.s`, `.syso`, `.c`…) | Partout |
 | Interdits de B1 et interdits renforcés | Partout, `platform/vault` compris |
 | API permises | `platform/vault` seulement |
 | `MoveFileEx` | `platform/vault` seulement, en appel direct avec le littéral `0` |
+| Accès d'écriture d'un `CreateFile` | `platform/vault` seulement, et seulement avec `CREATE_NEW` |
 | `golang.org/x/sys/windows` | `platform/vault` seulement, ce package exact |
 
 **API permises dans `platform/vault`**, chacune pour un besoin du protocole :
@@ -35,7 +37,7 @@ le garde de B1, auquel s'ajoutent les interdits renforcés ci-dessous.
 | API | Besoin |
 | --- | --- |
 | `GENERIC_WRITE` | Ouvrir en écriture un fichier que l'on crée, toujours avec `CREATE_NEW` |
-| `FILE_WRITE_ATTRIBUTES` | Dater un fichier ou un dossier que le coffre vient de créer |
+| `FILE_WRITE_ATTRIBUTES` | Dater un fichier que le coffre crée, avec `CREATE_NEW` |
 | `CREATE_NEW` | Seule disposition qui crée : échec si le nom existe |
 | `CreateDirectory` | Créer un dossier, un par un : échec s'il existe |
 | `FlushFileBuffers` | Rendre durable un temporaire avant son renommage, et chaque fichier copié |
@@ -43,25 +45,33 @@ le garde de B1, auquel s'ajoutent les interdits renforcés ci-dessous.
 | `MoveFileEx` | Seul renommage : drapeaux `0`, donc ni remplacement d'une cible existante, ni copie entre volumes |
 
 **Interdits renforcés, partout, `platform/vault` compris :** `Remove`,
-`RemoveAll`, `DeleteFile`, `RemoveDirectory`, `Rename`, `MoveFile`,
-`MoveFileWithProgress`, `MoveFileTransacted`, `ReplaceFile`, tout
-`MOVEFILE_*`, dont `MOVEFILE_REPLACE_EXISTING`, `MOVEFILE_COPY_ALLOWED`,
+`RemoveAll`, `DeleteFile`, `RemoveDirectory`, `Unlink`, `Rmdir` et leurs
+variantes `…at`, `Rename`, `Renameat`, `MoveFile`, `MoveFileWithProgress`,
+`MoveFileTransacted`, `ReplaceFile`, `Exchangedata`, tout `MOVEFILE_*`, dont
+`MOVEFILE_REPLACE_EXISTING`, `MOVEFILE_COPY_ALLOWED`,
 `MOVEFILE_DELAY_UNTIL_REBOOT`, `MOVEFILE_CREATE_HARDLINK` et
 `MOVEFILE_WRITE_THROUGH`, `Truncate`, `Ftruncate`, `SetEndOfFile`,
-`SetFileValidData`, `O_TRUNC`, `O_APPEND`, `CREATE_ALWAYS`, `OPEN_ALWAYS`,
-`TRUNCATE_EXISTING`, `FILE_FLAG_DELETE_ON_CLOSE`, `DELETE`,
+`SetFileValidData`, `Mknod`, `Mkfifo`, `O_TRUNC`, `O_APPEND`,
+`CREATE_ALWAYS`, `OPEN_ALWAYS`, `TRUNCATE_EXISTING`,
+`FILE_FLAG_DELETE_ON_CLOSE`, les droits `DELETE`, `WRITE_DAC`, `WRITE_OWNER`,
+`FILE_GENERIC_WRITE`, `MAXIMUM_ALLOWED`, `STANDARD_RIGHTS_REQUIRED`,
+`STANDARD_RIGHTS_ALL`, `SPECIFIC_RIGHTS_ALL` et `ACCESS_SYSTEM_SECURITY`,
 `SetFileInformationByHandle`, `NtCreateFile`, `NtSetInformationFile`,
 `NtSetEaFile`, `Link`, `Symlink`, `CreateSymbolicLink`, `CreateHardLink`,
 `DeviceIoControl`, `SetFileAttributes`, `Chmod`, `Chown` et leurs variantes,
-`Utimes`, `SetSecurityInfo`, `SetNamedSecurityInfo`, `WRITE_DAC`,
-`WRITE_OWNER`, les points de montage, l'exécution de processus, le
-chargement dynamique, dont `NewLazySystemDLL` et `LoadLibraryEx`, et les
-appels système bruts. La liste exacte est celle du garde. Restent aussi
-interdits dans `platform/vault` les API de B1 qui créent ou écrivent sans
-`CREATE_NEW` : `os.Create`, `os.OpenFile`, `os.WriteFile`, `os.Mkdir`,
-`O_CREATE`, `O_EXCL`, `O_WRONLY`, `O_RDWR`, `Chtimes`. Le coffre écrit le
-contenu d'un fichier par le handle qu'il vient de créer, jamais par une API
-qui ouvrirait un fichier existant.
+`Utimes` et ses variantes, les attributs étendus, `SetSecurityInfo`,
+`SetNamedSecurityInfo`, `SetKernelObjectSecurity`, les points de montage,
+`DefineDosDevice`, `SetVolumeLabel`, l'exécution de processus et de
+services, `WriteProcessMemory`, les sockets, le chargement dynamique, dont
+`LazyDLL`, `NewProc`, `FindProc` et ses variantes par ordinal,
+`NewLazySystemDLL` et `LoadLibraryEx`, l'appel par nom `MethodByName`, et
+tous les appels système bruts, `Syscall15`, `Syscall18` et `RawSyscall`
+compris. La liste exacte est celle du garde. Restent aussi interdits dans
+`platform/vault` les API de B1 qui créent ou écrivent sans `CREATE_NEW` :
+`os.Create`, `os.OpenFile`, `os.WriteFile`, `os.Mkdir`, `O_CREATE`, `O_EXCL`,
+`O_WRONLY`, `O_RDWR`, `Chtimes`. Le coffre écrit le contenu d'un fichier par
+le handle qu'il vient de créer, jamais par une API qui ouvrirait un fichier
+existant.
 
 **Règle d'appel de `MoveFileEx`.** Un sélecteur `MoveFileEx` n'est accepté
 que comme fonction d'un appel direct à trois arguments dont le troisième est
@@ -69,6 +79,20 @@ le littéral entier `0`. Sont refusés : un autre littéral, `0x0` ou `(0)`
 compris, une variable, une constante nommée, une expression, des arguments
 étalés, et toute valeur de fonction qui pourrait être appelée autrement. Le
 garde le vérifie sur l'arbre syntaxique.
+
+**Règle d'ouverture.** Un `CreateFile` n'est accepté qu'en appel direct à
+sept arguments. Son accès est une combinaison par `|` de droits nommés :
+`GENERIC_READ`, `FILE_READ_ATTRIBUTES`, `FILE_READ_DATA`,
+`FILE_LIST_DIRECTORY`, `READ_CONTROL`, `SYNCHRONIZE`, et dans
+`platform/vault` seulement `GENERIC_WRITE` et `FILE_WRITE_ATTRIBUTES`. Sa
+disposition est `OPEN_EXISTING`, ou `CREATE_NEW` dans `platform/vault`
+seulement ; un droit d'écriture exige `CREATE_NEW`. Aucun littéral, aucune
+variable, aucune constante locale n'est accepté à ces deux places. Les
+drapeaux d'un `Open` à trois arguments ou d'un `Openat` sont de même des
+drapeaux de lecture nommés : `O_RDONLY`, `O_NOFOLLOW`, `O_CLOEXEC`,
+`O_NONBLOCK`, `O_DIRECTORY`, `O_NOCTTY`, `O_LARGEFILE`. Ainsi rien ne peut
+rouvrir en écriture un fichier existant, enregistrement validé, receipt ou
+fichier publié, ni en changer la date.
 
 **`golang.org/x/sys/windows`.** Le test d'imports ne l'autorise que dans
 `internal/platform/vault`, ce répertoire exact, et seulement ce package :
@@ -124,10 +148,20 @@ après B2b.
   couches ; chaque interdit, y compris chaque `MOVEFILE_*` et chaque import
   interdit, est refusé dans `platform/vault` ; `MoveFileEx` est refusé avec
   tout autre troisième argument que le littéral `0`, et comme valeur de
-  fonction. Le test d'imports refuse `golang.org/x/sys/windows` hors de
-  `platform/vault`, et ses packages voisins partout.
+  fonction ; un `CreateFile` en écriture sans `CREATE_NEW`, ou dont l'accès
+  ou la disposition est numérique, est refusé. Les listes attendues, les sept
+  API permises et les interdits renforcés, sont écrites dans les tests à part
+  du garde : modifier le garde seul fait échouer un test. Le test d'imports
+  refuse `golang.org/x/sys/windows` hors de `platform/vault`, et ses packages
+  voisins partout.
+- La revue indépendante de cet assouplissement, point de contrôle du plan
+  B2 §8.2, a conduit aux règles d'ouverture, aux imports `unsafe` et
+  `reflect`, à `go:linkname` et aux interdits ajoutés ci-dessus, avant tout
+  code d'écriture.
 - Le garde reste un filet statique fondé sur les noms : il ne prouve pas
-  l'absence d'effet indirect. Il est complété par les tests dynamiques de
+  l'absence d'effet indirect. Restent hors de sa portée, par exemple, un
+  drapeau numérique dans les attributs d'un `CreateFile`, ou une valeur
+  calculée hors de l'appel. Il est complété par les tests dynamiques de
   création exclusive, cible existante refusée sans changement d'état, de
   non-mutation de la source, binaire lancé avec la source en écriture
   refusée, et d'absence d'écriture du mode plan.

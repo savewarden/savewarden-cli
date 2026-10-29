@@ -150,6 +150,10 @@ complet. Un temporaire abandonné ne contraint pas l'observation et ne compte
 pas dans l'enveloppe : son numéro ne sera plus jamais écrit. Seuls les
 temporaires du numéro suivant comptent pour E1. Les `k` ne sont pas exigés
 contigus : une absence ne prouve rien, et aucune décision ne repose sur elle.
+Le lecteur n'exige pas non plus que l'étape abandonnée soit l'une de celles
+que la reprise aurait pu remplacer à ce numéro : cette combinaison ne change
+aucune décision, qui ne repose que sur les enregistrements validés,
+l'observation et les temporaires du numéro suivant.
 
 **Ambiguïtés, toutes fail-closed, code 3, rien déplacé, rien écrit :**
 
@@ -494,3 +498,7 @@ relève de son propriétaire.
   produit par le protocole. Tests : `TestAbandonedTemporariesAreAccepted`,
   `TestIncoherentTemporariesAreAmbiguous`,
   `TestAbandonedTemporariesDoNotConsumeTheEnvelope`.
+- Ces amendements prévalent sur le §5 du plan B2 v0.2, qui reste inchangé
+  comme document validé : notamment sur « Temporaire d'un autre numéro que le
+  suivant », désormais précisé au §3, et sur l'enveloppe E1, désormais par
+  destination logique.
