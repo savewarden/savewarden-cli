@@ -49,6 +49,15 @@ Aucun tag ni release n'est publié par le bootstrap.
   si identité, taille et date sont stables autour de la lecture.
 - Garde statique de lecture seule du code de production, liste blanche des
   dépendances par couche, `errorlint` et `gosec`.
+- Adaptateur `platform/vault`, Windows seulement, pas encore câblé à une
+  commande : session de coffre en création seule, dossiers et fichiers
+  `CREATE_NEW`, flush, date à 100 ns, renommage `MoveFileEx` sans drapeau,
+  identité volume + index, verrou exclusif, type de volume et espace
+  disponible pour l'appelant ; chaque dossier traversé ou créé est épinglé
+  sans suivi de lien. Tests Windows réels, dont le renommage d'un enfant sous
+  un parent épinglé et les codes d'erreur consignés dans ADR 0006.
+- Dépendance `golang.org/x/sys` v0.49.0, package `windows` seul, limitée à
+  `platform/vault`.
 - Dépendance `go.yaml.in/yaml/v3` v3.0.5, limitée à `platform/manifests`.
 - Bootstrap B0 Go/Cobra : aide par défaut, `--help`, `help`, `version` et
   `--version`, version de développement `dev` et codes de sortie 0/1.

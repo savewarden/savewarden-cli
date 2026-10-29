@@ -399,6 +399,13 @@ récupération répétée (plan B2 §9.3).
   les programmes qui utilisent le coffre. Toute autre erreur : échec immédiat.
 - La liste 32 et 33 est fermée pour B2 ; l'étendre exigerait une décision du
   propriétaire et un amendement d'ADR 0006.
+- Codes observés sur Windows 11 et NTFS par les tests réels de
+  `platform/vault` : un dossier tenu ouvert sans `FILE_SHARE_DELETE`, comme
+  par une portée de lecture, refuse son renommage en 32, retenté ; un fichier
+  ouvert à l'intérieur du dossier le refuse en 5, jamais retenté : la
+  bascule échoue aussitôt et le diagnostic invite à fermer les programmes
+  qui utilisent le coffre. Une cible existante, fichier ou dossier, est
+  refusée en 183 ; `CREATE_NEW` sur un nom de dossier existant, en 5.
 - Backoff exponentiel par horloge injectée, nombre de tentatives borné,
   **5 secondes au plus** au total par renommage ; jamais de boucle infinie.
 - Pendant la section critique, de `publish-intent` ou `retire-intent` jusqu'à
@@ -502,3 +509,9 @@ relève de son propriétaire.
   comme document validé : notamment sur « Temporaire d'un autre numéro que le
   suivant », désormais précisé au §3, et sur l'enveloppe E1, désormais par
   destination logique.
+- **29 octobre 2026, adaptateur `platform/vault`** : l'hypothèse du §4,
+  qu'un parent épinglé n'empêche pas de renommer un enfant, est confirmée par
+  `TestParentPinsDoNotBlockChildRename`, identité conservée par le
+  renommage ; codes d'erreur observés consignés au §7
+  (`TestOpenHandlesBlockTheRename`, `TestMoveNeverReplaces`). Aucun écart au
+  protocole.
