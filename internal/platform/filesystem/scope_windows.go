@@ -93,6 +93,12 @@ func (s *Scope) Lstat(name string) (fs.FileInfo, error) {
 		return nil, err
 	}
 	info, err := s.root.Lstat(s.native(name))
+	if errors.Is(err, errorSharingViolation) {
+		// A file held without sharing, such as a save locked by its game or
+		// the lock of a running sync, cannot be opened. Its directory entry
+		// is read instead, through parents that are pinned and verified.
+		info, err = os.Lstat(longPath(s.absolute(name)))
+	}
 	if err != nil {
 		return nil, err
 	}

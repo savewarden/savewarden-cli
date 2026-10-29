@@ -25,10 +25,12 @@ type Inspector interface {
 }
 
 // ExitError asks for a specific process exit code after its report was
-// written. Its message is the one-line summary printed on stderr.
+// written. Its message is the one-line summary printed on stderr, unless
+// Reported says the command already wrote its diagnostic there.
 type ExitError struct {
-	Code    int
-	Message string
+	Code     int
+	Message  string
+	Reported bool
 }
 
 func (e *ExitError) Error() string { return e.Message }

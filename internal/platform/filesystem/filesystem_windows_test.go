@@ -326,3 +326,32 @@ func TestIdentitySurvivesARename(t *testing.T) {
 		t.Fatalf("missing: %v", err)
 	}
 }
+
+// A file held without any sharing, like the lock of a running sync or a
+// save locked by its game, is still described, and still never read.
+func TestLockedFileIsDescribed(t *testing.T) {
+	anchor := tempAnchor(t)
+	path := filepath.Join(anchor, "sync.lock")
+	write(t, path, "")
+	name, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := syscall.CreateFile(name, syscall.GENERIC_READ, 0, nil, syscall.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.CloseHandle(handle) }()
+	scope := open(t, anchor)
+	info, err := scope.Lstat("sync.lock")
+	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 {
+		t.Fatalf("lstat of a locked file: %v, %v", info, err)
+	}
+	entries, err := scope.ReadDir(".")
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("listing: %v, %v", entries, err)
+	}
+	if _, err := scope.OpenRegular("sync.lock"); err == nil || !strings.Contains(err.Error(), "locked by another process") {
+		t.Fatalf("open of a locked file: %v", err)
+	}
+}

@@ -211,7 +211,16 @@ func (o *operation) run() error {
 }
 
 func (o *operation) result() Result {
-	return Result{Plan: o.plan, Operation: o.op, Effect: o.effect}
+	r := Result{Plan: o.plan, Operation: o.op, Effect: o.effect}
+	if o.effect == EffectPublished {
+		receipt := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, receiptsDir, o.op+".json")
+		r.Receipt = windowsPath(o.plan.vaultVolume, receipt)
+		for _, source := range o.planned.Sources {
+			r.Files += len(source.Entries)
+			r.Bytes += source.Bytes()
+		}
+	}
+	return r
 }
 
 // wrote marks a write of initialization metadata.
