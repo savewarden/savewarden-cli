@@ -162,7 +162,11 @@ func writeJournal(t *testing.T, f *fakeFS, op string, steps ...backup.Step) {
 	dir := f.mkdir(vaultPath + `\games\synthetic-game\journal\` + op)
 	prev := ""
 	for i, step := range steps {
-		data, err := backup.EncodeRecord(backup.Record{Seq: i + 1, Step: step, Op: op, At: at, Prev: prev, Fields: map[string]json.RawMessage{}})
+		fields := map[string]json.RawMessage{}
+		if step == backup.StepPlanned {
+			fields["previous"] = json.RawMessage("null")
+		}
+		data, err := backup.EncodeRecord(backup.Record{Seq: i + 1, Step: step, Op: op, At: at, Prev: prev, Fields: fields})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -518,4 +522,66 @@ func TestPlanErrors(t *testing.T) {
 	if f.opened != 0 {
 		t.Fatalf("a refused plan read %d files", f.opened)
 	}
+}
+
+// Sources that reach the same directory under another name, such as an 8.3
+// short name, are refused as inspect refuses them.
+func TestSourcesOverlappingByIdentity(t *testing.T) {
+	f := world()
+	f.put(installPath+`\Profile Data\Slot\p.save`, f.file("p"))
+	install := f.get(installPath)
+	install.children["PROFIL~1"] = install.children["Profile Data"]
+	m := manifest(source("profile", "Profile Data", true), source("slot", `PROFIL~1\Slot`, true))
+	if err := planError(f, m, vaultPath); err == nil || !strings.Contains(err.Error(), `sources "profile" and "slot" resolve to overlapping directories`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestVaultStatesThatFailClosed(t *testing.T) {
+	game := vaultPath + `\games\synthetic-game`
+	t.Run("game directory differing by case", func(t *testing.T) {
+		f := world()
+		markVault(t, f, vaultPath)
+		f.mkdir(vaultPath + `\games\Synthetic-Game\current`)
+		p := plan(t, f, manifest(), vaultPath)
+		if got := causes(p); !slices.Equal(got, []string{"unexpected-entry games/Synthetic-Game"}) {
+			t.Fatalf("interventions = %q", got)
+		}
+	})
+	t.Run("unreadable journal", func(t *testing.T) {
+		f := world()
+		markVault(t, f, vaultPath)
+		f.mkdir(game + `\journal`).listErr = errors.New("access denied")
+		p := plan(t, f, manifest(), vaultPath)
+		if got := causes(p); !slices.Equal(got, []string{"journal-ambiguous games/synthetic-game/journal"}) {
+			t.Fatalf("interventions = %q", got)
+		}
+	})
+	t.Run("unreadable operation journal", func(t *testing.T) {
+		f := world()
+		markVault(t, f, vaultPath)
+		f.mkdir(game + `\journal\` + op1).listErr = errors.New("access denied")
+		p := plan(t, f, manifest(), vaultPath)
+		if got := causes(p); !slices.Equal(got, []string{"journal-ambiguous " + op1}) {
+			t.Fatalf("interventions = %q", got)
+		}
+	})
+	t.Run("receipt of another game", func(t *testing.T) {
+		f := world()
+		markVault(t, f, vaultPath)
+		publish(t, f, manifest(), op1, "")
+		r := f.get(game + `\receipts\` + op1 + `.json`)
+		r.data = []byte(strings.Replace(string(r.data), `"id": "synthetic-game"`, `"id": "other-game"`, 1))
+		expectFindings(t, plan(t, f, manifest(), vaultPath), "blocking current-modified  current")
+	})
+	t.Run("current not checked on an intervention", func(t *testing.T) {
+		f := world()
+		markVault(t, f, vaultPath)
+		publish(t, f, manifest(), op1, "")
+		writeJournal(t, f, op2, backup.StepPlanned)
+		p := plan(t, f, manifest(), vaultPath)
+		if !p.CurrentUnchecked || p.Current != "" || len(p.Pending) != 1 {
+			t.Fatalf("plan = %+v", p)
+		}
+	})
 }

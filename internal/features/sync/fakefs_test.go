@@ -20,6 +20,7 @@ type node struct {
 	modTime  time.Time
 	id       int
 	crypted  bool
+	listErr  error
 	children map[string]*node
 }
 
@@ -174,6 +175,8 @@ func (s *fakeScope) ReadDir(name string) ([]fs.DirEntry, error) {
 		return nil, &notFollowedError{name}
 	case !n.mode.IsDir():
 		return nil, errors.New(name + ": not a directory")
+	case n.listErr != nil:
+		return nil, n.listErr
 	}
 	entries := make([]fs.DirEntry, 0, len(n.children))
 	for childName, child := range n.children {

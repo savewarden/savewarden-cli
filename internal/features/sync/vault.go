@@ -137,6 +137,9 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 			found = true
 		case entry.Name == gameID:
 			return errVault(vaultPath, `games\%s is a link, a file or a reparse point; not followed`, gameID)
+		case strings.EqualFold(entry.Name, gameID):
+			// Windows would resolve games\<id> to this directory.
+			v.intervene(CauseUnexpectedEntry, gamesDir+"/"+entry.Name, "differs from the game id only by case")
 		case entry.Kind != backup.KindDirectory:
 			v.intervene(CauseUnexpectedEntry, gamesDir+"/"+entry.Name, "has no place in games")
 		}
@@ -167,13 +170,11 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 	prefix := gamesDir + "/" + gameID + "/"
 	journals := map[string]bool{}
 	if present[journalDir] {
-		if err := v.readJournals(scope, vaultPath, join(gameName, journalDir), prefix+journalDir, journals); err != nil {
-			return err
-		}
+		v.readJournals(scope, join(gameName, journalDir), prefix+journalDir, journals)
 	}
 	receipts := map[string]bool{}
 	if present[receiptsDir] {
-		if err := v.readReceipts(scope, vaultPath, join(gameName, receiptsDir), prefix+receiptsDir, receipts); err != nil {
+		if err := v.readReceipts(scope, vaultPath, join(gameName, receiptsDir), prefix+receiptsDir, gameID, receipts); err != nil {
 			return err
 		}
 	}
@@ -204,10 +205,12 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 
 // readJournals validates every operation journal and records those that
 // are not terminal. found receives the operations with a journal.
-func (v *vault) readJournals(scope Scope, vaultPath, name, subject string, found map[string]bool) error {
+func (v *vault) readJournals(scope Scope, name, subject string, found map[string]bool) {
 	entries, err := list(scope, name)
 	if err != nil {
-		return errVault(vaultPath, "%v", err)
+		// ADR 0006 §3: a journal that cannot be read is an ambiguity.
+		v.intervene(CauseJournalAmbiguous, subject, "journal cannot be listed: "+err.Error())
+		return
 	}
 	for _, entry := range entries {
 		if entry.Kind != backup.KindDirectory || backup.ValidOperationID(entry.Name) != nil {
@@ -217,11 +220,8 @@ func (v *vault) readJournals(scope Scope, vaultPath, name, subject string, found
 		found[entry.Name] = true
 		journal, err := readJournal(scope, join(name, entry.Name), entry.Name)
 		if err != nil {
-			var ambiguity *backup.AmbiguityError
-			if !errors.As(err, &ambiguity) {
-				return errVault(vaultPath, "%v", err)
-			}
-			v.intervene(CauseJournalAmbiguous, entry.Name, ambiguity.Error())
+			// Unreadable or inconsistent, the journal is ambiguous either way.
+			v.intervene(CauseJournalAmbiguous, entry.Name, err.Error())
 			continue
 		}
 		if !journal.Terminal() {
@@ -233,7 +233,6 @@ func (v *vault) readJournals(scope Scope, vaultPath, name, subject string, found
 			v.intervene(CausePendingOperation, entry.Name, fmt.Sprintf("last committed step %s; recovery needed, --recover is available from B2b", last))
 		}
 	}
-	return nil
 }
 
 func readJournal(scope Scope, name, op string) (backup.Journal, error) {
@@ -263,7 +262,7 @@ var receiptName = regexp.MustCompile(`^([0-9]{8}T[0-9]{6}-[0-9a-f]{8})\.json(\.t
 
 // readReceipts decodes every committed receipt; temporaries are ignored,
 // never read as receipts. found receives the operations with a receipt.
-func (v *vault) readReceipts(scope Scope, vaultPath, name, subject string, found map[string]bool) error {
+func (v *vault) readReceipts(scope Scope, vaultPath, name, subject, gameID string, found map[string]bool) error {
 	entries, err := list(scope, name)
 	if err != nil {
 		return errVault(vaultPath, "%v", err)
@@ -282,7 +281,7 @@ func (v *vault) readReceipts(scope Scope, vaultPath, name, subject string, found
 			return errVault(vaultPath, "%v", err)
 		}
 		r, err := backup.DecodeReceipt(data)
-		if err != nil || r.Operation != m[1] {
+		if err != nil || r.Operation != m[1] || r.GameID != gameID {
 			v.invalid = append(v.invalid, entry.Name)
 			continue
 		}

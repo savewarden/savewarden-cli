@@ -93,7 +93,10 @@ type Plan struct {
 	// Current is the operation that produced the current generation, empty
 	// when the vault holds none for this game.
 	Current string
-	Pending []Pending
+	// CurrentUnchecked is set when a current directory exists but an
+	// intervention stopped the plan before it could be checked.
+	CurrentUnchecked bool
+	Pending          []Pending
 	// Sources are planned only when no intervention is required.
 	Sources       []SourcePlan
 	Interventions []Intervention

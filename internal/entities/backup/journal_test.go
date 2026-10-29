@@ -2,6 +2,8 @@ package backup_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -55,7 +57,7 @@ func TestJournalAmbiguities(t *testing.T) {
 			return append(names, other)
 		}, "duplicate record number 002"},
 		{"broken chain", func(names []string, c map[string][]byte) []string {
-			c[names[0]] = mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: op, At: at.Add(time.Hour), Fields: map[string]json.RawMessage{}})
+			c[names[0]] = mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: op, At: at.Add(time.Hour), Fields: map[string]json.RawMessage{"previous": json.RawMessage("null")}})
 			return names
 		}, "chain broken"},
 		{"forbidden transition", func(names []string, c map[string][]byte) []string {
@@ -79,9 +81,6 @@ func TestJournalAmbiguities(t *testing.T) {
 			c[names[0]] = mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: "20261105T101500-ffffffff", At: at, Fields: map[string]json.RawMessage{}})
 			return names
 		}, "does not match its name or operation"},
-		{"record beyond eleven", func(names []string, c map[string][]byte) []string {
-			return append(names, "012-rolled-back.rec")
-		}, "expected 004"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,5 +132,61 @@ func TestEncodeRecordRefusesInvalidRecords(t *testing.T) {
 		if _, err := backup.EncodeRecord(r); err == nil {
 			t.Errorf("%+v: accepted", r)
 		}
+	}
+}
+
+// A first publication and a rotation never share a switch step, and the
+// planned record says which one the operation is.
+func TestFirstPublicationAndRotationDoNotMix(t *testing.T) {
+	for _, tt := range []struct {
+		rotation bool
+		steps    []backup.Step
+	}{
+		{false, steps(pre, backup.StepRetireIntent)},
+		{true, steps(pre, backup.StepPublishIntent)},
+	} {
+		names, contents := journalFiles(t, tt.rotation, tt.steps...)
+		if _, err := backup.ParseJournal(op, names, contents); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Errorf("rotation %v, %v: %v", tt.rotation, tt.steps, err)
+		}
+	}
+	for _, previous := range []string{``, `42`, `"yesterday"`, `"` + op + `"`} {
+		fields := map[string]json.RawMessage{}
+		if previous != "" {
+			fields["previous"] = json.RawMessage(previous)
+		}
+		data := mustEncode(t, backup.Record{Seq: 1, Step: backup.StepPlanned, Op: op, At: at, Fields: fields})
+		name := backup.RecordName(1, backup.StepPlanned)
+		var ambiguity *backup.AmbiguityError
+		if _, err := backup.ParseJournal(op, []string{name}, map[string][]byte{name: data}); !errors.As(err, &ambiguity) {
+			t.Errorf("previous %s: %v", previous, err)
+		}
+	}
+}
+
+// An empty "prev" is not null: the first record must say null explicitly.
+func TestRecordEmptyPrevIsRefused(t *testing.T) {
+	line := []byte(`{"at":"2026-11-05T10:15:00Z","fields":{"previous":null},"op":"` + op + `","prev":"","schema":"savewarden.journal","schema_version":1,"seq":1,"step":"planned"}` + "\n")
+	sum := sha256.Sum256(line)
+	data := append(line, []byte("sha256 "+hex.EncodeToString(sum[:])+"\n")...)
+	if _, err := backup.DecodeRecord(data); err == nil || !strings.Contains(err.Error(), "non-empty string") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+// Envelope E2: no operation has a twelfth record, even a well-formed one.
+func TestRecordBeyondTheEnvelope(t *testing.T) {
+	longest := steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepUnpromoteIntent,
+		backup.StepRollbackFailed, backup.StepRestoreIntent, backup.StepRollbackFailed, backup.StepRolledBack)
+	names, contents := journalFiles(t, true, longest...)
+	sum := sha256.Sum256(contents[names[len(names)-1]])
+	line := []byte(`{"at":"2026-11-05T10:15:00Z","fields":{},"op":"` + op + `","prev":"` + hex.EncodeToString(sum[:]) +
+		`","schema":"savewarden.journal","schema_version":1,"seq":12,"step":"abandoned"}` + "\n")
+	own := sha256.Sum256(line)
+	name := "012-abandoned.rec"
+	contents[name] = append(line, []byte("sha256 "+hex.EncodeToString(own[:])+"\n")...)
+	var ambiguity *backup.AmbiguityError
+	if _, err := backup.ParseJournal(op, append(names, name), contents); !errors.As(err, &ambiguity) || !strings.Contains(err.Error(), "outside 1..11") {
+		t.Fatalf("error = %v", err)
 	}
 }

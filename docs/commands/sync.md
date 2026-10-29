@@ -66,8 +66,8 @@ findings: 0 blocking, 1 info
 | `vault` | Chemin et état : `will be created`, `empty, will be initialized`, `initialized` ou `initialization interrupted` |
 | `destination` | Emplacement de la génération courante du jeu dans le coffre |
 | `volume` | Le type de volume, NTFS local exigé, sera contrôlé à partir de B2b |
-| `current` | Opération qui a produit la génération courante, ou `none` |
-| `pending` | Opérations interrompues, avec leur dernière étape validée |
+| `current` | Opération qui a produit la génération courante, `none`, ou `not checked, intervention required` quand une intervention arrête le plan |
+| `pending` | Opérations interrompues, avec leur dernière étape validée, ou `unknown, ambiguous journal` |
 | `plan` | `changes`, `up to date`, `blocked` ou `intervention required` |
 
 Chaque fichier est préfixé par `+` ajouté, `~` modifié, `-` retiré ou `=`
@@ -116,7 +116,7 @@ Voir le [guide du coffre](../vault.md) pour chacun de ces cas.
 | Code | Signification | stderr |
 | --- | --- | --- |
 | `0` | Plan sans anomalie bloquante, ou déjà à jour | Vide |
-| `1` | Invocation, manifeste ou coffre invalide, coffre qui chevauche l'installation, volume indisponible, erreur de lecture, interruption ; ou plan impossible à écrire en entier, auquel cas stdout peut contenir un **préfixe tronqué** | Un diagnostic |
+| `1` | Invocation, manifeste ou coffre invalide, coffre qui chevauche l'installation, sources qui se chevauchent sous un autre nom, volume indisponible, erreur de lecture, interruption ; ou plan impossible à écrire en entier, auquel cas stdout peut contenir un **préfixe tronqué** | Un diagnostic |
 | `2` | Plan complet avec au moins une anomalie bloquante | `savewarden: plan blocked: N blocking finding(s)` |
 | `3` | Le coffre demande une intervention avant tout plan | `savewarden: intervention required: <cause> <sujet>` |
 

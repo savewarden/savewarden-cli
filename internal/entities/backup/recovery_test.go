@@ -134,45 +134,99 @@ func TestRecoveryTablesAreClosed(t *testing.T) {
 }
 
 func TestTerminalOperationsNeedNoRecovery(t *testing.T) {
-	for _, tail := range [][]backup.Step{
-		{backup.StepAbandoned},
-		steps(pre[:2], backup.StepFailed),
-		steps(pre, backup.StepPublishIntent, backup.StepPublished),
-		steps(pre, backup.StepPublishIntent, backup.StepRolledBack),
-		steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepPublished),
+	for _, tt := range []struct {
+		rotation bool
+		steps    []backup.Step
+	}{
+		{false, []backup.Step{backup.StepAbandoned}},
+		{false, steps(pre[:2], backup.StepFailed)},
+		{false, steps(pre, backup.StepPublishIntent, backup.StepPublished)},
+		{false, steps(pre, backup.StepPublishIntent, backup.StepRolledBack)},
+		{true, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepPublished)},
 	} {
-		j := journal(t, false, tail...)
+		j := journal(t, tt.rotation, tt.steps...)
 		if action, err := backup.Classify(j, obs(backup.Other, backup.Other, backup.Other)); err != nil || action != backup.ActionNone {
-			t.Errorf("%v: %q, %v", tail, action, err)
+			t.Errorf("%v: %q, %v", tt.steps, action, err)
 		}
 	}
 }
 
-// Envelope E1: nine temporaries of the record that recovery must commit
+// withTemporaries adds temporaries of the record following steps.
+func withTemporaries(t *testing.T, rotation bool, steps []backup.Step, prepared ...backup.Step) backup.Journal {
+	t.Helper()
+	names, contents := journalFiles(t, rotation, steps...)
+	attempt := map[backup.Step]int{}
+	for _, step := range prepared {
+		attempt[step]++
+		names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(len(steps)+1, step), attempt[step]))
+	}
+	j, err := backup.ParseJournal(op, names, contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j
+}
+
+func repeat(step backup.Step, n int) []backup.Step {
+	out := make([]backup.Step, n)
+	for i := range out {
+		out[i] = step
+	}
+	return out
+}
+
+// A temporary was written before its action: the state it was prepared for
+// must still be observed, otherwise recovery fails closed (ADR 0006 §3).
+func TestPreparedTemporariesMustMatchTheObservation(t *testing.T) {
+	publishing := steps(pre, backup.StepPublishIntent)
+	retiring := steps(pre, backup.StepRetireIntent)
+	tests := []struct {
+		name     string
+		rotation bool
+		steps    []backup.Step
+		prepared backup.Step
+		obs      backup.Observation
+		want     backup.Action // empty: ambiguity
+	}{
+		{"published prepared, current published", false, publishing, backup.StepPublished, obs(n, a, a), backup.ActionVerifyThenPublish},
+		{"published prepared, staging still there", false, publishing, backup.StepPublished, obs(a, a, n), ""},
+		{"unpublish prepared, rename never happened", false, publishing, backup.StepUnpublishIntent, obs(a, a, n), ""},
+		{"rolled-back prepared, rename never happened", false, publishing, backup.StepRolledBack, obs(a, a, n), backup.ActionMarkRolledBack},
+		{"restore prepared, retire done", true, retiring, backup.StepRestoreIntent, obs(a, o, n), backup.ActionRestore},
+		{"restore prepared, retire never happened", true, retiring, backup.StepRestoreIntent, obs(o, a, n), ""},
+		{"staged prepared during the copy", false, pre[:2], backup.StepStaged, obs(a, a, u), backup.ActionAbandon},
+		{"staging-intent prepared, staging exists", false, pre[:1], backup.StepStagingIntent, obs(a, a, u), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := backup.Classify(withTemporaries(t, tt.rotation, tt.steps, tt.prepared), tt.obs)
+			if tt.want == "" {
+				var ambiguity *backup.AmbiguityError
+				if !errors.As(err, &ambiguity) {
+					t.Fatalf("got %q, %v; want an ambiguity", got, err)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// Envelope E1: nine temporaries of the next record, whatever their step,
 // exhaust the envelope; eight still leave one attempt.
 func TestRecoveryEnvelopeE1(t *testing.T) {
-	for _, temporaries := range []int{8, 9} {
-		names, contents := journalFiles(t, false, steps(pre, backup.StepPublishIntent)...)
-		for k := 1; k <= temporaries; k++ {
-			names = append(names, fmt.Sprintf("%s.tmp-%d", backup.RecordName(6, backup.StepPublished), k))
-		}
-		j, err := backup.ParseJournal(op, names, contents)
-		if err != nil {
-			t.Fatal(err)
-		}
-		action, err := backup.Classify(j, obs(n, a, a))
-		if temporaries == 8 && (err != nil || action != backup.ActionVerifyThenPublish) {
-			t.Fatalf("8 temporaries: %q, %v", action, err)
-		}
-		if temporaries == 9 && !errors.Is(err, backup.ErrEnvelopeExhausted) {
-			t.Fatalf("9 temporaries: %q, %v", action, err)
-		}
-		// Temporaries of another step at the same number do not consume
-		// the attempts of the record recovery needs.
-		if temporaries == 9 {
-			if action, err := backup.Classify(j, obs(a, a, n)); err != nil || action != backup.ActionMarkRolledBack {
-				t.Fatalf("other step: %q, %v", action, err)
-			}
+	publishing := steps(pre, backup.StepPublishIntent)
+	if action, err := backup.Classify(withTemporaries(t, false, publishing, repeat(backup.StepPublished, 8)...), obs(n, a, a)); err != nil || action != backup.ActionVerifyThenPublish {
+		t.Fatalf("8 temporaries: %q, %v", action, err)
+	}
+	for name, prepared := range map[string][]backup.Step{
+		"nine of one step":  repeat(backup.StepPublished, 9),
+		"nine of two steps": append(repeat(backup.StepPublished, 5), repeat(backup.StepUnpublishIntent, 4)...),
+	} {
+		if action, err := backup.Classify(withTemporaries(t, false, publishing, prepared...), obs(n, a, a)); !errors.Is(err, backup.ErrEnvelopeExhausted) {
+			t.Fatalf("%s: %q, %v", name, action, err)
 		}
 	}
 }

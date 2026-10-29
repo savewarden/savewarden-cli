@@ -87,6 +87,9 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 			return Plan{}, errVault(request.VaultPath, "is the installation, contains it or lies in it under another name; the vault must be distinct")
 		}
 	}
+	if err := s.checkSources(manifest, installVolume, vaultVolume, scope); err != nil {
+		return Plan{}, err
+	}
 	if err := v.read(scope, request.VaultPath, vaultSegments, manifest.Game.ID); err != nil {
 		return Plan{}, err
 	}
@@ -95,7 +98,7 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	}
 	plan.VaultState, plan.Pending = v.state, v.pending
 	if len(v.interventions) > 0 {
-		plan.Interventions = v.interventions
+		plan.Interventions, plan.CurrentUnchecked = v.interventions, v.current || v.currentLink
 		sort.SliceStable(plan.Interventions, func(a, b int) bool { return plan.Interventions[a].Subject < plan.Interventions[b].Subject })
 		return plan, nil
 	}
@@ -128,6 +131,41 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	}
 	plan.sortFindings(manifest)
 	return plan, nil
+}
+
+// checkSources refuses sources that resolve to overlapping directories by
+// identity, such as an 8.3 short name, as inspect does; the manifest grammar
+// already refuses overlaps by name.
+func (s *Service) checkSources(manifest game.Manifest, installVolume, vaultVolume string, vaultScope Scope) error {
+	scope := vaultScope
+	if !strings.EqualFold(installVolume, vaultVolume) {
+		opened, err := s.files.OpenScope(installVolume)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // every source is missing; the plan reports it
+		}
+		if err != nil {
+			return fmt.Errorf("open volume %s: %w", installVolume, err)
+		}
+		defer func() { _ = opened.Close() }()
+		scope = opened
+	}
+	chains := make([][]fs.FileInfo, len(manifest.Sources))
+	complete := make([]bool, len(manifest.Sources))
+	for i := range manifest.Sources {
+		_, segments, err := manifest.SourceSegments(i)
+		if err != nil {
+			return err
+		}
+		chains[i], complete[i] = chainOf(scope, segments)
+	}
+	for i := range manifest.Sources {
+		for j := i + 1; j < len(manifest.Sources); j++ {
+			if overlapping(scope, chains[i], complete[i], chains[j], complete[j]) {
+				return fmt.Errorf("sources %q and %q resolve to overlapping directories", manifest.Sources[i].ID, manifest.Sources[j].ID)
+			}
+		}
+	}
+	return nil
 }
 
 // checkCurrent compares the current generation with its receipt, exactly

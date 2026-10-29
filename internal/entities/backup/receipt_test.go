@@ -94,6 +94,11 @@ func TestReceiptStrictness(t *testing.T) {
 		{"escaping path", `"directories": [`, `"directories": ["../up",`, "relative"},
 		{"half recovered", `"recovered_at": null`, `"recovered_at": "2026-11-05T11:00:00Z"`, "both null or both set"},
 		{"null required", `"tool_version": "dev"`, `"tool_version": null`, "tool_version: required field is missing"},
+		{"case variant duplicate", `"tool_version": "dev",`, `"tool_version": "dev", "TOOL_VERSION": "evil",`, "lowercase ASCII"},
+		{"case variant key", `"operation":`, `"Operation":`, "lowercase ASCII"},
+		{"folded variant key", `"sha256": "7`, `"017Fha256": "7`, "lowercase ASCII"},
+		{"empty previous", `"previous": null`, `"previous": ""`, "non-empty string"},
+		{"empty recovered_by", `"recovered_by": null`, `"recovered_by": ""`, "non-empty string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

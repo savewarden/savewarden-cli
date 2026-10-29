@@ -78,12 +78,22 @@ func RenderPlan(plan sync.Plan) string {
 	fmt.Fprintf(&b, "destination: %s\n", printable(plan.Destination))
 	b.WriteString("volume: not checked by this build\n")
 	current := plan.Current
-	if current == "" {
+	switch {
+	case current != "":
+	case plan.CurrentUnchecked:
+		current = "not checked, intervention required"
+	default:
 		current = "none"
 	}
 	fmt.Fprintf(&b, "current: %s\n", current)
 	if len(plan.Pending) == 0 {
-		b.WriteString("pending: none\n")
+		pending := "none"
+		for _, intervention := range plan.Interventions {
+			if intervention.Cause == sync.CauseJournalAmbiguous {
+				pending = "unknown, ambiguous journal"
+			}
+		}
+		fmt.Fprintf(&b, "pending: %s\n", pending)
 	}
 	for _, pending := range plan.Pending {
 		last := string(pending.Last)

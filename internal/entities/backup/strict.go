@@ -48,6 +48,12 @@ func strictValue(decoder *json.Decoder) error {
 			if !ok {
 				return errors.New("object key is not a string")
 			}
+			// encoding/json matches field names without regard to case, and
+			// even folds U+017F to s and U+212A to k: only exact lowercase
+			// ASCII names can be compared reliably for duplicates and schema.
+			if !schemaKey.MatchString(name) {
+				return fmt.Errorf("key %q: object keys must be lowercase ASCII letters, digits and underscores", name)
+			}
 			if keys[name] {
 				return fmt.Errorf("duplicate key %q", name)
 			}
@@ -102,11 +108,13 @@ func (n nullable) optionalString(field string) (string, bool, error) {
 		return "", false, nil
 	}
 	var s string
-	if err := json.Unmarshal(n.raw, &s); err != nil {
-		return "", false, fmt.Errorf("%s: must be a string or null", field)
+	if err := json.Unmarshal(n.raw, &s); err != nil || s == "" {
+		return "", false, fmt.Errorf("%s: must be null or a non-empty string", field)
 	}
 	return s, true, nil
 }
+
+var schemaKey = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 func required[T any](field string, v *T) (T, error) {
 	if v == nil {

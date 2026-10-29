@@ -63,17 +63,6 @@ const (
 	ActionFinishRestore Action = "finish-restore"
 )
 
-// nextWrite is the step each action commits first, for envelope E1.
-var nextWrite = map[Action]Step{
-	ActionAbandon:           StepAbandoned,
-	ActionMarkRolledBack:    StepRolledBack,
-	ActionVerifyThenPublish: StepPublished,
-	ActionFinishUnpublish:   StepRolledBack,
-	ActionRestore:           StepRestoreIntent,
-	ActionFinishUnpromote:   StepRestoreIntent,
-	ActionFinishRestore:     StepRolledBack,
-}
-
 // Classify decides the recovery of a non-terminal operation from its
 // journal and the observed identities. Any combination absent from the
 // tables of ADR 0006 is an AmbiguityError: nothing is guessed.
@@ -85,10 +74,84 @@ func Classify(j Journal, o Observation) (Action, error) {
 	if !ok {
 		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("observation %s does not match the last step %q", o, displayStep(j.Last()))}
 	}
-	if j.Prepared[nextWrite[action]] >= MaxTemporaries || len(j.Records) >= MaxRecords {
-		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("%s cannot be committed again", nextWrite[action]), Err: ErrEnvelopeExhausted}
+	// A temporary is written before its action, so the state it was
+	// prepared for must still be there; otherwise an action happened
+	// without a committed intention, or a power cut lost the order.
+	for step, count := range j.Prepared {
+		if count > 0 && !preparedFor(step, j, o) {
+			return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("a temporary record %q was prepared for another state than %s", step, o)}
+		}
+	}
+	if j.Attempts() >= MaxTemporaries || len(j.Records) >= MaxRecords {
+		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("record %03d cannot be committed again", len(j.Records)+1), Err: ErrEnvelopeExhausted}
 	}
 	return action, nil
+}
+
+// preparedFor reports whether a temporary of step, following the last
+// committed record of j, could have been written in the observed state:
+// the state before its own action.
+func preparedFor(step Step, j Journal, o Observation) bool {
+	rotation := j.Rotation()
+	is := func(c, r, s Presence) bool { return o.Current == c && o.Retained == r && o.Staging == s }
+	// Before any move: current as planned, nothing retained.
+	before := func(staging ...Presence) bool {
+		if o.Retained != Absent || !contains(staging, o.Staging) {
+			return false
+		}
+		switch {
+		case len(j.Records) == 0:
+			return o.Current == Absent || o.Current == Old || o.Current == Unidentified
+		case rotation:
+			return o.Current == Old
+		}
+		return o.Current == Absent
+	}
+	switch step {
+	case StepPlanned, StepStagingIntent:
+		return before(Absent)
+	case StepStaged:
+		return before(Unidentified)
+	case StepVerified, StepPublishIntent, StepRetireIntent:
+		return before(New)
+	case StepFailed, StepAbandoned:
+		return before(Absent, Unidentified, New)
+	case StepPublished:
+		if rotation {
+			return is(New, Old, Absent)
+		}
+		return is(New, Absent, Absent)
+	case StepUnpublishIntent:
+		return is(New, Absent, Absent)
+	case StepPromoteIntent, StepRestoreIntent:
+		return is(Absent, Old, New)
+	case StepUnpromoteIntent:
+		return is(New, Old, Absent)
+	case StepRolledBack:
+		if rotation {
+			return is(Old, Absent, New)
+		}
+		return is(Absent, Absent, New)
+	case StepRollbackFailed:
+		switch j.Last() {
+		case StepUnpublishIntent:
+			return is(New, Absent, Absent)
+		case StepUnpromoteIntent:
+			return is(New, Old, Absent)
+		case StepRestoreIntent:
+			return is(Absent, Old, New)
+		}
+	}
+	return false
+}
+
+func contains(presences []Presence, p Presence) bool {
+	for _, candidate := range presences {
+		if candidate == p {
+			return true
+		}
+	}
+	return false
 }
 
 func displayStep(s Step) Step {

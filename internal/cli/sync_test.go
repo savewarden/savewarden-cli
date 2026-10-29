@@ -203,3 +203,15 @@ func TestDocumentedPlanExample(t *testing.T) {
 		t.Fatalf("docs/commands/sync.md does not show the rendering of the first plan:\n%s", cli.RenderPlan(firstPlan()))
 	}
 }
+
+func TestRenderHeaderOnAnIntervention(t *testing.T) {
+	plan := firstPlan()
+	plan.VaultState, plan.Sources, plan.Findings, plan.CurrentUnchecked = sync.VaultInitialized, nil, nil, true
+	plan.Interventions = []sync.Intervention{{Cause: sync.CauseJournalAmbiguous, Subject: "20261105T101500-1a2b3c4d", Detail: "chain broken"}}
+	out := cli.RenderPlan(plan)
+	for _, want := range []string{"current: not checked, intervention required\n", "pending: unknown, ambiguous journal\n"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
+	}
+}

@@ -218,6 +218,9 @@ type Journal struct {
 	// would follow the last committed one: intentions written but never
 	// committed.
 	Prepared map[Step]int
+	// Previous is the operation whose generation a rotation replaces, empty
+	// for a first publication or before the planned record.
+	Previous string
 }
 
 // Last returns the step of the last committed record, empty if none.
@@ -232,19 +235,29 @@ func (j Journal) Last() Step {
 func (j Journal) Terminal() bool { return j.Last().Terminal() }
 
 // Rotation reports whether the operation replaces an existing current: its
-// planned record names a previous generation, or it holds a rotation step.
-func (j Journal) Rotation() bool {
-	for _, r := range j.Records {
-		switch r.Step {
-		case StepRetireIntent, StepPromoteIntent, StepUnpromoteIntent, StepRestoreIntent:
-			return true
-		case StepPlanned:
-			if previous, ok := r.Fields["previous"]; ok && string(previous) != "null" {
-				return true
-			}
-		}
+// planned record names the previous generation.
+func (j Journal) Rotation() bool { return j.Previous != "" }
+
+// plannedPrevious reads the "previous" field of a planned record: null for
+// a first publication, or the operation id of the generation to replace.
+// Rotation and first publication follow different automata, so the field is
+// validated here rather than left to the writer.
+func plannedPrevious(r Record) (string, error) {
+	raw, ok := r.Fields["previous"]
+	if !ok {
+		return "", errors.New(`planned record lacks the field "previous"`)
 	}
-	return false
+	if string(raw) == "null" {
+		return "", nil
+	}
+	var previous string
+	if err := json.Unmarshal(raw, &previous); err != nil {
+		return "", errors.New(`planned record: "previous" must be null or an operation id`)
+	}
+	if err := ValidOperationID(previous); err != nil || previous == r.Op {
+		return "", fmt.Errorf(`planned record: "previous" %q is not another operation id`, previous)
+	}
+	return previous, nil
 }
 
 var (
@@ -312,8 +325,13 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 				return Journal{}, ambiguous("record %s: chain broken, previous record does not match", name)
 			}
 		}
-		if !allowed(j.steps(), r.Step) {
+		if !allowed(j.steps(), r.Step, j.Rotation()) {
 			return Journal{}, ambiguous("record %s: transition from %q to %q is not allowed", name, j.Last(), r.Step)
+		}
+		if r.Step == StepPlanned {
+			if j.Previous, err = plannedPrevious(r); err != nil {
+				return Journal{}, ambiguous("record %s: %v", name, err)
+			}
 		}
 		j.Records = append(j.Records, r)
 		previous = data
@@ -325,12 +343,22 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 			return Journal{}, ambiguous("temporary record after the terminal step %q", j.Last())
 		case t.seq != next:
 			return Journal{}, ambiguous("temporary record %03d-%s does not follow the last committed record", t.seq, t.step)
-		case !allowed(j.steps(), t.step):
+		case !allowed(j.steps(), t.step, j.Rotation()):
 			return Journal{}, ambiguous("temporary record %03d-%s is not an allowed next step", t.seq, t.step)
 		}
 		j.Prepared[t.step]++
 	}
 	return j, nil
+}
+
+// Attempts counts the temporaries of the record that would follow the last
+// committed one, whatever their step (envelope E1, counted per number).
+func (j Journal) Attempts() int {
+	total := 0
+	for _, count := range j.Prepared {
+		total += count
+	}
+	return total
 }
 
 func (j Journal) steps() []Step {
@@ -341,8 +369,9 @@ func (j Journal) steps() []Step {
 	return steps
 }
 
-// allowed applies the acyclic automaton of ADR 0006 §4 and §5.
-func allowed(history []Step, next Step) bool {
+// allowed applies the acyclic automaton of ADR 0006 §4 and §5. A first
+// publication and a rotation never share a switch step.
+func allowed(history []Step, next Step, rotation bool) bool {
 	if len(history) >= MaxRecords {
 		return false
 	}
@@ -360,7 +389,13 @@ func allowed(history []Step, next Step) bool {
 	case StepStaged:
 		return next == StepVerified || next == StepFailed || next == StepAbandoned
 	case StepVerified:
-		return next == StepPublishIntent || next == StepRetireIntent || next == StepFailed || next == StepAbandoned
+		switch next {
+		case StepPublishIntent:
+			return !rotation
+		case StepRetireIntent:
+			return rotation
+		}
+		return next == StepFailed || next == StepAbandoned
 	case StepPublishIntent:
 		return next == StepPublished || next == StepUnpublishIntent || next == StepRolledBack
 	case StepUnpublishIntent:
