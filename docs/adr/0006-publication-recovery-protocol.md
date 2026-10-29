@@ -241,25 +241,46 @@ Refus sans aucune mutation :
 - lien, jonction ou point d'analyse à n'importe quel niveau : code 1 ;
 - neuf temporaires de marqueur déjà présents : enveloppe E1 épuisée, code 3.
 
+**Génération précédente reconnue.** `current` est reconnu comme la
+génération publiée par l'opération `<prev-op>` seulement si toute la chaîne
+de preuve tient, observation comprise :
+
+1. le receipt `<prev-op>` est le receipt de tête du jeu, valide et du même
+   jeu ;
+2. le journal `<prev-op>` est terminal en `published`, et son
+   `receipt_sha256` est le SHA-256 du fichier receipt ;
+3. l'identité observée de `current`, lue sans suivi de lien, est l'identité
+   que ce journal a publiée : `staging_identity` de `staged`, reprise par
+   `publish-intent` pour une première publication ou par `promote-intent`
+   pour une rotation ;
+4. le contenu de `current` est intégralement conforme au receipt, relu comme
+   au §4.5 du plan B2.
+
+Un dossier présent dont l'une de ces preuves manque est `unidentified` ou
+`other`, jamais `old`. La règle vaut pour une génération publiée par B2b
+comme par une rotation de B2c, et pour un receipt reconstruit par la
+récupération, dont le journal porte les mêmes identités. Conséquence
+assumée : une copie du coffre vers un autre volume change les identités ;
+sa génération n'y est plus reconnue, et un nouveau coffre reste possible.
+
 **Opération non commencée (règle M3).** Un dossier d'opération sans aucun
 enregistrement validé, vide ou ne contenant que des temporaires `001-…`, n'a
-fixé ni plan ni identité : rien ne dit à quelle génération appartient un
-`current` présent. Sa clôture par `001-abandoned` n'est admise que si :
+fixé ni plan ni identité. Une **génération publiée est attendue** dès que le
+jeu a un receipt, valide ou non, ou un journal terminal en `published`.
+`staging\<op>` doit être absent, et tout `retained\<…>` présent expliqué
+par son receipt, comme le §3 l'exige déjà. Alors :
 
-1. `staging\<op>` n'existe pas, et tout `retained\<…>` présent est expliqué
-   par son receipt, comme le §3 l'exige déjà ;
-2. et soit `current` est absent ;
-3. soit `current` est la **génération précédente valide** : son receipt est
-   le receipt de tête, valide et du même jeu ; le journal de l'opération de
-   ce receipt est terminal en `published`, et son `receipt_sha256` est le
-   SHA-256 du fichier receipt ; le contenu de `current` est intégralement
-   conforme à ce receipt, relu comme au §4.5 du plan B2.
+| Génération publiée attendue | `current` | Action |
+| --- | --- | --- |
+| Non | Absent | `001-abandoned` |
+| Oui | Présent et génération précédente reconnue | `001-abandoned` |
+| Oui | Absent | Contradiction : code 3, rien écrit |
+| Non | Présent | Code 3, rien écrit |
+| Oui | Présent mais non reconnu : identité, contenu, receipt ou journal en défaut | Code 3, rien écrit |
 
-Dans tout autre cas, `current` non identifié, receipt manquant, illisible ou
-corrompu, journal précédent absent ou non publié, contenu différent : code 3,
-rien n'est écrit, aucune réparation n'est tentée. Ce cas, antérieur à
-`001-planned`, est distinct de celui d'une rotation dont `planned` est validé,
-où `current_identity` est la référence (§5).
+Aucune réparation n'est tentée. Ce cas, antérieur à `001-planned`, est
+distinct de celui d'une rotation dont `planned` est validé, où
+`current_identity` est la référence (§5).
 
 Un coffre incomplet n'est **jamais requalifié automatiquement** en coffre
 sain. La seule reprise d'une initialisation interrompue est `--recover
@@ -295,7 +316,7 @@ Récupération `--recover --apply` d'une première publication :
 
 | Dernier validé | Observation (`C`, `S`) | Action |
 | --- | --- | --- |
-| Aucun : dossier d'opération vide ou temporaires `001` seuls | Règle M3 : `current` absent, ou génération précédente valide ; `staging\<op>` absent | `001-abandoned` ; sinon code 3, rien écrit |
+| Aucun : dossier d'opération vide ou temporaires `001` seuls | Règle M3 : aucune génération publiée attendue et `current` absent, ou génération précédente reconnue ; `staging\<op>` absent | `001-abandoned` ; sinon code 3, rien écrit |
 | `planned` | (—, —) | `abandoned` |
 | `staging-intent` | (—, —), ou (—, dossier ordinaire sans point d'analyse) | `abandoned` ; staging laissé en place, ni lu ni déplacé |
 | `staged`, `verified` | (—, `new`) | `abandoned` ; staging laissé en place |
@@ -307,8 +328,10 @@ Récupération `--recover --apply` d'une première publication :
 | `published` | (`new`, —), receipt conforme | Rien |
 | Tout autre cas, dont un `staging\<op>` présent avant `staging-intent`, un `S` absent après `staged`, ou `C` et `S` tous deux présents | — | Fail-closed, code 3 |
 
-Un `current` existant et différent du plan est refusé avant tout staging
-(`current-exists`, code 2).
+En B2b, un `current` existant et différent du plan est refusé avant tout
+staging (`current-exists`, code 2). En B2c, seule la génération précédente
+reconnue est remplacée, par la rotation du §5 ; tout autre `current` reste
+refusé avant tout staging (§5, point 1).
 
 #### Ordre d'une bascule, handles et identités
 
@@ -386,10 +409,17 @@ non terminal.
 **Identité persistante de l'ancien `current` (A1, A2).** L'identité de
 l'ancien `current` est relevée une fois, sous verrou, et ne change plus :
 
-1. à l'étape I7, sous verrou et avant `001-planned`, `current` est relu
-   intégralement contre son receipt et son identité est relevée ; un écart
-   de contenu donne `current-modified`, code 2, sans journal ; une identité
-   indisponible ou un point d'analyse, code 3 ;
+1. à l'étape I7, sous verrou et avant `001-planned`, `current` doit être
+   la génération précédente reconnue (§4) : son identité est celle que le
+   journal `<prev-op>` a publiée et son contenu est relu intégralement contre
+   le receipt ; un écart de contenu sous cette identité donne
+   `current-modified`, code 2, sans journal ; une autre identité, une
+   identité indisponible ou un point d'analyse, code 3. Le mode plan
+   applique la même reconnaissance : un `current` dont l'identité n'est pas
+   celle que le journal `<prev-op>` a publiée est signalé
+   `unexpected-entry`, code 3, quel que soit son contenu, jamais comparé
+   comme s'il était la génération précédente ; un receipt absent ou
+   invalide garde `current-modified`, code 2, comme en B2b ;
 2. `planned` fixe cette identité dans `current_identity` : c'est la
    référence `old` des observations, de `retire-intent` et de
    `restore-intent` pour toute la suite de l'opération et de sa
@@ -402,18 +432,44 @@ l'ancien `current` est relevée une fois, sous verrou, et ne change plus :
    enregistré ni déplacé ;
 4. le pré-contrôle de M1 suit l'ordre du §4 : identité égale à
    `current_identity`, `retained\<prev-op>` absent, portées de lecture
-   fermées.
+   fermées ;
+5. après le post-contrôle de M1 et avant `promote-intent`, l'observation
+   doit être exactement (—, `old`, `new`) : `current` absent, staging
+   d'identité `new`, et `retained\<prev-op>` relu intégralement contre le
+   receipt `<prev-op>`, identité égale à `current_identity`. Tout écart,
+   dont un `current` réapparu ou un `retained` modifié, est une
+   contradiction : code 3, **rien n'est enregistré ni déplacé**, ni
+   promotion, ni restauration d'une génération altérée. Le journal reste à
+   `retire-intent` ; sa récupération suit la ligne (—, `old`, `new`) du
+   tableau ci-dessous, sans rien déduire.
 
-Une écriture dans `current` entre la relecture du point 3 et M1 n'est pas
-détectée : jeu et launcher doivent être fermés, comme pour la source.
+**Fenêtres résiduelles.** `sync.lock` n'exclut qu'une autre opération
+Savewarden : il n'empêche pas un autre processus d'écrire dans `current` ou
+`retained\<prev-op>`. Les relectures des points 3 et 5 bornent ces fenêtres
+sans les fermer : une écriture entre la relecture du point 3 et M1, ou entre
+celle du point 5 et M2, n'est pas détectée. Jeu, launcher et tout outil qui
+touche le coffre doivent être fermés, comme pour la source.
+
+**Restaurations vérifiées.** Toute restauration M3, en cours d'exécution
+comme en récupération, est précédée de la relecture intégrale de
+`retained\<prev-op>` contre son receipt, identité égale à
+`current_identity` : conforme, M3 a lieu ; non conforme, code 3, rien
+déplacé ni enregistré. Une génération altérée n'est jamais remise en place
+comme si elle était intacte.
 
 En cours d'exécution :
 
 - M1 échoue : l'observation confirme (`old`, —, `new`) : `rolled-back`, code 1,
   `vault: rolled back <op>; current unchanged` ;
-- M2 échoue : `restore-intent`, M3, post-contrôle, `rolled-back`, code 1 ;
-  si M3 échoue : `rollback-failed`, code 3, diagnostic nommant les deux
-  emplacements, tous deux intacts ;
+- relecture du point 5 en écart : code 3, `vault: intervention required for
+  <op>: …`, diagnostic nommant le nom en écart ; aucun enregistrement, aucun
+  déplacement ;
+- M2 échoue : nouvelle observation avant toute restauration ; (—, `old`,
+  `new`) confirmé : restauration vérifiée, puis `restore-intent`, M3,
+  post-contrôle, `rolled-back`, code 1 ; si M3 échoue : `rollback-failed`,
+  code 3, diagnostic nommant les deux emplacements, tous deux intacts ;
+  `retained` non conforme, `current` réapparu ou toute autre observation :
+  code 3, rien d'autre enregistré ni déplacé ;
 - post-contrôle de M2 contraire à l'intention : code 3, aucun autre
   déplacement.
 
@@ -432,12 +488,12 @@ Récupération, tableau fermé :
 | Aucun : dossier d'opération vide ou temporaires `001` seuls | Règle M3 du §4 | `001-abandoned` ; sinon code 3, rien écrit |
 | `planned` à `verified` | (`old`, —, `S` selon les règles du §4), `old` étant `current_identity` de `planned` | `abandoned` |
 | `retire-intent` | (`old`, —, `new`) | M1 non effectué : `rolled-back` |
-| `retire-intent` | (—, `old`, `new`) | M1 effectué : `restore-intent`, puis M3, puis `rolled-back` |
-| `promote-intent` | (—, `old`, `new`) | M2 non effectué : `restore-intent`, puis M3, puis `rolled-back` |
+| `retire-intent` | (—, `old`, `new`) | M1 effectué : restauration vérifiée ; `retained` conforme : `restore-intent`, puis M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
+| `promote-intent` | (—, `old`, `new`) | M2 non effectué : restauration vérifiée ; conforme : `restore-intent`, puis M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
 | `promote-intent` | (`new`, `old`, —) | M2 effectué : revérification intégrale ; égal : receipt, `published` ; différent : `unpromote-intent`, puis M4, sauf si le receipt de `<op>` est déjà validé : code 3, rien écrit, comme en A5 et A6 |
-| `unpromote-intent` | (`new`, `old`, —) | M4 non effectué : M4, puis `restore-intent`, M3, `rolled-back` |
-| `unpromote-intent` | (—, `old`, `new`) | M4 effectué : `restore-intent`, puis M3, puis `rolled-back` |
-| `restore-intent` | (—, `old`, `new`) | M3 non effectué : M3, puis `rolled-back` |
+| `unpromote-intent` | (`new`, `old`, —) | M4 non effectué : M4, puis restauration vérifiée ; conforme : `restore-intent`, M3, `rolled-back` ; non conforme : code 3, rien d'autre écrit |
+| `unpromote-intent` | (—, `old`, `new`) | M4 effectué : restauration vérifiée ; conforme : `restore-intent`, puis M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
+| `restore-intent` | (—, `old`, `new`) | M3 non effectué : restauration vérifiée ; conforme : M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
 | `restore-intent` | (`old`, —, `new`) | M3 effectué : `rolled-back` |
 | `rollback-failed` | L'une des observations prévues pour l'intention qui le précède | Comme la ligne de cette intention ; nouvel échec du déplacement : code 3, sans nouvel enregistrement (E3) |
 | `published` | (`new`, `old`, —), receipt conforme | Rien |
@@ -610,3 +666,15 @@ relève de son propriétaire.
   ambiguë. Les journaux B2b restent lisibles ; les enveloppes E1 à E4 sont
   inchangées. Ces amendements prévalent sur le §5 du plan B2 v0.2 ; leurs
   tests sont exigés par son §9.3 amendé.
+- **29 octobre 2026, revue du cadrage de B2c** par le propriétaire :
+  définition unique de la génération précédente reconnue, dont l'identité
+  observée doit être celle que son journal a publiée (P0-2, §4) ; règle M3
+  qui tient l'absence de `current` pour une contradiction dès qu'une
+  génération publiée est attendue (P0-1, §4) ; relecture de
+  `retained\<prev-op>` entre M1 et M2, nouvelle observation avant toute
+  restauration après un échec de M2, et restaurations toujours vérifiées,
+  sans promotion ni restauration d'une génération altérée (P1, §5) ;
+  fenêtres résiduelles du verrou explicitées (P1, §5) ; mode plan aligné,
+  `unexpected-entry` pour un `current` d'une autre identité que celle
+  publiée ;
+  `current-exists` conservé comme règle de B2b (§4).
