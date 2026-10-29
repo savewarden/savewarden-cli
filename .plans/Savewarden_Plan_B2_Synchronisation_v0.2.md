@@ -1,6 +1,6 @@
 # Savewarden — Plan B2 : synchronisation sécurisée, `sync` sans suppression
 
-> **Statut : v0.2 — VALIDÉ PAR LE PROPRIÉTAIRE le 29 octobre 2026 — B2a et B2b livrés ; arbitrages B2c A1–A5 et M3, puis revue du cadrage, intégrés (§0.8) ; GO de développement B2c non donné**
+> **Statut : v0.2 — VALIDÉ PAR LE PROPRIÉTAIRE le 29 octobre 2026 — B2a et B2b livrés ; arbitrages B2c A1–A5 et M3, revue du cadrage et ses trois effets, intégrés (§0.8) ; GO de développement B2c non donné**
 > Version du plan : `0.2` — 29 octobre 2026, validée après revue intégrale ; remplace le brouillon v0.1 du 24 octobre
 > Lot : **B2**, en trois PR successives B2a, B2b, B2c, cible `release/v0.1.0-a1` (D15)
 > Cadre : [plan directeur v0.1](Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md) §4, §7 B2 et §8,
@@ -164,14 +164,19 @@ les §4.5 et §5.5 ; elles ne valent pas davantage GO de développement :
 | R4 | Fenêtres résiduelles (P1) | `sync.lock` n'exclut qu'une autre opération Savewarden ; une écriture externe entre une relecture et le déplacement qui la suit n'est pas détectée, et la documentation le dit ; anomalie observée après M1 : blocage, sans rollback conjectural | ADR 0006 §5 |
 | R5 | ADR 0007 (P1) | Codes B2b manquants ajoutés ; définition historique de `current-exists` conservée | Ci-dessous |
 
-Conséquence de R2, acceptée : une copie du coffre, ou d'un `current`, change
-les identités ; la génération n'est plus reconnue, code 3, et un nouveau
-coffre reste la voie documentée. Le mode plan applique la même
-reconnaissance que `--apply` : il annonce `unexpected-entry`, code 3, pour un
-`current` dont l'identité n'est pas celle que son journal a publiée, quel que
-soit son contenu ; un receipt absent ou invalide garde `current-modified`,
-code 2, comme en B2b. C'est le seul changement de comportement du mode plan
-pour un coffre écrit par B2b.
+Le mode plan applique la même reconnaissance que `--apply` : il annonce
+`unexpected-entry`, code 3, pour un `current` dont l'identité n'est pas celle
+que son journal a publiée, quel que soit son contenu ; un receipt absent ou
+invalide garde `current-modified`, code 2, comme en B2b. C'est le seul
+changement de comportement du mode plan pour un coffre écrit par B2b.
+
+**Effets de la revue, arbitrés par le propriétaire (29 octobre 2026) :**
+
+| Effet | Décision | Exigence |
+| --- | --- | --- |
+| Coffre B2b copié ou déplacé : `unexpected-entry`, code 3 | Accepté sous condition, refus conservateur temporaire | Code 3, aucune écriture, aucune adoption ni réécriture d'identité ; la documentation dit qu'une copie peut changer les identités NTFS sans corrompre les données, que copier ou déplacer un coffre n'est pas encore pris en charge, et le diagnostic ne prétend prouver ni corruption ni compromission ; portabilité renvoyée à une procédure future de requalification ou d'import contrôlé (§13), sans affaiblir la récupération fail-closed |
+| M3 plus strict que le code B2b fusionné | Validé | Correction aux commits 1 et 4 du §8.3 ; journaux B2b toujours lus ; absence normale de génération distinguée de la disparition d'une génération publiée |
+| `current` réapparu entre M1 et M2 | Validé | Code 3, ni promotion ni restauration automatique ; objets conservés en place, ancienne génération dans `retained\<prev-op>` ; diagnostic nommant l'ambiguïté |
 
 **Impacts sur ADR 0004.** Aucune frontière nouvelle, aucun port nouveau :
 la rotation et sa récupération n'emploient que les ports existants, `Vault`
@@ -212,7 +217,9 @@ B2c :
   ou d'une anomalie observée après M1 : `intervention required`, code 3 ;
 - un `current` reconnu exige désormais son identité publiée : le sens de
   `current-modified` est inchangé, l'écart d'identité relève de
-  `unexpected-entry`.
+  `unexpected-entry`, dont le diagnostic dit que l'identité diffère de celle
+  publiée par `<prev-op>` et qu'un coffre copié ou déplacé n'est pas encore
+  pris en charge, sans parler de corruption ni de compromission.
 
 ---
 
@@ -618,7 +625,8 @@ trop, aucun lien.
 - En B2c, le contrôle porte aussi sur l'identité : `current` doit être la
   génération précédente reconnue (ADR 0006 §4) ; un `current` d'une autre
   identité que celle publiée par son journal est `unexpected-entry`, code 3,
-  quel que soit son contenu (§0.8, R2).
+  quel que soit son contenu (§0.8, R2) ; c'est le cas d'un coffre copié ou
+  déplacé, non pris en charge en B2, sans écriture ni adoption d'identité.
 - Les générations `retained\` ne sont pas recontrôlées à chaque `sync` ; ce
   sera le rôle de `doctor` en B5. Seule exception : `retained\<prev-op>`,
   relu par la rotation qui le crée, entre M1 et M2 et avant toute
@@ -1285,7 +1293,7 @@ au choix du propriétaire. La PR B2c garde sept commits :
 | 3 | `feat(sync): removals and missing sources policy` | §4.4, D5, V1, A3 : `--allow-removals`, `--accept-missing-source` répétable | — |
 | 4 | `feat(sync): recover an interrupted rotation` | Tableau §5.5, restaurations vérifiées comprises ; règle M3, première publication comprise ; énumération des crashs à chaque transition et pendant la récupération | **Revue du remplacement** |
 | 5 | `feat(cli): rotation flags and output` | Flags, rendu, `rolled back`, ADR 0007 amendé (§0.8, R5) ; test de complétude des codes documentés ; smoke binaire de rotation | — |
-| 6 | `docs: document B2c` | Guide de récupération complet, accumulation des générations (A4), sécurité, pilote, ADR 0004 corrigé, CHANGELOG | — |
+| 6 | `docs: document B2c` | Guide de récupération complet, accumulation des générations (A4), coffre copié ou déplacé non pris en charge (§0.8), sécurité, pilote, ADR 0004 corrigé, CHANGELOG | — |
 | 7 | `docs: add B2c validation report` | Preuves, revue de sécurité consignée | Revue de sécurité indépendante, Human GO |
 
 Le commit 1 ajoute au découpage d'origine la part « entités » du contrat
@@ -1487,7 +1495,7 @@ chaîne, `internal/features/sync` pour le contenu
 | Publié par une rotation : identité de `staged` reprise par `promote-intent` | Reconnu | `TestPreviousGenerationIsRecognizedAfterRotation` |
 | Receipt reconstruit par la récupération, `recovered_by` renseigné | Reconnu | `TestPreviousGenerationFromReconstructedReceipt` |
 | Dossier ordinaire dont aucune identité publiée n'est connue | `unidentified`, jamais `old` | `TestUnidentifiedCurrentIsNeverOld` |
-| Contenu conforme, autre identité : dossier recopié, coffre copié vers un autre volume | Non reconnu : `unexpected-entry`, code 3 | `TestCurrentWithAnotherIdentityIsNotRecognized` |
+| Contenu conforme, autre identité : dossier recopié, coffre copié vers un autre volume | Non reconnu : `unexpected-entry`, code 3, rien écrit, aucune identité adoptée ; diagnostic d'écart d'identité, sans mention de corruption | `TestCurrentWithAnotherIdentityIsNotRecognized` |
 | Même identité, contenu altéré | Non reconnu : `current-modified`, code 2 | `TestCurrentWithAlteredContentIsNotRecognized` |
 | Receipt de tête invalide, journal non terminal ou non `published`, `receipt_sha256` différent | Non reconnu, jamais rotation ; causes B2b inchangées | `TestPreviousGenerationNeedsItsWholeProofChain` |
 | Mode plan, `current` d'une autre identité que celle publiée, contenu conforme ou non | `unexpected-entry`, code 3, rien écrit ; receipt absent ou invalide : `current-modified`, code 2, comme en B2b | `TestPlanReportsACurrentNotPublishedByItsOperation` |
@@ -1524,7 +1532,7 @@ d'opération vide, puis temporaires `001-…` seuls ; le test B2b
 | --- | --- | --- | --- |
 | Après le post-contrôle de M1, avant `promote-intent` | Fichier de `retained\<prev-op>` modifié, ajouté ou retiré, même identité | Code 3, rien enregistré ni déplacé : journal à `retire-intent`, ni promotion ni restauration | `TestPromotionRefusedWhenRetainedChangedAfterRetirement` |
 | Idem | `retained\<prev-op>` remplacé, autre identité | Idem | `TestPromotionRefusedWhenRetainedReplacedAfterRetirement` |
-| Idem | `current` réapparu | Idem, rien écrasé | `TestPromotionRefusedWhenCurrentReappearsAfterRetirement` |
+| Idem | `current` réapparu | Idem, rien écrasé ; l'objet apparu reste en place, l'ancienne génération dans `retained\<prev-op>` ; diagnostic nommant l'ambiguïté | `TestPromotionRefusedWhenCurrentReappearsAfterRetirement` |
 | Après un refus de M2 | `retained\<prev-op>` altéré depuis la relecture du point 5 | Nouvelle observation : code 3, aucun `restore-intent`, rien déplacé | `TestFailedPromotionDoesNotRestoreAnAlteredRetained` |
 | `--recover` de `retire-intent`, `promote-intent`, `unpromote-intent` ou `restore-intent`, observation (—, `old`, `new`) | `retained\<prev-op>` altéré | Code 3, rien écrit ; trois exécutions, même diagnostic | `TestRecoveryDoesNotRestoreAnAlteredRetained` |
 | Idem | Aucun, `retained\<prev-op>` conforme | `restore-intent` s'il manque, M3, `rolled-back` | `TestRecoveryRestoresAVerifiedRetained` |
@@ -1539,7 +1547,7 @@ système
 | M1 refusé, erreur 5, fichier ouvert dans `current` | `rolled-back` aussitôt, code 1, `current` inchangé | `TestRetirementRefusedByAnOpenFileRollsBack` |
 | M2 refusé, observation (—, `old`, `new`) confirmée | Restauration vérifiée, `restore-intent`, M3, `rolled-back`, code 1 | `TestPromotionRefusedRestoresCurrent` |
 | M2 refusé puis M3 refusé | `rollback-failed`, code 3, les deux emplacements intacts | `TestRestorationRefusedIsRecordedOnce` |
-| `current` réapparu après `promote-intent`, avant M2 | M2 refusé sans écrasement ; nouvelle observation : code 3, aucune restauration, rien d'autre déplacé | `TestCurrentReappearingBetweenMovesIsNeverOverwritten` |
+| `current` réapparu après `promote-intent`, avant M2 | M2 refusé sans écrasement ; nouvelle observation : code 3, ni promotion ni restauration, objets conservés en place, rien d'autre déplacé | `TestCurrentReappearingBetweenMovesIsNeverOverwritten` |
 | Post-contrôle de M2 contraire | Code 3, aucun autre déplacement | `TestPromotionPostcheckMismatchStops` |
 | Annulation demandée pendant la section critique | Bascule ou rollback menés à terme | `TestCancellationDuringRotationIsDeferred` |
 
@@ -1589,12 +1597,14 @@ les features figure dans la table d'ADR 0007, `current-exists` compris,
 refusé par un fichier ouvert dans `current`,
 `TestRotationRefusedByAnOpenFileOnWindows` ; processus tué pendant le
 staging d'une rotation puis `--recover`,
-`TestSyncKilledDuringRotationThenRecovered`. Les tests B2b
-`TestExistingCurrentIsRefused` et `TestSyncApplyRefusesToReplaceCurrent`
-deviennent des tests de rotation : `current-exists` n'est plus attendu dans
-le chemin nominal. Pilote B2c exécuté par le propriétaire après la fusion :
-sauvegarde modifiée en jeu, rotation, `retained\` conforme, puis
-idempotence.
+`TestSyncKilledDuringRotationThenRecovered` ; coffre synthétique copié
+dans un autre dossier : plan, `--apply` et `--recover` en code 3, coffre
+copié identique octet pour octet, `TestCopiedVaultIsRefusedWithoutWriting`.
+Les tests B2b `TestExistingCurrentIsRefused` et
+`TestSyncApplyRefusesToReplaceCurrent` deviennent des tests de rotation :
+`current-exists` n'est plus attendu dans le chemin nominal. Pilote B2c
+exécuté par le propriétaire après la fusion : sauvegarde modifiée en jeu,
+rotation, `retained\` conforme, puis idempotence.
 
 ### 9.4 Gates
 
@@ -1630,9 +1640,11 @@ Limites à documenter honnêtement : pas d'instantané atomique, jeu fermé ;
 même disque physique ≠ sauvegarde hors disque ; fenêtre d'absence de
 `current` pendant une rotation ; coupure de courant : état récupérable,
 dernière étape non garantie ; générations, stagings et temporaires non
-nettoyés ; attributs, ACL, flux alternatifs et dates de création non copiés ;
-NTFS seul ; `subst` non détecté ; SHA-256 identique ≠ partie chargeable ;
-receipts et sorties contiennent des chemins locaux.
+nettoyés ; coffre copié ou déplacé non pris en charge, code 3 sans
+écriture, sans présumer une corruption ; attributs, ACL, flux alternatifs et
+dates de création non copiés ; NTFS seul ; `subst` non détecté ; SHA-256
+identique ≠ partie chargeable ; receipts et sorties contiennent des chemins
+locaux.
 
 ## 11. Rollout, rollback et pilotes
 
@@ -1757,6 +1769,7 @@ dans un lot ultérieur ; B2 les bloque sans les résoudre :
 | Adoption, migration ou intervention sur un coffre non créé par Savewarden | Refus générique (§4.2, D17) |
 | Rétention et nettoyage des générations, stagings et temporaires | Aucune suppression (D7) |
 | Extension de la liste des erreurs retentées | Liste fermée 32 et 33 (V4) |
+| Portabilité d'un coffre copié ou déplacé : requalification ou import contrôlé | Code 3, rien écrit, aucune identité adoptée ni réécrite ; diagnostic d'écart d'identité, sans présumer de corruption (§0.8) |
 
 ## 14. Risques
 
@@ -1807,3 +1820,4 @@ auto-approbation**.
 | 0.2, amendements de revue finale | 29 octobre 2026 | commit local suivant `561ed7a` | Revue intégrale de `561ed7a` : protocole d'initialisation I1 à I9 (P0-1) ; enveloppe de récupération E1 à E4 (P0-2) ; rollback de rotation M1 à M4 en tableau fermé (P0-3) ; observations admises avant publication, état `metadata only`, ordre des handles autour de la bascule, provenance des champs d'un receipt reconstruit, nuance après coupure (P1-1 à P1-5) |
 | 0.2, cadrage B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Arbitrages A1 à A5 et M3 du propriétaire (§0.8) ; ADR 0006 amendé ; §8.3 et §9.3 amendés ; impacts sur ADR 0004 et 0007 recensés ; pas de GO de développement B2c |
 | 0.2, revue du cadrage B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Corrections R1 à R5 du propriétaire (§0.8) : M3 sans `current`, génération précédente reconnue par son identité publiée, fenêtre M1–M2 et restaurations vérifiées, fenêtres résiduelles du verrou, codes B2b et `current-exists` historique dans ADR 0007 ; §4.5 et §8.3 ajustés ; matrice du §9.3 nommée test par test ; pas de GO de développement B2c |
+| 0.2, effets de la revue B2c | 29 octobre 2026 | local, branche `docs/b2c-framing` | Trois effets arbitrés par le propriétaire (§0.8) : coffre copié ou déplacé refusé sous condition, portabilité reportée (§13) ; M3 strict validé ; `current` réapparu entre M1 et M2 validé ; §4.5, §8.3, §9.3 et §10 ajustés ; pas de GO de développement B2c |
