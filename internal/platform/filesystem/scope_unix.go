@@ -23,7 +23,7 @@ func openScope(root string) (*Scope, error) {
 	if !filepath.IsAbs(root) {
 		// A Windows volume such as D:\ is a relative name here; never let it
 		// resolve against the working directory.
-		return nil, fmt.Errorf("volume %s is not available on %s: inspect supports Windows installations only", root, runtime.GOOS)
+		return nil, fmt.Errorf("volume %s is not available on %s: Savewarden supports Windows installations only", root, runtime.GOOS)
 	}
 	scopeRoot, err := os.OpenRoot(root)
 	if err != nil {
