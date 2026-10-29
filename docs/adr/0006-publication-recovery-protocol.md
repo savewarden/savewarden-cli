@@ -267,7 +267,7 @@ Récupération `--recover --apply` d'une première publication :
 
 | Dernier validé | Observation (`C`, `S`) | Action |
 | --- | --- | --- |
-| Aucun : dossier d'opération vide ou temporaires `001` seuls | (—, —) | `001-abandoned` |
+| Aucun : dossier d'opération vide ou temporaires `001` seuls | (—, —), ou un `current` publié par une opération antérieure : seul `staging\<op>` doit manquer (I8) | `001-abandoned` |
 | `planned` | (—, —) | `abandoned` |
 | `staging-intent` | (—, —), ou (—, dossier ordinaire sans point d'analyse) | `abandoned` ; staging laissé en place, ni lu ni déplacé |
 | `staged`, `verified` | (—, `new`) | `abandoned` ; staging laissé en place |

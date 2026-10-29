@@ -333,8 +333,12 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 // (envelope E3) and stops in code 3.
 func (o *operation) unpublish(retried bool) error {
 	moved, err := o.switchTo(o.game+"/"+currentDir, o.stagingDir(), o.staging)
+	var unexplained *unexplainedError
 	switch {
 	case err == nil:
+	case errors.As(err, &unexplained):
+		// An object no record explains: nothing is recorded or moved.
+		return o.intervene(err.Error())
 	case moved:
 		return o.intervene("the rollback did not end as recorded: " + err.Error())
 	default:

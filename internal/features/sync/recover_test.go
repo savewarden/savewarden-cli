@@ -550,3 +550,43 @@ func TestAnOpenOperationIsAnIntervention(t *testing.T) {
 		terminal(t, name, f)
 	}
 }
+
+// The move back of recovery checks identities first, like the switch: an
+// object that appears under staging\<op> after the plan under lock is an
+// ambiguity, and nothing is recorded or moved.
+func TestRecoveryMoveBackRefusesAnUnexplainedStaging(t *testing.T) {
+	r := crashAt(t, "Move games/synthetic-game/staging/"+op1+" games/synthetic-game/current", true)
+	r.f.get(gameDir + `\current\saves\1.save`).data = []byte("ONE")
+	vaults := newFakeVaults(r.f)
+	racing := &racingVaults{fakeVaults: vaults, from: "never"}
+	appearing := &appearingCurrent{racingVaults: racing, staging: "games/synthetic-game/current", appear: func() {
+		r.f.mkdir(gameDir + `\staging\` + op1)
+	}}
+	_, err := service(r.f, manifest()).Recover(context.Background(), sync.Request{ManifestPath: "m.yaml", VaultPath: vaultPath},
+		sync.Writer{Vaults: appearing, Clock: &fakeClock{now: at.Add(timeLater)}, Random: strings.NewReader("abcd"), ToolVersion: "dev"})
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "no record explains") {
+		t.Fatalf("recovery: %v", err)
+	}
+	if got := lastStep(r.f, op1); got != "unpublish-intent" {
+		t.Fatalf("journal ends at %q, want unpublish-intent and nothing after", got)
+	}
+}
+
+// Resuming an initialization that fails again says so in its own words.
+func TestFailedInitializationResumeIsAnIntervention(t *testing.T) {
+	r := crashAt(t, "Close savewarden-vault.json.tmp-1", false)
+	vaults := newFakeVaults(r.f)
+	vaults.failWrite = func(call string) error {
+		if strings.HasPrefix(call, "Close savewarden-vault.json.tmp-") {
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	result, err := recoverWith(r.f, vaults)
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention ||
+		!strings.Contains(err.Error(), "the vault initialization is still interrupted") {
+		t.Fatalf("%+v, %v", result, err)
+	}
+}

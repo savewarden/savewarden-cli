@@ -224,6 +224,10 @@ func (o *operation) unfinished(err error) error {
 		return err
 	}
 	o.effect = EffectIntervention
+	if o.op == "" {
+		// Resuming a vault initialization: only its marker was at stake.
+		return &InterventionError{Cause: oneLine(err.Error()) + "; the vault initialization is still interrupted, run sync --recover --apply again"}
+	}
 	return &InterventionError{Operation: o.op, Cause: oneLine(err.Error()) + "; the operation is not closed, run sync --recover"}
 }
 
