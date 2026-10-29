@@ -32,12 +32,14 @@ release n'a eu lieu.
 | `9591ad7` | Corrections de la revue du remplacement | 4, suite |
 | `f5ba069` | Corrections de la revue de sécurité | 7, préalable |
 | `b59835f` | Corrections de la vérification indépendante des deux commits précédents | 7, préalable |
-| ce commit | Rapport de validation | 7 |
+| `bf306fd` | Rapport de validation | 7 |
+| ce commit | Deux constats du premier lint de la CI, sur `bf306fd` : `%w` dans `checkRetired`, loi de De Morgan dans un test | 7, suite |
 
-Écart au découpage, admis par A5 et expliqué : cinq commits s'ajoutent aux
+Écart au découpage, admis par A5 et expliqué : six commits s'ajoutent aux
 sept prévus. Deux portent des tests nommés par la matrice et oubliés par les
 commits 4 et 5 ; trois portent les corrections des revues, gardées séparées
-pour que chaque revue reste traçable à son SHA. Chacun des commits 1 à 4 passe
+pour que chaque revue reste traçable à son SHA ; le dernier corrige les deux
+constats du premier lint de la CI. Chacun des commits 1 à 4 passe
 la suite complète à son propre SHA, vérifié dans un worktree temporaire.
 
 ## Décisions du propriétaire intégrées
@@ -159,7 +161,8 @@ elles relèvent de la décision du propriétaire avant toute fusion.
 | `go test ./.github/scripts`, `go run ./.github/scripts` | Succès |
 | `go build -trimpath`, Windows et Linux | Succès, compilation seulement pour Linux |
 | Commits 1 à 4, chacun à son SHA | Suite complète verte |
-| golangci-lint, govulncheck | **Non exécutés** : outils absents sur ce poste ; à prouver par la CI |
+| golangci-lint 2.14.0, `run ./... ./.github/scripts`, Windows et `GOOS=linux` | `0 issues` après le commit de correction ; non exécuté avant `bf306fd`, dont la CI a relevé deux constats |
+| govulncheck | **Non exécuté** : outil absent sur ce poste ; à prouver par la CI |
 | `go test -race` | **Non exécuté** : pas de cgo local ; à prouver par le job Linux de la CI |
 
 ## Limites et suites

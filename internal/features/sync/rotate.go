@@ -192,8 +192,11 @@ func (o *operation) checkRetired() error {
 	if err != nil {
 		return err
 	}
-	if id, err := o.vault.Identity(o.retainedDir()); err != nil || id != o.old {
-		return fmt.Errorf("%s was replaced while it was read, or cannot be checked: %v %v", o.retainedDir(), id, err)
+	switch id, err := o.vault.Identity(o.retainedDir()); {
+	case err != nil:
+		return fmt.Errorf("%s cannot be checked after it was read: %w", o.retainedDir(), err)
+	case id != o.old:
+		return fmt.Errorf("%s was replaced while it was read: it is %s, not the directory %s recorded by planned", o.retainedDir(), id, o.old)
 	}
 	if len(differences) > 0 {
 		first := differences[0]

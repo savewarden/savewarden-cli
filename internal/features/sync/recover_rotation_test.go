@@ -293,7 +293,7 @@ func TestRotationRecoveryRows(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			f := row.state(t)
 			rec, err := recoverPlan(f)
-			if rec.Action != row.action && !(row.last == "" && err != nil) {
+			if rec.Action != row.action && (row.last != "" || err == nil) {
 				t.Fatalf("recovery plan %q, %v; want %q", rec.Action, err, row.action)
 			}
 			before := snapshot(f, `F:\`)
