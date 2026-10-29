@@ -15,13 +15,18 @@ func recoverPlan(f *fakeFS) (sync.Recovery, error) {
 	return service(f, manifest()).RecoverPlan(context.Background(), sync.Request{ManifestPath: "m.yaml", VaultPath: vaultPath})
 }
 
-// recoverWith runs --recover --apply in a new process on the same disk.
+// recoverWith runs --recover --apply in a new process on the same disk,
+// later than the runs it recovers: a first publication at, a rotation one
+// hour later.
 func recoverWith(f *fakeFS, vaults *fakeVaults) (sync.Result, error) {
 	return service(f, manifest()).Recover(context.Background(), sync.Request{ManifestPath: "m.yaml", VaultPath: vaultPath},
-		writer(vaults, &fakeClock{now: at.Add(timeLater)}))
+		writer(vaults, &fakeClock{now: at.Add(recoveryLater)}))
 }
 
-const timeLater = 3600e9
+const (
+	timeLater     = 3600e9
+	recoveryLater = 5400e9
+)
 
 // lastStep returns the last committed step of op, or "" without journal.
 func lastStep(f *fakeFS, op string) string {

@@ -90,11 +90,26 @@ func (o *operation) rotate() error {
 // observation first, then restore-intent and M3, verified restoration of
 // ADR 0006 §5. A refused M3 is recorded once as rollback-failed (E3).
 func (o *operation) restore(cause error) error {
-	if err := o.checkRetired(); err != nil {
-		return o.intervene(fmt.Sprintf("promotion failed (%v) and %v; nothing restored", cause, err))
+	if err := o.restoreOld(fmt.Sprintf("promotion failed (%v), then ", cause), true, false); err != nil {
+		return err
 	}
-	if err := o.record(backup.StepRestoreIntent, backup.StepValues{Retained: o.old}); err != nil {
-		return o.intervene(fmt.Sprintf("promotion failed (%v) and the restoration could not be recorded: %v", cause, err))
+	return fmt.Errorf("promotion failed, current restored: %w", cause)
+}
+
+// restoreOld is the verified restoration of ADR 0006 §5, during a run as
+// during recovery: the observation (—, old, new) with retained read in
+// full, restore-intent unless already committed, M3, then rolled-back. An
+// altered retained is never put back: code 3, nothing moved or recorded.
+// A refused M3 is recorded as rollback-failed unless one already follows
+// the intent (E3). why prefixes the diagnostics.
+func (o *operation) restoreOld(why string, intent, retried bool) error {
+	if err := o.checkRetired(); err != nil {
+		return o.intervene(fmt.Sprintf("%s%v; nothing restored", why, err))
+	}
+	if intent {
+		if err := o.record(backup.StepRestoreIntent, backup.StepValues{Retained: o.old}); err != nil {
+			return o.intervene(fmt.Sprintf("%sthe restoration could not be recorded: %v", why, err))
+		}
 	}
 	moved, err := o.switchTo(o.retainedDir(), o.game+"/"+currentDir, o.old)
 	var unexplained *unexplainedError
@@ -105,17 +120,42 @@ func (o *operation) restore(cause error) error {
 	case moved:
 		return o.intervene("the restoration did not end as recorded: " + err.Error())
 	default:
-		if recordErr := o.record(backup.StepRollbackFailed, backup.StepValues{Text: oneLine(err.Error())}); recordErr != nil {
-			return o.intervene(fmt.Sprintf("restoration failed (%v) and could not be recorded: %v", err, recordErr))
+		if !retried {
+			if recordErr := o.record(backup.StepRollbackFailed, backup.StepValues{Text: oneLine(err.Error())}); recordErr != nil {
+				return o.intervene(fmt.Sprintf("%sthe restoration failed (%v) and could not be recorded: %v", why, err, recordErr))
+			}
 		}
-		return o.intervene(fmt.Sprintf("promotion failed (%v), then the restoration (%v); the old generation is intact in %s, "+
-			"the new one in %s; close the programs that use the vault, then run sync --recover --apply", cause, err, o.retainedDir(), o.stagingDir()))
+		return o.intervene(fmt.Sprintf("%sthe restoration failed (%v); the old generation is intact in %s, the new one in %s; "+
+			"close the programs that use the vault, then run sync --recover --apply", why, err, o.retainedDir(), o.stagingDir()))
 	}
 	if err := o.record(backup.StepRolledBack, backup.StepValues{}); err != nil {
 		return o.intervene("current was restored but the journal is not closed: " + err.Error())
 	}
 	o.critical, o.effect = false, EffectRolledBack
-	return fmt.Errorf("promotion failed, current restored: %w", cause)
+	return nil
+}
+
+// unpromote moves the new current back to staging\<op> after
+// unpromote-intent (M4), then restores the old generation. A refused M4 is
+// recorded as rollback-failed unless one already follows the intent (E3).
+func (o *operation) unpromote(retried bool) error {
+	moved, err := o.switchTo(o.game+"/"+currentDir, o.stagingDir(), o.staging)
+	var unexplained *unexplainedError
+	switch {
+	case err == nil:
+	case errors.As(err, &unexplained):
+		return o.intervene(err.Error())
+	case moved:
+		return o.intervene("the move back to staging did not end as recorded: " + err.Error())
+	default:
+		if !retried {
+			if recordErr := o.record(backup.StepRollbackFailed, backup.StepValues{Text: oneLine(err.Error())}); recordErr != nil {
+				return o.intervene(fmt.Sprintf("the move back to staging failed (%v) and could not be recorded: %v", err, recordErr))
+			}
+		}
+		return o.intervene("the move back to staging failed: " + err.Error() + "; close the programs that use the vault, then run sync --recover --apply again")
+	}
+	return o.restoreOld("", true, false)
 }
 
 // checkRetired requires the observation (—, old, new) after M1: current
