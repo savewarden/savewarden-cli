@@ -317,7 +317,7 @@ trouvée sous chaque nom : `C` pour `current`, `S` pour `staging\<op>`, `R` pour
 `retained\<prev-op>`. `new` est l'identité du staging relevée dans `staged` ;
 `old` celle de l'ancien `current`, relevée sous verrou et fixée par
 `current_identity` de `planned` (§5) ; `—` un nom absent. Toute autre
-identité sous l'un de ces noms est une ambiguïté.
+identité sous l'un de ces noms, notée `other`, est une ambiguïté.
 
 Récupération `--recover --apply` d'une première publication :
 
@@ -450,9 +450,20 @@ l'ancien `current` est relevée une fois, sous verrou, et ne change plus :
    sous `current` n'a pas de provenance démontrée : il n'est ni lu comme une
    génération, ni déplacé, ni écrasé, et l'ancienne génération reste dans
    `retained\<prev-op>`, momentanément indisponible sous son nom courant ;
-   le diagnostic nomme l'ambiguïté. Le journal reste à `retire-intent` ; sa
-   récupération suit la ligne (—, `old`, `new`) du tableau ci-dessous, sans
-   rien déduire.
+   le diagnostic nomme l'ambiguïté. Le journal reste à `retire-intent`. Sa
+   récupération ne déduit rien de cet écart : elle classe l'observation
+   qu'elle trouve, selon le tableau ci-dessous :
+   - objet inattendu sous `current`, (`other`, `old`, `new`), ou
+     `retained\<prev-op>` d'une autre identité, (—, `other`, `new`) : aucune
+     ligne ne s'applique ; fail-closed, code 3, rien écrit, enregistré ni
+     déplacé tant que cet objet reste présent ; `retained\<prev-op>` et
+     `staging\<op>` restent intacts ;
+   - `retained\<prev-op>` de même identité au contenu altéré, (—, `old`,
+     `new`) : la ligne prévue exige une restauration vérifiée, qui échoue :
+     code 3, rien écrit ;
+   - une récupération n'est possible que lorsqu'une observation ultérieure
+     correspond entièrement à une ligne du tableau, toutes ses vérifications
+     comprises.
 
 **Fenêtres résiduelles.** `sync.lock` n'exclut qu'une autre opération
 Savewarden : il n'empêche pas un autre processus d'écrire dans `current` ou
@@ -507,6 +518,7 @@ Récupération, tableau fermé :
 | `restore-intent` | (—, `old`, `new`) | M3 non effectué : restauration vérifiée ; conforme : M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
 | `restore-intent` | (`old`, —, `new`) | M3 effectué : `rolled-back` |
 | `rollback-failed` | L'une des observations prévues pour l'intention qui le précède | Comme la ligne de cette intention ; nouvel échec du déplacement : code 3, sans nouvel enregistrement (E3) |
+| `retire-intent`, `promote-intent`, `unpromote-intent`, `restore-intent` ou `rollback-failed` | (`other`, `old`, `new`) : objet inattendu sous `current` | Aucune ligne ne s'applique : fail-closed, code 3, rien écrit, enregistré ni déplacé ; objet, `retained\<prev-op>` et `staging\<op>` laissés en place, à chaque exécution, tant que l'objet est présent |
 | `published` | (`new`, `old`, —), receipt conforme | Rien |
 | Tout autre cas | — | Fail-closed, code 3 |
 
@@ -695,3 +707,9 @@ relève de son propriétaire.
   d'import contrôlé (§4) ; règle M3 plus stricte que le code B2b validée ;
   `current` réapparu entre M1 et M2 : code 3, ni promotion ni restauration,
   objets conservés en place (§5).
+- **29 octobre 2026, cohérence de la récupération après M1**, sur revue du
+  propriétaire : un objet inattendu sous `current`, noté `other`, ou un
+  `retained\<prev-op>` d'une autre identité ne relève d'aucune ligne du
+  tableau : code 3, rien écrit, enregistré ni déplacé tant qu'il reste
+  présent ; une récupération ne reprend que sur une observation entièrement
+  conforme à une ligne, toutes ses vérifications comprises (§4, §5).
