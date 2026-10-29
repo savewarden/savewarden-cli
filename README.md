@@ -16,7 +16,7 @@ release ni installation via package manager.
 
 ## Compiler et utiliser
 
-Prérequis : Git et Go **1.27.2**. Depuis la racine du dépôt :
+Prérequis : Git et Go **1.27.3**. Depuis la racine du dépôt :
 
 ```sh
 go mod download

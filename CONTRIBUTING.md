@@ -1,6 +1,6 @@
 # Contribuer à Savewarden
 
-Prérequis : Go **1.27.2**, Git. Outils de contrôle : golangci-lint **2.14.0**
+Prérequis : Go **1.27.3**, Git. Outils de contrôle : golangci-lint **2.14.0**
 et govulncheck **1.6.0**, exécutés depuis leurs modules Go versionnés. Les
 outils ne font pas partie du binaire Savewarden.
 

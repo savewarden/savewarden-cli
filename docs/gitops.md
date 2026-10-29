@@ -56,7 +56,7 @@ Les noms à configurer comme checks requis sont :
 
 Verify : modules vérifiés, tidy sans diff, gofmt, vet, tests, smoke binaire
 et build CLI. Race sur Linux. Lint 2.14.0 et govulncheck 1.6.0 via modules Go
-épinglés. Go 1.27.2 fixé dans go.mod ; OS explicitement versionnés, sans `latest`.
+épinglés. Go 1.27.3 fixé dans go.mod ; OS explicitement versionnés, sans `latest`.
 Les Actions sont épinglées par SHA complet ; les pins sont contrôlés.
 Ces labels OS sont vérifiés dans le catalogue `actions/runner-images`, mais
 les images hébergées continuent à recevoir leurs mises à jour.
