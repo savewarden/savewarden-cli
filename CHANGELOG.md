@@ -17,8 +17,9 @@ Aucun tag ni release n'est publié par le bootstrap.
   Le plan qualifie le volume du coffre, NTFS sur lecteur local fixe ou
   amovible, sinon code 1, et exige l'espace de la génération complète plus
   max(64 Mio, 5 %) disponible pour l'utilisateur, sinon `insufficient-space`.
-- Première publication par la feature `sync`, pas encore exposée par la
-  CLI : initialisation du coffre I2 à I9 en créations exclusives, verrou,
+- Commande `sync --apply`, `--recover` et `--recover --apply`, avec la ligne
+  d'état du coffre en dernière ligne de stderr (ADR 0007).
+- Première publication par la feature `sync` : initialisation du coffre I2 à I9 en créations exclusives, verrou,
   état et espace relus sous verrou, journal validé par renommage avec
   l'enveloppe E1 et les retries bornés sur les erreurs 32 et 33, copie hachée
   avec détection de changement de la source, second inventaire, relecture du
@@ -27,7 +28,7 @@ Aucun tag ni release n'est publié par le bootstrap.
   `current-exists`. Énumération des crashs avant et après chaque appel au
   coffre.
 - Récupération d'une première publication interrompue par la feature
-  `sync`, pas encore exposée par la CLI : plan de récupération sans
+  `sync` : plan de récupération sans
   écriture, observation des identités de `current` et du staging,
   classement d'ADR 0006, puis exécution sous verrou après relecture ;
   marqueur repris, `abandoned`, `rolled-back`, `current` revérifié puis
@@ -98,8 +99,11 @@ Aucun tag ni release n'est publié par le bootstrap.
 
 ### Limits
 
-- `sync` ne fait que planifier : `--apply` et `--recover` arrivent avec B2b
-  et B2c ; ReFS n'est pas encore qualifié.
+- `sync --apply` publie la première génération d'un jeu seulement : la
+  rotation de `current`, `--allow-removals` et `--accept-missing-source`
+  arrivent avec B2c ; ReFS n'est pas encore qualifié ; la durabilité d'un
+  renommage après une coupure de courant n'est pas garantie par Windows, la
+  récupération repose sur l'observation.
 - snapshot, restore et doctor restent à implémenter ; pas de sortie JSON de
   la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et

@@ -1,9 +1,10 @@
 # Coffre Savewarden
 
 Un coffre est un dossier que Savewarden crée et dont il est le seul à écrire
-le contenu. `sync` y publiera, à partir de B2b, une copie vérifiée des sources
-d'un manifeste. Dans cette version, `sync` **planifie seulement** : il lit le
-coffre s'il existe et n'écrit rien. Les règles de publication et de
+le contenu. `sync --apply` y publie une copie vérifiée des sources d'un
+manifeste ; le plan, sans `--apply`, le lit sans rien écrire. Cette version
+publie la première génération d'un jeu ; la remplacer arrive avec le lot
+B2c. Les règles de publication et de
 récupération sont fixées par
 [ADR 0006](adr/0006-publication-recovery-protocol.md), le contrat de la
 commande par [ADR 0007](adr/0007-sync-contract-receipt-v1.md).
@@ -36,8 +37,9 @@ commande par [ADR 0007](adr/0007-sync-contract-receipt-v1.md).
 - **Distinct** de l'installation du jeu : ni elle, ni dedans, ni autour.
 - De préférence sur un **autre disque physique** que la source : une copie sur
   le même disque ne protège pas d'une panne de ce disque.
-- À partir de B2b : un volume **NTFS local**. ReFS, FAT32, exFAT et les
-  lecteurs réseau seront refusés.
+- Un volume **NTFS** sur un lecteur local, fixe ou amovible. ReFS, y compris
+  un Dev Drive, n'est pas encore qualifié ; FAT32, exFAT, les lecteurs réseau,
+  optiques et RAM sont refusés.
 
 Ne modifiez pas le contenu d'un coffre à la main. Savewarden compare la
 génération courante à son receipt avant toute publication : un écart bloque
@@ -55,8 +57,8 @@ supprime quoi que ce soit.
 
 | Cause | Ce qui s'est passé | Que faire |
 | --- | --- | --- |
-| `initialization-interrupted` | La création du coffre s'est arrêtée avant que son marqueur soit validé : le dossier ne contient que des fichiers `savewarden-vault.json.tmp-<k>` | Jusqu'à B2b, choisir un autre dossier pour le coffre. À partir de B2b, `sync --recover --apply` reprendra l'initialisation, explicitement |
-| `pending-operation` | Une opération s'est interrompue : son journal n'atteint pas d'étape terminale | Jusqu'à B2b, aucune opération ne peut exister. À partir de B2b, lancer `sync --recover` pour voir l'action prévue, puis `sync --recover --apply` |
+| `initialization-interrupted` | La création du coffre s'est arrêtée avant que son marqueur soit validé : le dossier ne contient que des fichiers `savewarden-vault.json.tmp-<k>` | `sync --recover --apply` valide un nouveau marqueur ; les temporaires restent en place. Un autre dossier vide reste toujours possible |
+| `pending-operation` | Une opération s'est interrompue : son journal n'atteint pas d'étape terminale | Lancer `sync --recover` pour voir l'action prévue, puis `sync --recover --apply` |
 | `unexpected-entry` | Une entrée n'a pas sa place : fichier ajouté à la main, staging sans journal, génération conservée sans receipt | Examiner l'entrée nommée ; si elle a été ajoutée à la main, la déplacer hors du coffre vous-même |
 | `journal-ambiguous` | Un journal est incomplet, corrompu, incohérent, ou deux opérations sont en attente pour un même jeu | Ne rien modifier. Conserver le coffre tel quel et demander une analyse ; Savewarden ne réparera jamais un journal ambigu |
 
@@ -66,11 +68,37 @@ Et pour une anomalie bloquante (code 2) liée au coffre :
 | --- | --- | --- |
 | `current-modified` | `current` ne correspond plus exactement à son receipt, n'en a pas, ou un receipt n'a plus de `current` | Comparer avec `inspect`, par un manifeste qui pointe sur `current` ; la résolution d'un tel écart relève d'une décision ultérieure. Un nouveau coffre reste toujours possible |
 
+## Récupérer une opération interrompue
+
+`sync --recover` lit le journal de l'opération et observe, par leur identité
+de fichier, ce que contiennent `current` et `staging\<op>`. Il n'agit que
+dans les cas prévus par
+[ADR 0006](adr/0006-publication-recovery-protocol.md) :
+
+| Situation | Action de `--recover --apply` | Ligne d'état |
+| --- | --- | --- |
+| Initialisation interrompue | Valide un nouveau marqueur | `metadata only; …` |
+| Opération arrêtée avant la publication, staging éventuel en place | Enregistre `abandoned` ; le staging reste, jamais lu ni déplacé | `current unchanged; operation <op> kept in staging` |
+| Publication voulue, renommage non effectué | Enregistre `rolled-back` | `rolled back <op>; current unchanged` |
+| Staging déjà devenu `current`, receipt absent ou non clos | Vérifie `current` entier contre le plan ; égal : écrit le receipt, reconstruit avec `recovered_at` et `recovered_by`, puis clôt ; différent : remet `current` en staging | `published <op>` ou `rolled back <op>; …` |
+| Remise en staging interrompue | La termine ; un échec est enregistré une fois, `rollback-failed`, code 3 | `rolled back <op>; …` ou `intervention required …` |
+
+Une interruption pendant la récupération elle-même laisse un état que la
+récupération suivante reconnaît. Tout le reste est une ambiguïté : code 3,
+rien n'est écrit ni déplacé, à chaque exécution.
+
+**Enveloppe épuisée.** Chaque fichier validé par renommage dispose de neuf
+essais : un enregistrement du journal, toutes étapes confondues, un receipt,
+le marqueur. Si neuf essais ont été interrompus, `recovery envelope
+exhausted` : Savewarden ne fait plus rien sur ce coffre. Ne supprimez aucun
+temporaire ; conservez le coffre tel quel pour analyse et utilisez, au
+besoin, un nouveau coffre.
+
 ## Espace disque
 
-Chaque publication copie la génération complète en staging. À partir de B2b,
-Savewarden exigera, avant d'écrire, la taille de la génération plus
-max(64 Mio, 5 %) d'espace disponible pour l'utilisateur. Les générations
+Chaque publication copie la génération complète en staging. Savewarden exige,
+au plan puis sous verrou, la taille de la génération plus max(64 Mio, 5 %)
+d'espace disponible pour l'utilisateur, quotas compris. Les générations
 remplacées et les stagings échoués ne sont jamais supprimés automatiquement :
 l'espace qu'ils occupent relève du propriétaire du coffre.
 

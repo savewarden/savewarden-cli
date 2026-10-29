@@ -51,8 +51,12 @@ le 24 octobre 2026. Détail dans [le rapport B1](../validation/b1.md). L'étape
 facultative d'écriture en jeu n'est pas consignée ; aucune empreinte
 individuelle n'est versionnée.
 
-B2 copiera seulement après plan/dry-run, choix explicite de destination et
-autorisation ; pas de suppression de la source. B3 ajoutera un snapshot neuf
+B2 copie seulement après plan, choix explicite de destination et
+autorisation ; pas de suppression de la source. Le pilote B2b, première
+publication vers un coffre neuf choisi par le propriétaire, attend son propre
+Human GO après la fusion de B2b ; il n'a pas été exécuté. L'ancien coffre du
+pilote, non vide et sans marqueur, est refusé par la règle générique du
+coffre, jamais adopté. B3 ajoutera un snapshot neuf
 et immuable. B4 restaurera un snapshot dans un dossier **isolé**. B5 contrôlera
 manifestes/receipts/hash et validera le pilote complet avant une RC.
 

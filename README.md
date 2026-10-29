@@ -6,11 +6,13 @@ Savewarden vise à inspecter, centraliser, vérifier et restaurer les sauvegarde
 de jeux à partir de sources explicitement choisies. Le moteur sera indépendant
 de la CLI, local-first et Windows-first.
 
-**État actuel : lot B2a, version `dev`.** La commande `inspect` lit un
+**État actuel : lot B2b, version `dev`.** La commande `inspect` lit un
 [manifeste v1](docs/manifest-v1.md) et inventorie en lecture seule les dossiers
-de sauvegarde qu'il déclare. La commande `sync` **planifie**, en lecture seule
-elle aussi, leur copie vers un [coffre](docs/vault.md). Rien n'est copié,
-déplacé, écrit ni exécuté : la copie arrive avec le lot B2b. Les commandes
+de sauvegarde qu'il déclare. La commande `sync` planifie, en lecture seule,
+leur copie vers un [coffre](docs/vault.md) ; avec `--apply`, elle y publie la
+première génération du jeu, vérifiée, et `--recover` reprend une opération
+interrompue. Remplacer une génération existante arrive avec le lot B2c. Les
+sources ne sont que lues ; rien n'est jamais supprimé ni écrasé. Les commandes
 `snapshot`, `restore` et `doctor` ne sont pas encore disponibles. Aucune
 release ni installation via package manager.
 
@@ -83,18 +85,32 @@ rapport à la génération courante du coffre, puis les anomalies. Rien n'est
 écrit, pas même le coffre. Code **0** : plan sans anomalie bloquante.
 Code **2** : plan bloqué, par exemple une source requise absente ou un fichier
 retiré. Code **3** : le coffre demande une intervention. Code **1** : manifeste
-ou coffre invalide, ou erreur. Détails : [`savewarden sync`](docs/commands/sync.md).
+ou coffre invalide, ou erreur.
+
+Pour publier, toujours jeu et launcher fermés :
+
+```powershell
+.\bin\savewarden.exe sync --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre' --apply
+```
+
+La copie passe par un staging, vérifié en SHA-256 avant de devenir `current`,
+avec un receipt. La dernière ligne de stderr dit ce que contient le coffre,
+par exemple `savewarden: vault: published <opération>`. Après une
+interruption, `sync --recover` montre la récupération prévue et
+`sync --recover --apply` l'exécute. Détails : [`savewarden sync`](docs/commands/sync.md).
 
 ## Sécurité et support
 
 - `inspect` ne lit que les dossiers déclarés. Il ne suit aucun lien,
   jonction ni point d'analyse, et ne lit pas les placeholders cloud.
-- `sync` planifie sans écrire ; il refuse tout dossier non vide qui n'est pas
-  un coffre Savewarden et tout coffre qui chevauche l'installation.
+- `sync` refuse tout dossier non vide qui n'est pas un coffre Savewarden et
+  tout coffre qui chevauche l'installation. Sans `--apply`, il n'écrit rien.
+- `--apply` n'écrit que dans le coffre, par créations exclusives et
+  renommages qui ne remplacent rien ; chaque publication passe par un staging
+  vérifié en SHA-256 et un journal, et toute ambiguïté arrête tout en code 3.
 - Le code de production est gardé par un test qui refuse les API d'écriture,
-  d'exécution et de réseau. Les tests utilisent des données synthétiques.
-- Les prochaines mutations exigeront une destination explicite, un plan,
-  une copie en staging et une vérification SHA-256 avant publication.
+  d'exécution et de réseau, sauf dans le seul package `platform/vault`, en
+  création seule. Les tests utilisent des données synthétiques.
 - Les sauvegardes sources et les snapshots approuvés ne seront jamais supprimés
   silencieusement.
 - Une copie sur le même disque physique ne protège pas contre la panne du disque.
