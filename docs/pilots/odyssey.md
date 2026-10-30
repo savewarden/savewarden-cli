@@ -89,6 +89,36 @@ prouvés par les tests synthétiques et la CI. Détail dans
 [le rapport B2b](../validation/b2b.md#pilote-b2b). Aucune empreinte
 individuelle, aucun receipt réel ni aucun chemin personnel n'est versionné.
 
+### Résultat B2c — 30 octobre 2026
+
+Exécuté par le propriétaire sous Windows 11, après la fusion de B2c, avec un
+binaire compilé depuis un worktree détaché au commit de fusion `d69ff0c`, dont
+l'empreinte est vérifiée par le préflight juste avant la rotation, puis par
+chaque contrôle suivant. Première rotation, dans le coffre du pilote B2b,
+après une sauvegarde en jeu :
+
+- préflight, plan seul : code `0` deux fois, plans identiques, `plan: changes`,
+  `current` égal à l'opération du pilote B2b ; **14 fichiers**, dont 8
+  modifiés, 6 inchangés, aucun ajout ni retrait, aucune anomalie ; rien à
+  récupérer ; coffre inchangé ;
+- `sync --apply` : code `0`, `published <op>`, 14 fichiers et 9 566 606 octets
+  vérifiés par SHA-256, aucun drapeau ; la ligne `retained:` nomme la
+  génération du pilote B2b ;
+- génération conservée relue par `inspect` : 14 fichiers, 9 520 705 octets,
+  la taille publiée par le pilote B2b ; fichiers, tailles, SHA-256 et
+  dossiers égaux à son receipt ; le nouveau receipt la nomme `previous` ;
+  `current` égal au sien ;
+- plan suivant `up to date`, puis second `sync --apply` : code `0`,
+  `operation: none`, `not modified`, plan identique, empreinte d'inventaire et
+  de contenu du coffre inchangée ; `IdempotencePassed = True`.
+
+Qualification fonctionnelle : à prononcer par le propriétaire. Le pilote
+qualifie la rotation nominale ; rollback, crashs et récupération restent
+prouvés par les tests synthétiques, les tests Windows réels et la CI. Détail
+dans [le rapport B2c](../validation/b2c.md#pilote-b2c). Aucune empreinte
+individuelle, aucun receipt réel, aucun identifiant d'opération, aucun nom de
+profil ni aucun chemin personnel n'est versionné.
+
 B2 copie seulement après plan, choix explicite de destination et
 autorisation ; pas de suppression de la source. L'ancien coffre du pilote,
 non vide et sans marqueur, est refusé par la règle générique du coffre,
