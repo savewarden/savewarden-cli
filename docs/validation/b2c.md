@@ -3,8 +3,9 @@
 Rotation de `current` et récupération complète de `sync`, selon le plan B2
 v0.2 §0.8, §8.3 et §9.3, et ADR 0006 amendé, référence de sécurité. Ce
 rapport consigne les preuves locales, les revues indépendantes et ce qui reste
-à établir. Aucun push, aucune PR, aucune fusion, aucun pilote, aucun tag ni
-release n'a eu lieu.
+à établir. À sa rédaction, aucun push, aucune PR, aucune fusion ni aucun
+pilote n'avait eu lieu ; la PR, sa CI, la fusion et le pilote sont consignés
+ensuite, sur GO distincts. Aucun tag ni release.
 
 ## Cadre
 
@@ -12,10 +13,10 @@ release n'a eu lieu.
 | --- | --- |
 | GO humain | « Go pour la suite » du propriétaire, le 29 octobre 2026, après la clôture de la revue de conception sur `a7bc69c` ; GO de développement, local, sans publication Git |
 | Branche | `feat/b2c-rotation`, locale, créée depuis `docs/b2c-framing` en `a7bc69c`, elle-même sur `54b1c02`, tête de `release/v0.1.0-a1` ; les neuf commits de cadrage sont donc en tête de la branche ; Go 1.27.3 |
-| PR | Non ouverte : aucun push autorisé |
+| PR | Non ouverte à la rédaction ; puis, sur GO distincts, [savewarden/savewarden-cli#8](https://github.com/savewarden/savewarden-cli/pull/8), fusionnée dans `release/v0.1.0-a1` par le merge commit `d69ff0c` ; branche supprimée, sur le remote et en local |
 | Écritures | Seul `internal/platform/vault` écrit, ADR 0005 ; B2c n'ajoute ni API d'écriture, ni port, ni méthode ; `git diff --stat 54b1c02..` sur `internal/app`, `internal/platform`, ADR 0005, `go.mod`, `go.sum` et `.github` ne montre qu'un cas du test de contrat `app_test.go` |
 | Revues indépendantes | Revue du remplacement, point de contrôle du §8.3 ; revue de sécurité, préalable au rapport ; vérification indépendante de leurs corrections sur `f5ba069`. Trois agents en lecture seule, distincts de l'auteur ; ce ne sont pas des approbations humaines. Consignées ci-dessous |
-| Pilote B2c | Non exécuté : il est exécuté par le propriétaire après la fusion, selon le [protocole B2c](../pilots/odyssey.md#protocole-b2c) |
+| Pilote B2c | Non exécuté à la fusion ; **exécuté par le propriétaire après fusion, le 30 octobre 2026**, selon le [protocole B2c](../pilots/odyssey.md#protocole-b2c), voir [Pilote B2c](#pilote-b2c) ; qualification fonctionnelle à prononcer par le propriétaire |
 
 ## Commits
 
@@ -33,7 +34,7 @@ release n'a eu lieu.
 | `f5ba069` | Corrections de la revue de sécurité | 7, préalable |
 | `b59835f` | Corrections de la vérification indépendante des deux commits précédents | 7, préalable |
 | `bf306fd` | Rapport de validation | 7 |
-| ce commit | Deux constats du premier lint de la CI, sur `bf306fd` : `%w` dans `checkRetired`, loi de De Morgan dans un test | 7, suite |
+| `d5d2037` | Deux constats du premier lint de la CI, sur `bf306fd` : `%w` dans `checkRetired`, loi de De Morgan dans un test | 7, suite |
 
 Écart au découpage, admis par A5 et expliqué : six commits s'ajoutent aux
 sept prévus. Deux portent des tests nommés par la matrice et oubliés par les
@@ -71,10 +72,10 @@ la suite complète à son propre SHA, vérifié dans un worktree temporaire.
 
 | # | Critère | Preuve |
 | --- | --- | --- |
-| 16 | Rotation réelle avec rollback, renommage refusé par un fichier ouvert ; génération conservée identique ; chaque ligne du §5.5 atteinte ; crash avant et après M1 à M4 et pendant chaque validation ; §5.9 ; ancien `current` toujours intact | Windows réel : `TestRotationEndToEnd`, `retained` relu par `inspect` aux SHA-256 de son receipt ; `TestRotationRefusedByAnOpenFileOnWindows`, erreur 5, `rolled back`, code 1 ; `TestSyncKilledDuringRotationThenRecovered`. Faux coffre : `TestCrashAtEveryRotationCall`, crash avant et après chaque appel de trois chemins, nominal, restauration par M3, `rollback-failed`, avec l'état final exact de chaque point ; `TestRotationRecoveryRows`, une ligne par cas ; `TestRotationRecoveryIsInterruptible` et `TestRepeatedInterruptionsBetweenUnpromoteAndRestore`, crash à chaque appel de la récupération, M4 compris ; `TestRotationEnvelope`, E1 à E3 et le chemin de onze enregistrements ; `TestRotationAmbiguityIsStable` ; `rotationTerminal` exige l'ancienne génération intacte, dans `current` ou `retained` |
+| 16 | Rotation réelle avec rollback, renommage refusé par un fichier ouvert ; génération conservée identique ; chaque ligne du §5.5 atteinte ; crash avant et après M1 à M4 et pendant chaque validation ; §5.9 ; ancien `current` toujours intact | Windows réel : `TestRotationEndToEnd`, `retained` relu par `inspect` aux SHA-256 de son receipt ; `TestRotationRefusedByAnOpenFileOnWindows`, erreur 5, `rolled back`, code 1 ; `TestSyncKilledDuringRotationThenRecovered`. Faux coffre : `TestCrashAtEveryRotationCall`, crash avant et après chaque appel de trois chemins, nominal, restauration par M3, `rollback-failed`, avec l'état final exact de chaque point ; `TestRotationRecoveryRows`, une ligne par cas ; `TestRotationRecoveryIsInterruptible` et `TestRepeatedInterruptionsBetweenUnpromoteAndRestore`, crash à chaque appel de la récupération, M4 compris ; `TestRotationEnvelope`, E1 à E3 et le chemin de onze enregistrements ; `TestRotationAmbiguityIsStable` ; `rotationTerminal` exige l'ancienne génération intacte, dans `current` ou `retained`. Après fusion, pilote réel : rotation en code `0`, génération conservée égale à son receipt, voir [Pilote B2c](#pilote-b2c) |
 | 17 | Aucune disparition de fichiers sans drapeau, dans les seules conditions de V1 ; source requise absente et source retirée toujours bloquantes ; `current-modified` bloque sans rien déplacer | `TestAllowRemovalsCoversRemovedFilesOnly`, `TestAcceptMissingSourceCoversVanishedSourceOnly`, `TestRequiredOrRemovedSourcesStayBlocked`, `TestInvalidAcceptMissingSourceIsCode1`, `TestTwoAcceptedMissingSources` ; binaire `TestRotationFlagsEndToEnd` ; `TestCurrentWithAlteredContentIsNotRecognized`, `TestRotationRefusesCurrentChangedBeforeTheLock`, `TestRotationFailsWhenCurrentChangesBeforeRetirement`, et le binaire de `TestRotationEndToEnd`, `current` modifié à la main : code 2, coffre inchangé |
 | 18 | Revue de sécurité consignée ; `readonly_test.go` inchangé depuis B2b | Revue ci-dessous ; `readonly_test.go`, `architecture_test.go` et `internal/platform` inchangés depuis `54b1c02` |
-| 19 | 7 checks verts sur le SHA exact | **Non établi** : rien n'est poussé |
+| 19 | 7 checks verts sur le SHA exact | Non établi à la rédaction ; puis 7 checks verts sur `d5d2037`, tête de la PR, et sur `d69ff0c` après fusion, voir [CI](#ci) |
 | 20 | Docs, guide de récupération, CHANGELOG et ADR cohérents ; exemples vérifiés | Guide de commande, guide du coffre, modèle de sécurité, architecture, README, AGENTS, CONTRIBUTING, CHANGELOG, ADR 0004, 0006 et 0007 ; `TestStableCodesAreDocumented` ; `TestReadmeCommandExamples` |
 | 21 | Aucun accès aux données protégées, aucun chemin personnel | Tests en mémoire ou en `t.TempDir()`, chemins fictifs ; aucun accès à `D:\Ga`, `D:\Savewarden`, `E:\GMS` ni aux clés SSH ; la vérification du retour arrière vers B2b a utilisé un coffre synthétique en dossier temporaire |
 
@@ -88,6 +89,23 @@ devient `TestRotationEndToEnd`. Hors matrice, le test CLI
 et `TestRecoverRefusesPolicyFlags`. B2c ajoute 76 fonctions de test et en
 retire ces trois. `TestRepeatedRecoveryWithAnUnexpectedCurrentAfterRetirement`
 exerce `--recover --apply` trois fois, comme exigé.
+
+## CI
+
+**À la rédaction : aucun run.** La branche n'était pas poussée.
+
+**Après le GO de push :** le premier run, sur `bf306fd`, échoue au seul job
+Lint, sur deux constats que golangci-lint n'avait pas relevés faute d'avoir
+tourné localement ; ils sont corrigés en `d5d2037`. Les sept checks requis
+sont ensuite verts sur le SHA exact de la PR, puis sur le commit de fusion.
+Ils couvrent aussi ce qui n'avait pas pu tourner localement : govulncheck et
+le détecteur de courses.
+
+| Commit | Run | Résultat |
+| --- | --- | --- |
+| `bf306fd` | [40973584785](https://github.com/savewarden/savewarden-cli/actions/runs/40973584785) | Lint en échec, `errorlint` et `QF1001` ; six autres checks verts |
+| `d5d2037`, tête de la PR #8 | [40974262994](https://github.com/savewarden/savewarden-cli/actions/runs/40974262994) | 7/7 : Verify Ubuntu, Windows et macOS, Race detector, Lint, Vulnerability scan, Pins |
+| `d69ff0c`, fusion dans `release/v0.1.0-a1` | [41037795818](https://github.com/savewarden/savewarden-cli/actions/runs/41037795818) | 7/7, mêmes jobs |
 
 ## Revues indépendantes
 
@@ -140,6 +158,56 @@ reconstruit. Un constat important et quatre mineurs, corrigés en `b59835f` :
 Les deux nouvelles gardes ont été désactivées le temps de vérifier que leurs
 tests échouent.
 
+## Pilote B2c
+
+**À la fusion :** non exécuté. L'agent n'a lu aucune des zones protégées par
+`AGENTS.md` et n'a pas exécuté le pilote ensuite. Il a préparé le binaire et
+les scripts de contrôle du propriétaire, et ne les a exercés que sur des
+coffres synthétiques.
+
+**Après fusion, 30 octobre 2026 :** exécuté par le propriétaire, sur
+Assassin's Creed Odyssey, selon [le protocole B2c](../pilots/odyssey.md#protocole-b2c) :
+préflight en lecture seule, première rotation, vérification de la génération
+conservée, puis contrôle d'idempotence. Chaque étape n'a été lancée qu'après
+la réussite de la précédente.
+
+| Élément | Résultat |
+| --- | --- |
+| Binaire | `go build -trimpath` depuis un worktree détaché au commit de fusion `d69ff0c`, propre ; `vcs.revision` et `vcs.modified=false` contrôlés ; compilation reproductible, même SHA-256 depuis un second dossier |
+| Scripts du propriétaire | Hors dépôt, empreintes vérifiées avant exécution ; ils s'arrêtent avant tout appel à Savewarden si le jeu tourne, si le worktree, le binaire, la racine du coffre ou le dossier des rapports ne sont pas ceux attendus, ou si le coffre contient un point d'analyse ; seul celui d'idempotence lance `--apply`, une fois, après un plan `up to date` ; éprouvés sur coffres synthétiques, cas nominaux et négatifs : aucun appel à Savewarden après une précondition en échec, aucun `--apply` après un plan qui n'est pas à jour |
+| Poste | Windows 11 |
+| Coffre | Celui du pilote B2b, `current` publié par ce pilote |
+| Préflight, plan seul | 27 contrôles sur 27, deux fois ; code `0`, deux plans identiques, `plan: changes` ; `current` reconnu, égal à l'opération du pilote B2b ; rien en attente, rien à récupérer ; coffre inchangé |
+| Changements planifiés | 14 fichiers, 9 566 606 octets : 8 modifiés, 6 inchangés, aucun ajout ni retrait ; aucune anomalie ; aucun drapeau |
+| Rotation | `sync --apply`, code `0` ; 14 fichiers et 9 566 606 octets vérifiés par SHA-256 ; ligne d'état `published` ; la ligne `retained:` nomme la génération du pilote B2b |
+| Vérification | 31 contrôles sur 31 : plan suivant `up to date`, 14 fichiers inchangés ; nouveau receipt dont `previous` est l'opération B2b ; `retained` ne contient que cette génération |
+| Génération conservée | Relue par `inspect` : 14 fichiers, 9 520 705 octets, la taille publiée par le pilote B2b ; fichiers, tailles, SHA-256 et dossiers égaux à son receipt |
+| Génération courante | Relue par `inspect` : égale à son receipt |
+| Second `sync --apply` | 17 contrôles sur 17 : code `0`, `up to date`, `operation: none`, dernière ligne de stderr `savewarden: vault: not modified` ; plan identique avant et après |
+| Coffre | Empreinte d'inventaire et de contenu inchangée pendant chaque contrôle et autour du second `--apply` |
+| Verdicts | `PreflightPassed`, `VerificationPassed` et `IdempotencePassed` à `True` |
+
+Un premier lancement du contrôle d'idempotence, avec l'identifiant d'exemple
+de la commande au lieu de celui de l'opération, s'est arrêté sur sa
+précondition sans appeler Savewarden.
+
+**Qualification fonctionnelle :** à prononcer par le propriétaire.
+
+Limites du pilote :
+
+- Il qualifie la rotation nominale. Le rollback, les crashs et la
+  récupération restent prouvés par les tests synthétiques, les tests Windows
+  réels et la CI ; le pilote ne simule ni refus de renommage ni coupure.
+- Un seul jeu, une seule source, un seul poste, une seule rotation.
+- L'empreinte du coffre couvre les chemins, attributs, dates, tailles et
+  SHA-256 de chaque entrée ; ni les ACL, ni les identités NTFS, ni les flux
+  alternatifs. Les scripts relisent les métadonnées sur chaque entrée : la
+  copie qu'en garde l'index du dossier parent est mise à jour en différé, ce
+  qui a produit un faux écart sur un coffre synthétique.
+- Ne sont versionnés ni les empreintes individuelles, ni les receipts réels,
+  ni les identifiants d'opération, ni le nom de profil, ni aucun chemin
+  personnel, ni la sortie complète, ni les scripts du propriétaire.
+
 ## Amendements d'ADR 0006 après la certification du cadrage
 
 Deux entrées s'ajoutent après le cadrage certifié par le propriétaire, sans
@@ -148,7 +216,8 @@ d'une restauration vérifiée et M3, et la fenêtre du staging entre `verified`
 et M2 ; le refus d'un receipt validé sans bascule observée, et
 l'authentification du receipt de `<prev-op>` avant une restauration. Elles
 appliquent le fail-closed du §3 à des cas que les revues ont démontrés ;
-elles relèvent de la décision du propriétaire avant toute fusion.
+elles relèvent de la décision du propriétaire. À la fusion de la PR #8, leur
+ratification explicite n'était pas consignée ; elle reste à prononcer.
 
 ## Contrôles locaux
 
@@ -162,12 +231,13 @@ elles relèvent de la décision du propriétaire avant toute fusion.
 | `go build -trimpath`, Windows et Linux | Succès, compilation seulement pour Linux |
 | Commits 1 à 4, chacun à son SHA | Suite complète verte |
 | golangci-lint 2.14.0, `run ./... ./.github/scripts`, Windows et `GOOS=linux` | `0 issues` après le commit de correction ; non exécuté avant `bf306fd`, dont la CI a relevé deux constats |
-| govulncheck | **Non exécuté** : outil absent sur ce poste ; à prouver par la CI |
-| `go test -race` | **Non exécuté** : pas de cgo local ; à prouver par le job Linux de la CI |
+| govulncheck | **Non exécuté** : outil absent sur ce poste ; prouvé ensuite par la CI, voir [CI](#ci) |
+| `go test -race` | **Non exécuté** : pas de cgo local ; prouvé ensuite par le job Linux de la CI, voir [CI](#ci) |
 
 ## Limites et suites
 
-- CI, revue et fusion de la PR B2c attendent leurs GO distincts.
+- CI et fusion de la PR B2c : faites sur GO distincts, voir [CI](#ci) ; la
+  PR n'a reçu aucune approbation, le dépôt n'en exige pas.
 - Points ouverts relevés par les revues, laissés à la décision du
   propriétaire : la ligne `unpromote-intent` d'ADR 0006 fait M4 avant de
   vérifier `retained` ; si `retained` est altéré, le coffre reste sans
@@ -179,7 +249,9 @@ elles relèvent de la décision du propriétaire avant toute fusion.
   d'opération.
 - Un `retained\<X>` autre que celui de la génération courante n'est expliqué
   que par le nom de son receipt ; aucune action de B2c ne le touche.
-- Le pilote B2c, exécuté par le propriétaire après la fusion, reste à faire.
+- Le pilote B2c a été exécuté par le propriétaire après la fusion, voir
+  [Pilote B2c](#pilote-b2c) ; sa qualification fonctionnelle, et donc la
+  clôture de B2c, lui reviennent.
 - Les fenêtres résiduelles du §5 et l'accumulation des générations sont des
   limites documentées, pas des défauts.
 - Un coffre copié ou déplacé n'est pas pris en charge ; sa portabilité relève
