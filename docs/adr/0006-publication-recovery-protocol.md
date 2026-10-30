@@ -4,7 +4,8 @@ Date : 29 octobre 2026. Statut : accepté pour B2, contenu normatif du plan B2
 v0.2 §5, validé par le propriétaire le 29 octobre 2026 après revue intégrale ;
 amendé le même jour avant les premières écritures de B2b, puis pour le
 cadrage et les revues de B2c ; amendements de B2c postérieurs au cadrage
-ratifiés par le propriétaire le 30 octobre 2026 (voir Amendements).
+ratifiés par le propriétaire le 30 octobre 2026 (voir Amendements). Le §10,
+snapshots de B3, est un **projet non accepté** (plan B3 v0.2).
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -47,7 +48,7 @@ peut pas s'y conformer exige un amendement de l'ADR, revu, avant son code.
 | I5 | Fail-closed : toute ambiguïté arrête tout, sans déplacement ni écriture, code 3, diagnostic |
 | I6 | Rollback par défaut avant publication achevée ; finalisation seulement après revérification intégrale du nouvel état contre le plan |
 | I7 | Une génération publiée ou conservée, un receipt, un enregistrement ne sont jamais rouverts en écriture |
-| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` |
+| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` ; précisé par domaine pour les snapshots au §10, projet B3 non accepté |
 | I9 | La publication est **transactionnelle par protocole, pas atomique** : la fenêtre où `current` est absent est reconnue et récupérable |
 | I10 | Seules les garanties documentées de Windows sont revendiquées ; le reste est une hypothèse couverte par une récupération fondée sur l'observation |
 | I11 | L'initialisation du coffre, qui précède tout journal, n'est faite que de créations exclusives et d'un marqueur validé par renommage ; chaque état partiel est reconnu par le tableau du §4 ou refusé sans mutation, jamais adopté implicitement |
@@ -199,7 +200,7 @@ l'observation et les temporaires du numéro suivant.
 | Neuf temporaires du numéro suivant quand la reprise doit l'écrire | Enveloppe E1 épuisée |
 | Second `rollback-failed` pour la même intention | Enveloppe E3 dépassée |
 | Enregistrement d'une autre opération dans le dossier | Mélange d'opérations |
-| Deux opérations non terminales pour un jeu | Exclusivité violée |
+| Deux opérations non terminales pour un jeu ; par domaine selon le §10, projet B3 | Exclusivité violée |
 | Enregistrement après un état terminal | Opération close modifiée |
 | Observation contraire au dernier enregistrement, dans un sens ou dans l'autre : `published` sans `current` de l'identité attendue, ou `current` publié alors que `publish-intent` manque | Durabilité ou intervention extérieure non prouvées |
 | Identité de fichier indisponible, dossier du journal illisible | Observation impossible |
@@ -613,6 +614,282 @@ l'examiner, sans commande de suppression. Savewarden ne supprime jamais un
 temporaire pour rouvrir l'enveloppe : toute intervention sur le coffre
 relève de son propriétaire.
 
+### 10. Snapshots (B3) — projet
+
+**Statut : projet**, rédigé avec le plan B3 v0.2 le 30 octobre 2026 et soumis
+au propriétaire ; **non accepté**. Tant qu'il ne l'est pas, aucun code ne
+s'en réclame et les §1 à §9 s'appliquent seuls.
+
+Un snapshot est la copie vérifiée d'une génération `current` publiée, rangée
+sous `games\<game-id>\snapshots\`, approuvée à sa publication, puis jamais
+rouverte en écriture, déplacée, remplacée ni supprimée. Les invariants I1 à
+I12 s'y appliquent avec les précisions de ce paragraphe, qui prévalent pour le
+domaine des snapshots. Le contrat de la commande et le receipt de snapshot
+sont fixés par ADR 0008.
+
+#### Domaines et disposition
+
+```text
+games\<game-id>\
+  sync.lock                                             verrou commun aux deux domaines
+  current\, retained\, staging\, receipts\, journal\    domaine de current (§4, §5)
+  snapshots\                                            domaine des snapshots
+    <snap-id>\<source-id>\...              P : snapshot publié
+    <snap-id>.incomplete\<source-id>\...   I : copie en cours, échouée ou abandonnée
+    receipts\<snap-id>.json                receipt de snapshot (ADR 0008)
+    journal\<snap-id>\NNN-<étape>.rec      journal de l'opération de snapshot
+```
+
+- `<snap-id>` est l'identifiant de l'opération, de la forme du §3. Il est
+  distinct de tout identifiant déjà employé dans l'un ou l'autre domaine ; le
+  contrôle a lieu avant tout journal.
+- **Grammaire** du domaine, toute autre entrée étant une ambiguïté du domaine
+  des snapshots, code 3 :
+  - `snapshots\` : `receipts`, `journal`, et des dossiers ordinaires
+    `<snap-id>` ou `<snap-id>.incomplete` ;
+  - `snapshots\receipts\` : des fichiers `<snap-id>.json` et leurs temporaires
+    `<snap-id>.json.tmp-<k>`, `k` de 1 à 9 (§3, E1) ;
+  - `snapshots\journal\` : des dossiers `<snap-id>`, dont le contenu suit le
+    §3 ;
+  - un lien, un fichier là où un dossier est attendu, ou un point d'analyse,
+    partout.
+- **Explication**, par nom ou par identité (§3) : `P`, `I` et chaque receipt
+  de snapshot portent le nom d'une opération de snapshot journalisée. Leur
+  identité est exigée dès que `staged` l'a fixée. Un `I` dont le journal
+  s'arrête avant `staged` est accepté s'il est un dossier ordinaire sans point
+  d'analyse ; il n'est jamais lu ni déplacé. Un `I` d'une opération close
+  n'est ni relu ni exigé : son absence n'est ni signalée ni bloquante.
+- **Structure.** `snapshots`, `snapshots\receipts` et `snapshots\journal` sont
+  créés sous verrou, après le second contrôle d'espace et avant tout journal,
+  par création exclusive, dans cet ordre et seulement s'ils manquent ; suit
+  `snapshots\journal\<snap-id>`. Comme pour I11, une structure faite de
+  dossiers de structure vides est reconnue et complétée par la création
+  suivante ; un dossier d'opération vide, ou ne contenant que des temporaires
+  `001-…`, est une opération non commencée ; tout autre état partiel est une
+  ambiguïté.
+- **Verrou.** `sync.lock` sert aux deux domaines. Une opération de snapshot le
+  prend par la même primitive que `sync`, qui le crée vide s'il manque ; elle
+  ne l'écrit, ne le tronque ni ne le supprime jamais. Ainsi, l'absence du
+  verrou ne rend jamais la récupération d'un snapshot dépendante du domaine
+  de `current`.
+
+#### I8 par domaine
+
+Précise I8. Le domaine de `current` compte les opérations de `journal\` ;
+celui des snapshots, celles de `snapshots\journal\`. Le verrou garantit
+qu'une seule opération s'exécute à la fois par jeu, quel que soit son
+domaine.
+
+- Deux opérations non terminales d'un même domaine : ambiguïté, code 3.
+- Une opération non terminale du domaine de `current` bloque toute nouvelle
+  création dans les deux domaines.
+- Une opération de snapshot non terminale ne bloque que la création d'un
+  snapshot.
+- Une opération non terminale dans chaque domaine est un état admis ; chaque
+  domaine se récupère seul.
+
+Aucune observation faite **sous** `snapshots\` n'entre dans les décisions du
+domaine de `current` : explication de `staging\`, règle M3, receipt de tête,
+opérations en attente. `sync` ne lit rien sous `snapshots\`. L'entrée
+`snapshots` elle-même reste soumise à la lecture de `games\<game-id>` par
+`sync` : un fichier ou un lien sous ce nom y est une entrée imprévue.
+
+#### Automate et contrat des champs
+
+Même format d'enregistrement qu'au §3 et mêmes noms d'étapes que la première
+publication. Le lecteur applique cet automate au seul dossier
+`snapshots\journal\<snap-id>`. Tous les champs sont obligatoires, aucun autre
+n'est accepté.
+
+| # | Enregistrement validé | Champs | Cohérence vérifiée à la lecture | Action qui suit |
+| --- | --- | --- | --- | --- |
+| 1 | `planned` | `source_operation` ; `source_receipt_sha256` ; `source_identity`, identité de `current` relevée sous verrou ; `plan` : objet strict, version de l'outil, jeu, `started_at`, `sources` au format du receipt v1 ; `plan_sha256` | `plan_sha256` est le SHA-256 de `plan` ; `source_operation` au format du §3 et différent de l'opération ; jeu du plan égal au `<game-id>` du dossier | — |
+| 2 | `staging-intent` | `staging` : `snapshots/<snap-id>.incomplete` | Nom fixé par l'opération | Créer `I`, copier, flusher |
+| 3 | `staged` | `staging_identity` ; `copied_sha256` | `copied_sha256` est l'empreinte de contenu de `plan.sources` | Relecture de `I` |
+| 4 | `verified` | `verified_sha256` | Idem | Porte de provenance |
+| 5 | `publish-intent` | `staging_identity` | Égale à celle de `staged` ; `P` absent attendu | Bascule `I` → `P`, porte de provenance, receipt de snapshot |
+| 6 | `published` | `receipt_sha256` | — | Terminal |
+
+La comparaison de `receipt_sha256` au receipt de snapshot présent est une
+**observation**, pas une cohérence du journal : un écart relève des
+snapshots approuvés, plus bas, et non des ambiguïtés du §3.
+
+Rollback : `unpublish-intent`, de champ `staging_identity` égal à celui de
+`staged`, précède le seul déplacement `P` → `I` ; puis `rolled-back`, sans
+champ. `rollback-failed` (`error`) : au plus un par intention, non terminal.
+`failed` et `abandoned` (`reason`), `published` et `rolled-back` sont
+terminaux. Les étapes de rotation et les champs `previous` et
+`current_identity` sont interdits dans ce mode : `source_identity` porte un
+autre nom pour que l'identité de `current` relevée par un snapshot ne soit
+jamais lue comme celle de l'ancien `current` d'une rotation.
+
+#### Création
+
+Sous verrou, préconditions de création d'ADR 0008 remplies : `current`
+reconnu par toute sa chaîne de preuve (§4, §5), égal à son receipt, identité
+relue après le contenu ; aucune opération non terminale dans l'un ou l'autre
+domaine ; espace recontrôlé.
+
+1. Identifiant contrôlé ; structure complétée ; dossier d'opération ;
+   `planned`.
+2. `current` relu en entier contre son receipt, identité relue après ;
+   `staging-intent` ; création exclusive de `I` ; copie hachée, chaque fichier
+   flushé avant sa fermeture ; identité de `current` relue après la copie.
+   Identité changée : code 3, rien enregistré de plus. Contenu copié différent
+   du plan : `failed`, code 2. `I` est conservé dans les deux cas.
+3. `staged` ; relecture de `I` depuis le disque contre `plan.sources`, puis
+   identité de `I` relue. Contenu différent : `failed`,
+   `verification-mismatch`, code 2, `I` conservé. Identité changée : code 3,
+   rien enregistré de plus. Conforme : `verified`.
+4. Porte de provenance. Fermée : `failed`, code 3, cause `source-unverified`,
+   `I` conservé ; rien n'est publié. Franchie : `publish-intent`.
+5. Bascule `I` → `P` dans l'ordre du §4 : fermer toute portée ouverte sur
+   `I`, `P` et `current` ; ne garder épinglés que les ancêtres de
+   `snapshots\journal\<snap-id>` et ce dossier ; pré-contrôle de `I`, nom `P`
+   absent ; `MoveFileEx(I, P, 0)` avec les retries du §7 ; post-contrôle :
+   `P` de l'identité `staging_identity`, `I` absent. Un renommage dont l'échec
+   est confirmé par la source et la cible donne `rolled-back`, code 1 ; toute
+   autre observation, code 3.
+6. Porte de provenance de nouveau. Preuve contradictoire :
+   `unpublish-intent`, `P` → `I`, `rolled-back`, code 3, cause
+   `source-unverified`. Preuve indisponible : code 3, rien écrit,
+   l'opération reste en `publish-intent`. Franchie : receipt de snapshot
+   validé par temporaire et renommage (§3, E1), puis `published`.
+
+#### Porte de provenance
+
+Une opération de snapshot n'approuve rien sans recouper trois preuves :
+`receipts\<source-op>.json`, du domaine de `current`, que le protocole ne
+réécrit ni ne supprime ; son `planned` ; le receipt de snapshot qu'elle va
+écrire. La porte est franchie avant `publish-intent` et avant l'écriture du
+receipt de snapshot, en exécution comme en récupération :
+
+1. `receipts\` et `receipts\<source_operation>.json` ouverts sans suivi de
+   lien, dossier et fichier ordinaires sans point d'analyse ;
+2. receipt valide selon le receipt v1, d'opération `source_operation`, de jeu
+   égal au `<game-id>` du dossier et au jeu du plan ;
+3. SHA-256 de ses octets égal à `source_receipt_sha256` ;
+4. empreinte de contenu de ses `sources` égale à celle de `plan.sources`.
+
+Il n'a pas à être le receipt de tête : après une rotation de `current`, il ne
+l'est plus, et la porte reste franchissable. Ni `current` ni `retained\` ne
+sont lus.
+
+- **Preuve indisponible** : erreur de lecture autre que l'absence, verrou ou
+  partage refusé. Rien n'est écrit ni déplacé ; une nouvelle exécution
+  réessaie.
+- **Preuve contradictoire** : receipt absent, lien ou point d'analyse,
+  invalide, d'une autre opération ou d'un autre jeu, octets ou empreinte
+  différents.
+- Selon la position : avant `publish-intent`, toute porte fermée clôt
+  l'opération en `failed`, rien n'étant publié ; après la bascule et avant
+  tout receipt de snapshot validé, une preuve contradictoire mène au
+  rollback, `unpublish-intent` puis `P` → `I` puis `rolled-back`, qui
+  n'approuvent rien et ne franchissent pas la porte ; une preuve
+  indisponible laisse l'opération en `publish-intent`, sans rien écrire.
+  Dans tous les cas, cause `source-unverified`, code 3.
+- Une fois le receipt de snapshot validé (A5, A6), la porte n'est plus
+  rejouée : ce receipt n'est écrit qu'après elle, et ses `source.*` égalent
+  ceux de `planned`. Il tient lieu de preuve de provenance, comme pour un
+  snapshot publié.
+
+**Limite.** La porte vérifie la **cohérence** de preuves conservées dans le
+même coffre, liées par des SHA-256 sans clé. Elle refuse une altération
+accidentelle ou partielle ; elle n'authentifie pas contre une réécriture
+délibérée et coordonnée du journal et du receipt source, hors modèle, comme
+pour le recoupement du receipt de `<prev-op>` en B2c.
+
+#### Points d'arrêt
+
+Ceux de la première publication, A1 à A8 (§4), avec `P` à la place de
+`current` et `I` à la place de `staging\<op>`. En A3 et A4, `P` est revérifié
+en entier contre le plan, sans lire `current`, et la porte de provenance est
+franchie avant tout receipt. En A5 et A6, le receipt de snapshot validé
+interdit tout retour en arrière : relu strictement, égal au plan, `P`
+conforme, il donne `published` ; toute autre observation, code 3.
+
+#### Récupération
+
+`--recover` ne s'appuie que sur le domaine des snapshots :
+
+- **exigé** : le marqueur du coffre ; `<vault>`, `games`, `games\<game-id>`,
+  `snapshots` et `snapshots\journal`, dossiers ordinaires sans point
+  d'analyse ; les journaux et receipts du domaine des snapshots, relus
+  strictement ; avec `--apply`, le verrou, pris comme ci-dessus ;
+- **ignoré** : la présence, la reconnaissance et l'intégrité de `current` ;
+  les opérations, journaux, receipts et anomalies du domaine de `current` ;
+  les autres entrées de la racine du coffre, de `games` et de
+  `games\<game-id>`, qui ne sont pas lues. Seul le receipt source est lu, à la
+  porte de provenance. `current` n'est jamais lu ;
+- `snapshots\` ou `snapshots\journal` absent : rien à récupérer, code 0.
+
+Un receipt de snapshot validé pour une opération n'admet que deux lignes :
+`publish-intent` avec (`new`, —), qui est A5 ou A6, et `published`. Toute
+autre combinaison, et tout receipt de snapshot sans journal ou d'une
+opération close autrement qu'en `published`, est une ambiguïté, code 3.
+
+| Dernier validé | Observation (`P`, `I`) | Action |
+| --- | --- | --- |
+| Aucun : dossier d'opération vide ou temporaires `001` seuls | (—, —) | `001-abandoned` ; sinon code 3, rien écrit |
+| `planned` | (—, —) | `abandoned` |
+| `staging-intent` | (—, —), ou (—, dossier ordinaire sans point d'analyse) | `abandoned` ; `I` laissé en place, ni lu ni déplacé |
+| `staged`, `verified` | (—, `new`) | `abandoned` ; `I` conservé |
+| `publish-intent`, aucun receipt de snapshot | (—, `new`) | Renommage non effectué : `rolled-back` |
+| `publish-intent`, aucun receipt de snapshot | (`new`, —) | Renommage effectué : revérification intégrale de `P` contre le plan. Égal, porte franchie : receipt, puis `published`. Égal, preuve contradictoire : `unpublish-intent`, `P` → `I`, `rolled-back`, code 3, `source-unverified`. Égal, preuve indisponible : code 3, rien écrit. Différent : `unpublish-intent`, puis `P` → `I` |
+| `publish-intent`, receipt de snapshot validé | (`new`, —) | Receipt relu strictement, égal au plan, `P` revérifié en entier : `published`, sans rejouer la porte ; sinon code 3, rien écrit ni déplacé |
+| `unpublish-intent`, aucun receipt de snapshot | (`new`, —) | Déplacement non effectué : l'exécuter, puis `rolled-back` ; échec : `rollback-failed`, code 3 |
+| `unpublish-intent` ou `rollback-failed`, aucun receipt de snapshot | (—, `new`) | Déplacement effectué : `rolled-back` |
+| `rollback-failed`, aucun receipt de snapshot | (`new`, —) | Nouvel essai ; succès : `rolled-back` ; échec : code 3, sans nouvel enregistrement (E3) |
+| `published` | (`new`, —), receipt de snapshot conforme | Rien |
+| `published` | Toute autre observation de `P`, de `I` ou du receipt de snapshot | Snapshot dégradé, plus bas : rien écrit ni déplacé |
+| Tout autre cas, dont `P` et `I` présents ensemble hors d'une opération close, une identité `other`, un receipt de snapshot validé sans bascule observée | — | Fail-closed, code 3, rien écrit |
+
+`new` est l'identité de `I` relevée dans `staged` ; `other`, toute autre
+identité. Chaque revérification relit l'identité après le contenu. Les
+propriétés du §9 s'appliquent : explicite, idempotente, interruptible,
+convergente et bornée dans l'enveloppe, monotone, non aggravante.
+
+#### Snapshots approuvés : exception au §3
+
+Une opération de snapshot dont le journal, valide, se termine par `published`
+n'est jamais une ambiguïté, quoi qu'on observe de son snapshot : aucune
+opération ne dépend d'un snapshot déjà approuvé, et rien ne pourrait lever un
+code 3 sans suppression ni réécriture. Elle est signalée comme **dégradée**
+selon ADR 0008, rien n'est écrit ni déplacé pour elle, et elle ne compte plus
+pour l'idempotence :
+
+| Observation | Diagnostic |
+| --- | --- |
+| `P` absent, `I` absent ou d'une autre identité | `snapshot-missing` |
+| `P` absent, `I` présent de l'identité `new` : renommage perdu, signature d'une coupure (§6) | `snapshot-rename-lost` ; `I` n'est jamais renommé |
+| `P` d'une autre identité, ou `P` conforme à côté d'un `I` présent ; receipt de snapshot absent, invalide, contraire au plan ou d'un SHA-256 différent de `receipt_sha256` ; contenu relu différent | `snapshot-modified` |
+
+Hors de cette exception, toute ambiguïté du domaine des snapshots reste
+fail-closed selon le §3 : opération non terminale, journal illisible ou
+incohérent, entrée inexpliquée. Elle bloque la création de snapshots, jamais
+`sync` ; elle exige l'intervention du propriétaire du coffre, et un nouveau
+coffre reste possible, comme en B2.
+
+#### Enveloppe
+
+E1, E3 et E4 inchangées ; E1 vaut aussi pour chaque
+`snapshots\receipts\<snap-id>.json`. E2 : au plus 11 enregistrements ; le plus
+long chemin d'un snapshot en compte 8, `planned` à `publish-intent`, puis
+`unpublish-intent`, `rollback-failed` et `rolled-back`.
+
+#### Ce qu'une opération de snapshot ne fait jamais
+
+Écrire, renommer ou supprimer hors de `snapshots\`, hormis la création du
+fichier de verrou vide par `Lock`, comme `sync` ; écrire dans `sync.lock` ;
+déplacer `P` après `published` ; renommer un `I` vers `P` hors de la bascule
+de sa propre opération ; remplacer une cible ; copier vers un nom publié ;
+lire un objet dont l'identité n'est pas celle attendue ; lire `current`
+pendant une récupération ; approuver sans porte de provenance ; supprimer un
+temporaire ou un `I` ; recréer ou réparer un snapshot approuvé.
+Immutabilité protocolaire, non matérielle : rien n'empêche un autre programme
+de modifier un snapshot ; Savewarden ne le fait jamais et le signale dans les
+limites d'ADR 0008.
+
 
 ## Alternatives
 
@@ -744,3 +1021,11 @@ relève de son propriétaire.
   restauration vérifiée ; si `retained\<prev-op>` est altéré, rien n'est
   restauré et `current` reste absent jusqu'à une intervention, plutôt qu'une
   restauration non vérifiée.
+- **30 octobre 2026, cadrage de B3 — projet, non accepté** (plan B3 v0.2) :
+  §10, snapshots ; I8 précisé par domaine ; porte de provenance avant toute
+  approbation d'un snapshot, rollback sur preuve contradictoire, aucune porte
+  rejouée après un receipt de snapshot validé ; récupération d'un snapshot
+  indépendante du domaine de `current`, verrou pris comme `sync` ; exception
+  au §3 pour une opération de snapshot terminale en `published`, dont le
+  snapshot dégradé est signalé sans blocage. Aucune règle des §1 à §9 ne
+  change pour le domaine de `current`.

@@ -1,7 +1,7 @@
 # ADR 0004 — Frontières de `sync`
 
 Date : 29 octobre 2026. Statut : accepté pour B2, plan B2 v0.2 §3, validé par
-le propriétaire le 29 octobre 2026.
+le propriétaire le 29 octobre 2026. Amendement B3 : projet, non accepté.
 
 ## Contexte
 
@@ -105,4 +105,28 @@ plan B2 §3.2, sans changer les frontières :
   partage sans l'ouvrir. B2c n'ajoute ni frontière ni port : la rotation et
   sa récupération n'emploient que `Vault`, `Files`, `Inventories`, `Volumes`
   et `Clock`.
+
+## Amendement B3 — projet, non accepté
+
+30 octobre 2026, plan B3 v0.2. Les snapshots ne forment pas une feature
+séparée : `features/sync` possède **toutes les publications dans le coffre
+d'un jeu**, `current` et snapshots, et leurs récupérations. La phrase des
+Conséquences qui annonçait une feature `snapshot` réutilisant
+`entities/backup` est remplacée par celle-ci ; `restore` (B4) reste une
+feature à cadrer.
+
+- Le moteur de publication, non exporté, est paramétré par la disposition et
+  les codes de l'opération, dans le même package, sans changement de
+  comportement pour `current`.
+- La commande CLI `snapshot` appelle des méthodes de service propres au
+  snapshot ; `internal/cli` n'importe toujours que des features.
+- Aucun port, aucune frontière, aucune règle d'import ne change ;
+  `platform/vault` et ADR 0005 restent inchangés.
+- `entities/backup` reçoit le receipt de snapshot v1, l'automate et le
+  contrat des champs du mode snapshot, et le classement de ses observations,
+  sans I/O.
+
+Alternatives écartées pour B3 : une feature `snapshot` dupliquant le moteur
+d'écriture et ses faux de test ; l'extraction du moteur dans un package de
+protocole, frontière durable nouvelle, réexaminée au cadrage de B4.
 
