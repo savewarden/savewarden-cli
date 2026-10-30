@@ -4,8 +4,9 @@ Rotation de `current` et récupération complète de `sync`, selon le plan B2
 v0.2 §0.8, §8.3 et §9.3, et ADR 0006 amendé, référence de sécurité. Ce
 rapport consigne les preuves locales, les revues indépendantes et ce qui reste
 à établir. À sa rédaction, aucun push, aucune PR, aucune fusion ni aucun
-pilote n'avait eu lieu ; la PR, sa CI, la fusion et le pilote sont consignés
-ensuite, sur GO distincts. Aucun tag ni release.
+pilote n'avait eu lieu ; la PR, sa CI, la fusion, le pilote et les décisions
+de clôture du propriétaire sont consignés ensuite, sur GO distincts. Aucun tag
+ni release.
 
 ## Cadre
 
@@ -16,7 +17,8 @@ ensuite, sur GO distincts. Aucun tag ni release.
 | PR | Non ouverte à la rédaction ; puis, sur GO distincts, [savewarden/savewarden-cli#8](https://github.com/savewarden/savewarden-cli/pull/8), fusionnée dans `release/v0.1.0-a1` par le merge commit `d69ff0c` ; branche supprimée, sur le remote et en local |
 | Écritures | Seul `internal/platform/vault` écrit, ADR 0005 ; B2c n'ajoute ni API d'écriture, ni port, ni méthode ; `git diff --stat 54b1c02..` sur `internal/app`, `internal/platform`, ADR 0005, `go.mod`, `go.sum` et `.github` ne montre qu'un cas du test de contrat `app_test.go` |
 | Revues indépendantes | Revue du remplacement, point de contrôle du §8.3 ; revue de sécurité, préalable au rapport ; vérification indépendante de leurs corrections sur `f5ba069`. Trois agents en lecture seule, distincts de l'auteur ; ce ne sont pas des approbations humaines. Consignées ci-dessous |
-| Pilote B2c | Non exécuté à la fusion ; **exécuté par le propriétaire après fusion, le 30 octobre 2026**, selon le [protocole B2c](../pilots/odyssey.md#protocole-b2c), voir [Pilote B2c](#pilote-b2c) ; qualification fonctionnelle à prononcer par le propriétaire |
+| Pilote B2c | Non exécuté à la fusion ; **exécuté par le propriétaire après fusion, le 30 octobre 2026**, selon le [protocole B2c](../pilots/odyssey.md#protocole-b2c), voir [Pilote B2c](#pilote-b2c) ; **qualification fonctionnelle validée par le propriétaire le 30 octobre 2026** |
+| Clôture | B2c clos par le propriétaire le 30 octobre 2026 dans son périmètre, amendements d'ADR 0006 postérieurs au cadrage ratifiés, voir [Décisions de clôture](#décisions-de-clôture) ; aucun tag ni release |
 
 ## Commits
 
@@ -191,7 +193,11 @@ Un premier lancement du contrôle d'idempotence, avec l'identifiant d'exemple
 de la commande au lieu de celui de l'opération, s'est arrêté sur sa
 précondition sans appeler Savewarden.
 
-**Qualification fonctionnelle :** à prononcer par le propriétaire.
+**Qualification fonctionnelle, 30 octobre 2026 :** le propriétaire valide le
+pilote B2c, décision D1. Il démontre sur une sauvegarde réelle la rotation
+nominale du lot : nouvelle génération publiée et vérifiée par SHA-256,
+génération précédente conservée dans `retained` et égale à son receipt,
+seconde exécution sans aucune mutation du coffre.
 
 Limites du pilote :
 
@@ -213,11 +219,39 @@ Limites du pilote :
 Deux entrées s'ajoutent après le cadrage certifié par le propriétaire, sans
 changer d'architecture : la troisième fenêtre résiduelle, entre la relecture
 d'une restauration vérifiée et M3, et la fenêtre du staging entre `verified`
-et M2 ; le refus d'un receipt validé sans bascule observée, et
-l'authentification du receipt de `<prev-op>` avant une restauration. Elles
-appliquent le fail-closed du §3 à des cas que les revues ont démontrés ;
-elles relèvent de la décision du propriétaire. À la fusion de la PR #8, leur
-ratification explicite n'était pas consignée ; elle reste à prononcer.
+et M2 ; le pré-contrôle d'une bascule dont l'identité est illisible tenu pour
+une ambiguïté ; le refus d'un receipt validé sans bascule observée ;
+l'authentification du receipt de `<prev-op>` avant une restauration ; et
+l'identité relue après chaque contenu. Elles appliquent le fail-closed du §3
+à des cas que les revues ont démontrés ; elles relèvent de la décision du
+propriétaire. À la fusion de la PR #8, leur ratification explicite n'était pas
+consignée ; le propriétaire les ratifie le 30 octobre 2026, décision D2, voir
+[Décisions de clôture](#décisions-de-clôture).
+
+## Décisions de clôture
+
+Le 30 octobre 2026, après la fusion de la PR #9, qui consigne le pilote, et
+ses deux runs de CI verts, 7/7 sur sa tête `b866be0`
+([41129506700](https://github.com/savewarden/savewarden-cli/actions/runs/41129506700))
+puis sur le commit de fusion `d992198`
+([41130016451](https://github.com/savewarden/savewarden-cli/actions/runs/41130016451)),
+le propriétaire décide :
+
+| # | Décision | Périmètre |
+| --- | --- | --- |
+| D1 | Gate 6, qualification fonctionnelle de B2c : **validée** ; clôture documentaire du lot autorisée | La rotation nominale, sur le pilote Odyssey ; les garanties de récupération et de rollback restent celles établies par les tests automatisés et la CI |
+| D2 | Amendements d'ADR 0006 postérieurs au cadrage certifié : **ratifiés** | Vérifications d'identité et de provenance, refus conservateur des observations contradictoires, fenêtres résiduelles documentées ; compromis fail-closed de M4 accepté, ci-dessous |
+
+Compromis de M4 : la ligne `unpromote-intent` d'ADR 0006 effectue M4 avant
+de vérifier `retained\<prev-op>` ; si cette génération est altérée, rien n'est
+restauré et le coffre reste sans `current` jusqu'à une intervention. Le
+propriétaire accepte cette indisponibilité temporaire de `current` quand une
+restauration sûre n'est pas démontrable : l'intégrité prime la disponibilité.
+
+Ces décisions ne rouvrent pas le développement de B2c et n'autorisent ni tag,
+ni GitHub Release, ni nouvelle implémentation. Le worktree du pilote est
+conservé pour traçabilité. B3 est un lot distinct : son cadrage et son GO de
+développement seront validés séparément.
 
 ## Contrôles locaux
 
@@ -238,20 +272,20 @@ ratification explicite n'était pas consignée ; elle reste à prononcer.
 
 - CI et fusion de la PR B2c : faites sur GO distincts, voir [CI](#ci) ; la
   PR n'a reçu aucune approbation, le dépôt n'en exige pas.
-- Points ouverts relevés par les revues, laissés à la décision du
-  propriétaire : la ligne `unpromote-intent` d'ADR 0006 fait M4 avant de
-  vérifier `retained` ; si `retained` est altéré, le coffre reste sans
-  `current` jusqu'à une intervention, conforme à l'ADR, l'ordre inverse
-  exigerait un amendement. Le recoupement du receipt de `<prev-op>` refuse
-  une altération accidentelle ou partielle, pas une réécriture délibérée du
-  receipt et du journal, hors modèle. Hérité de B2b : `RenderApply` affiche
-  `operation: <id>` pour un refus de code 1 ou 2 levé avant le dossier
-  d'opération.
+- Points relevés par les revues : la ligne `unpromote-intent` d'ADR 0006
+  fait M4 avant de vérifier `retained` ; si `retained` est altéré, le coffre
+  reste sans `current` jusqu'à une intervention ; compromis accepté par le
+  propriétaire, D2. Le recoupement du receipt de `<prev-op>` refuse une
+  altération accidentelle ou partielle, pas une réécriture délibérée du
+  receipt et du journal, hors modèle, comme le dit l'amendement ratifié.
+  Reste ouvert, hérité de B2b : `RenderApply` affiche `operation: <id>` pour
+  un refus de code 1 ou 2 levé avant le dossier d'opération.
 - Un `retained\<X>` autre que celui de la génération courante n'est expliqué
   que par le nom de son receipt ; aucune action de B2c ne le touche.
 - Le pilote B2c a été exécuté par le propriétaire après la fusion, voir
-  [Pilote B2c](#pilote-b2c) ; sa qualification fonctionnelle, et donc la
-  clôture de B2c, lui reviennent.
+  [Pilote B2c](#pilote-b2c) ; il est qualifié et B2c est clos dans son
+  périmètre, voir [Décisions de clôture](#décisions-de-clôture). B3 attend
+  son propre cadrage et son GO de développement.
 - Les fenêtres résiduelles du §5 et l'accumulation des générations sont des
   limites documentées, pas des défauts.
 - Un coffre copié ou déplacé n'est pas pris en charge ; sa portabilité relève
