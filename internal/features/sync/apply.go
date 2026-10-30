@@ -16,6 +16,9 @@ import (
 // Codes of a run that published nothing, beyond the plan's findings
 // (ADR 0007).
 const (
+	// CodeCurrentExists keeps its B2b meaning: a current that differs from
+	// the plan, refused by a build without rotation. This build rotates the
+	// recognised current instead and no longer emits it.
 	CodeCurrentExists        backup.Code = "current-exists"
 	CodeChangedDuringSync    backup.Code = "changed-during-sync"
 	CodeVerificationMismatch backup.Code = "verification-mismatch"
@@ -53,10 +56,12 @@ type Result struct {
 	// Cause explains EffectIntervention.
 	Cause string
 	// Receipt is the Windows path of the receipt once published; Files and
-	// Bytes count what was verified.
-	Receipt string
-	Files   int
-	Bytes   int64
+	// Bytes count what was verified. Retained is the Windows path of the
+	// generation a published rotation kept in retained.
+	Receipt  string
+	Retained string
+	Files    int
+	Bytes    int64
 	// Recovery is what --recover found and did, nil for --apply.
 	Recovery *Recovery
 }
@@ -147,12 +152,20 @@ type operation struct {
 	planSum    [32]byte
 	staging    backup.FileID
 	intentAt   time.Time
+	// A rotation replaces the generation of previous, described by head,
+	// whose current has the identity old, fixed by planned (ADR 0006 §5).
+	previous string
+	head     backup.Receipt
+	old      backup.FileID
 }
 
-// Apply plans, then copies, verifies and publishes a first generation
-// (ADR 0006 §4). Its Result says what the vault now holds even when it
-// fails. An existing current that differs from the plan is refused with
-// current-exists: replacing it is the rotation of B2c.
+// rotation reports whether the operation replaces an existing current.
+func (o *operation) rotation() bool { return o.previous != "" }
+
+// Apply plans, then copies, verifies and publishes a generation: the first
+// one (ADR 0006 §4), or the next one by rotation of the recognised current
+// into retained (§5). Its Result says what the vault now holds even when it
+// fails.
 func (s *Service) Apply(ctx context.Context, request Request, w Writer) (Result, error) {
 	plan, err := s.Plan(ctx, request)
 	if err != nil {
@@ -168,13 +181,19 @@ func (s *Service) Apply(ctx context.Context, request Request, w Writer) (Result,
 		return result, &BlockedError{Detail: fmt.Sprintf("%d blocking finding(s)", plan.Blocking())}
 	case plan.upToDate():
 		return result, nil
-	case plan.Current != "":
-		return result, &BlockedError{Code: CodeCurrentExists,
-			Detail: "the vault already holds a generation of this game; replacing it is not available in this build"}
 	}
 	o, err := s.begin(ctx, plan, w)
 	if err != nil {
 		return result, err
+	}
+	if plan.Current != "" {
+		head := findReceipt(plan.observed, plan.Current)
+		if head == nil || plan.observed.currentID == (backup.FileID{}) {
+			_ = o.vault.Close()
+			result.Effect, result.Cause = EffectIntervention, "current is not recognised as the generation of "+plan.Current
+			return result, &InterventionError{Cause: result.Cause}
+		}
+		o.previous, o.head, o.old = plan.Current, *head, plan.observed.currentID
 	}
 	err = o.run()
 	if closeErr := o.vault.Close(); err == nil && closeErr != nil {
@@ -202,11 +221,16 @@ func (s *Service) begin(ctx context.Context, plan Plan, w Writer) (*operation, e
 	}, nil
 }
 
-// run performs the first publication; the caller closes the session.
+// run performs the publication or the rotation; the caller closes the
+// session.
 func (o *operation) run() error {
+	switchPhase := o.publish
+	if o.rotation() {
+		switchPhase = o.rotate
+	}
 	err := o.initialize()
 	if err == nil {
-		for _, phase := range []func() error{o.stage, o.recheck, o.verify, o.publish} {
+		for _, phase := range []func() error{o.stage, o.recheck, o.verify, switchPhase} {
 			if err = phase(); err != nil {
 				err = o.fail(err)
 				break
@@ -233,9 +257,17 @@ func (o *operation) unfinished(err error) error {
 
 func (o *operation) result() Result {
 	r := Result{Plan: o.plan, Operation: o.op, Effect: o.effect}
+	if r.Effect == EffectIntervention && !o.open {
+		// Refused before its directory existed: the vault is the subject.
+		r.Operation = ""
+	}
 	if o.effect == EffectPublished {
 		receipt := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, receiptsDir, o.op+".json")
 		r.Receipt = windowsPath(o.plan.vaultVolume, receipt)
+		if o.rotation() {
+			retained := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, retainedDir, o.previous)
+			r.Retained = windowsPath(o.plan.vaultVolume, retained)
+		}
 		for _, source := range o.planned.Sources {
 			r.Files += len(source.Entries)
 			r.Bytes += source.Bytes()
@@ -317,25 +349,50 @@ func (o *operation) initialize() error {
 	if err != nil {
 		return o.fail(err)
 	}
-	if err := o.record(backup.StepPlanned, backup.StepValues{Plan: planned}); err != nil {
+	if err := o.record(backup.StepPlanned, backup.StepValues{Previous: planned.Previous, Plan: planned, Current: o.old}); err != nil {
 		return o.fail(err)
 	}
 	return nil
 }
 
 // underLock reads the vault again and requires the state of the plan, then
-// checks the space once more (plan B2 §4.3, V2).
+// checks the space once more (plan B2 §4.3, V2). A rotation also requires
+// current to be recognised again, by the same identity, and its content to
+// match its receipt in full, before any journal (ADR 0006 §5, A2).
 func (o *operation) underLock() error {
 	v, err := o.s.observe(o.plan.Vault, o.plan.vaultVolume, o.plan.vaultSegments, o.plan.Game.ID)
 	if err != nil {
 		return err
 	}
 	before := o.plan.observed
+	if o.rotation() {
+		// Recognition refused under lock: current is not the generation the
+		// plan recognised, code 3 before any journal (ADR 0006 §5, A2).
+		for _, intervention := range v.interventions {
+			if intervention.Subject == o.game+"/"+currentDir || intervention.Subject == o.game+"/"+retainedDir+"/"+o.previous {
+				o.effect = EffectIntervention
+				return &InterventionError{Cause: string(intervention.Cause) + " " + intervention.Subject + ": " + intervention.Detail}
+			}
+		}
+		if !v.current || v.currentLink {
+			o.effect = EffectIntervention
+			return &InterventionError{Cause: "current is no longer the directory recognised by the plan: absent, a link or a reparse point"}
+		}
+	}
 	changed := v.state != VaultInitialized || len(v.interventions) > 0 || len(v.pending) > 0 ||
 		v.current != before.current || v.currentLink != before.currentLink ||
 		!sameOperations(v.receipts, before.receipts) || len(v.invalid) != len(before.invalid)
 	if changed {
 		return errVault(o.plan.Vault, "vault-changed: the vault changed since the plan; run sync again")
+	}
+	if o.rotation() && v.currentID != o.old {
+		o.effect = EffectIntervention
+		return &InterventionError{Cause: fmt.Sprintf("current is no longer the directory %s recognised by the plan", o.old)}
+	}
+	if o.rotation() {
+		if err := o.oldUnchanged(currentDir); err != nil {
+			return err
+		}
 	}
 	volume, err := o.s.volumes.Describe(o.plan.Vault)
 	if err != nil {
@@ -355,7 +412,7 @@ func (o *operation) underLock() error {
 func (o *operation) plannedContent() (*backup.Planned, error) {
 	p := &backup.Planned{
 		ToolVersion: o.w.ToolVersion, GameID: o.plan.Game.ID, GameName: o.plan.Game.Name,
-		StartedAt: o.started,
+		StartedAt: o.started, Previous: o.previous,
 	}
 	for _, source := range o.plan.Sources {
 		rs := backup.ReceiptSource{ID: source.Source.ID, Kind: string(source.Source.Kind), Required: source.Source.Required, Path: source.Path}
@@ -369,7 +426,7 @@ func (o *operation) plannedContent() (*backup.Planned, error) {
 			p.Changes.Removed += source.Changes.Removed
 			p.Changes.Unchanged += source.Changes.Unchanged
 		case SourceMissing:
-			rs.State, rs.Directories = backup.SourceMissing, []string{}
+			rs.State, rs.Directories, rs.Accepted = backup.SourceMissing, []string{}, source.Accepted
 		default:
 			return nil, fmt.Errorf("source %s is %s; nothing can be published", source.Source.ID, source.Status)
 		}
@@ -418,7 +475,7 @@ func (o *operation) record(step backup.Step, values backup.StepValues) error {
 	if err := o.commitFile(o.journalDir()+"/"+backup.RecordName(seq, step), data, o.attempts[seq], nil); err != nil {
 		return fmt.Errorf("record %s: %w", backup.RecordName(seq, step), err)
 	}
-	if step == backup.StepPublishIntent {
+	if step == backup.StepPublishIntent || step == backup.StepPromoteIntent {
 		o.intentAt = r.At
 	}
 	sum := sha256.Sum256(data)

@@ -124,23 +124,77 @@ func TestSyncApplyEndToEnd(t *testing.T) {
 	}
 }
 
-// B2b publishes a first generation only: once the source changed, --apply
-// refuses in code 2 and leaves the vault byte for byte as it was.
-func TestSyncApplyRefusesToReplaceCurrent(t *testing.T) {
+// receiptEntries reads the SHA-256 of every file a receipt describes.
+func receiptEntries(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt struct {
+		Sources []struct {
+			Entries []struct {
+				SHA256 string `json:"sha256"`
+			} `json:"entries"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	var sums []string
+	for _, entry := range receipt.Sources[0].Entries {
+		sums = append(sums, entry.SHA256)
+	}
+	return sums
+}
+
+// Plan B2 §9.3, binary: once the source changed, --apply rotates current
+// into retained on a real NTFS volume; inspect reads the retained
+// generation with the SHA-256 of its receipt; a third --apply is up to
+// date; a current modified by hand blocks in code 2, nothing moved.
+func TestRotationEndToEnd(t *testing.T) {
 	s := newSynthetic(t, buildBinary(t), 0)
-	if _, stderr, code := s.run(t, "--apply"); code != 0 {
+	_, stderr, code := s.run(t, "--apply")
+	first := publishedLine.FindStringSubmatch(stderr)
+	if code != 0 || first == nil {
 		t.Fatalf("first apply: %d %q", code, stderr)
 	}
 	if err := os.WriteFile(filepath.Join(s.install, "saves", "1.save"), []byte("ONE"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stdout, stderr, code := s.run(t, "--apply")
+	second := publishedLine.FindStringSubmatch(stderr)
+	if code != 0 || second == nil || second[1] == first[1] {
+		t.Fatalf("rotation: exit %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	game := filepath.Join(s.vault, "games", "synthetic-game")
+	if data, err := os.ReadFile(filepath.Join(game, "current", "saves", "1.save")); err != nil || string(data) != "ONE" {
+		t.Fatalf("current: %q, %v", data, err)
+	}
+	retained := filepath.Join(game, "retained", first[1])
+	manifest := filepath.Join(s.base, "retained.yaml")
+	writeManifest(t, manifest, retained)
+	inspected, err := exec.Command(s.binary, "inspect", "--manifest", manifest).Output()
+	if err != nil {
+		t.Fatalf("inspect retained: %v\n%s", err, inspected)
+	}
+	for _, sum := range receiptEntries(t, filepath.Join(game, "receipts", first[1]+".json")) {
+		if !strings.Contains(string(inspected), sum) {
+			t.Fatalf("inspect of the retained generation lacks %s:\n%s", sum, inspected)
+		}
+	}
+	if _, stderr, code := s.run(t, "--apply"); code != 0 || stderr != "savewarden: vault: not modified\n" {
+		t.Fatalf("third apply: exit %d, stderr %q", code, stderr)
+	}
+	if err := os.WriteFile(filepath.Join(game, "current", "saves", "1.save"), []byte("one by hand"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	before := fingerprint(t, s.vault)
-	_, stderr, code := s.run(t, "--apply")
-	if code != 2 || !strings.Contains(stderr, "current-exists") || !strings.HasSuffix(stderr, "savewarden: vault: not modified\n") {
-		t.Fatalf("exit %d, stderr %q", code, stderr)
+	if _, stderr, code := s.run(t, "--apply"); code != 2 || !strings.HasSuffix(stderr, "savewarden: vault: not modified\n") {
+		t.Fatalf("modified current: exit %d, stderr %q", code, stderr)
 	}
 	if fingerprint(t, s.vault) != before {
-		t.Fatal("the refused apply changed the vault")
+		t.Fatal("the blocked apply changed the vault")
 	}
 }
 
@@ -185,5 +239,159 @@ func TestSyncKilledDuringStagingThenRecovered(t *testing.T) {
 	}
 	if _, stderr, code := s.run(t, "--apply"); code != 0 || publishedLine.FindStringSubmatch(stderr) == nil {
 		t.Fatalf("apply after recovery: exit %d, stderr %q", code, stderr)
+	}
+}
+
+// The policy flags on a real vault: a removed file blocks in code 2 until
+// --allow-removals, which keeps it in retained; --recover refuses them in
+// code 1 without writing.
+func TestRotationFlagsEndToEnd(t *testing.T) {
+	s := newSynthetic(t, buildBinary(t), 0)
+	_, stderr, code := s.run(t, "--apply")
+	first := publishedLine.FindStringSubmatch(stderr)
+	if code != 0 || first == nil {
+		t.Fatalf("first apply: %d %q", code, stderr)
+	}
+	if err := os.Remove(filepath.Join(s.install, "saves", "1.save")); err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(t, s.vault)
+	if stdout, stderr, code := s.run(t, "--apply"); code != 2 || !strings.Contains(stdout, "blocking  files-removed  saves  1.save") {
+		t.Fatalf("removal without the flag: exit %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	if _, stderr, code := s.run(t, "--recover", "--allow-removals"); code != 1 || !strings.Contains(stderr, "--recover takes neither") {
+		t.Fatalf("--recover with a policy flag: exit %d, stderr %q", code, stderr)
+	}
+	if _, stderr, code := s.run(t, "--apply", "--accept-missing-source", "saves"); code != 1 || !strings.Contains(stderr, "is required") {
+		t.Fatalf("invalid --accept-missing-source: exit %d, stderr %q", code, stderr)
+	}
+	if fingerprint(t, s.vault) != before {
+		t.Fatal("a refused run changed the vault")
+	}
+	stdout, stderr, code := s.run(t, "--apply", "--allow-removals")
+	if code != 0 || publishedLine.FindStringSubmatch(stderr) == nil || !strings.Contains(stdout, "info  files-removed  saves  1.save") {
+		t.Fatalf("removal with the flag: exit %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	game := filepath.Join(s.vault, "games", "synthetic-game")
+	if _, err := os.Stat(filepath.Join(game, "current", "saves", "1.save")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the removed file is still current: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(game, "retained", first[1], "saves", "1.save")); err != nil || string(data) != "one" {
+		t.Fatalf("the removed file is not retained: %q, %v", data, err)
+	}
+}
+
+// A file of current kept open by another program refuses M1 on real NTFS,
+// access denied, never retried: the rotation is rolled back at once, code
+// 1, current unchanged; once the file is closed, the next --apply rotates.
+func TestRotationRefusedByAnOpenFileOnWindows(t *testing.T) {
+	s := newSynthetic(t, buildBinary(t), 0)
+	if _, stderr, code := s.run(t, "--apply"); code != 0 {
+		t.Fatalf("first apply: %d %q", code, stderr)
+	}
+	if err := os.WriteFile(filepath.Join(s.install, "saves", "1.save"), []byte("ONE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	game := filepath.Join(s.vault, "games", "synthetic-game")
+	open, err := os.Open(filepath.Join(game, "current", "saves", "1.save"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := s.run(t, "--apply")
+	_ = open.Close()
+	if code != 1 || !regexp.MustCompile(`savewarden: vault: rolled back [0-9T-]+[0-9a-f]{8}; current unchanged\n$`).MatchString(stderr) {
+		t.Fatalf("rotation with a file open in current: exit %d, stderr %q", code, stderr)
+	}
+	if data, err := os.ReadFile(filepath.Join(game, "current", "saves", "1.save")); err != nil || string(data) != "one" {
+		t.Fatalf("current changed: %q, %v", data, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(game, "retained")); len(entries) != 0 {
+		t.Fatalf("something was retained: %v", entries)
+	}
+	if _, stderr, code := s.run(t, "--apply"); code != 0 || publishedLine.FindStringSubmatch(stderr) == nil {
+		t.Fatalf("apply once the file is closed: exit %d, stderr %q", code, stderr)
+	}
+}
+
+// A rotation killed during its staging leaves an operation beside the
+// recognised current: --recover shows it abandoned, --recover --apply
+// closes it with current unchanged, and a new --apply rotates.
+func TestSyncKilledDuringRotationThenRecovered(t *testing.T) {
+	s := newSynthetic(t, buildBinary(t), 2000)
+	if _, stderr, code := s.run(t, "--apply"); code != 0 {
+		t.Fatalf("first apply: %d %q", code, stderr)
+	}
+	if err := os.WriteFile(filepath.Join(s.install, "saves", "1.save"), []byte("ONE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	game := filepath.Join(s.vault, "games", "synthetic-game")
+	cmd := exec.Command(s.binary, "sync", "--manifest", s.manifest, "--vault", s.vault, "--apply")
+	var childErr bytes.Buffer
+	cmd.Stderr = &childErr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	deadline := time.After(60 * time.Second)
+	killed := false
+	for !killed {
+		select {
+		case err := <-done:
+			t.Skipf("the copy ended before it could be interrupted: %v %s", err, childErr.String())
+		case <-deadline:
+			_ = cmd.Process.Kill()
+			t.Fatal("the copy did not start within a minute")
+		default:
+		}
+		if entries, _ := filepath.Glob(filepath.Join(game, "staging", "*", "saves", "bulk", "*.save")); len(entries) > 10 {
+			killed = cmd.Process.Kill() == nil
+		}
+		time.Sleep(time.Millisecond)
+	}
+	<-done
+	stdout, stderr, code := s.run(t, "--recover")
+	if code != 0 || !strings.Contains(stdout, "action: record abandoned") || stderr != "savewarden: vault: not modified\n" {
+		t.Fatalf("recover plan: exit %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+	if _, stderr, code := s.run(t, "--recover", "--apply"); code != 0 || !strings.Contains(stderr, "kept in staging") {
+		t.Fatalf("recover: exit %d, stderr %q", code, stderr)
+	}
+	if data, err := os.ReadFile(filepath.Join(game, "current", "saves", "1.save")); err != nil || string(data) != "one" {
+		t.Fatalf("current changed: %q, %v", data, err)
+	}
+	if _, stderr, code := s.run(t, "--apply"); code != 0 || publishedLine.FindStringSubmatch(stderr) == nil {
+		t.Fatalf("apply after recovery: exit %d, stderr %q", code, stderr)
+	}
+}
+
+// A copied vault keeps the data but not the identities NTFS gave them: the
+// plan, --apply and --recover refuse it in code 3, and the copy stays
+// identical byte for byte. The original vault still works.
+func TestCopiedVaultIsRefusedWithoutWriting(t *testing.T) {
+	s := newSynthetic(t, buildBinary(t), 0)
+	if _, stderr, code := s.run(t, "--apply"); code != 0 {
+		t.Fatalf("first apply: %d %q", code, stderr)
+	}
+	copied := s
+	copied.vault = filepath.Join(s.base, "Coffre copié")
+	if err := os.CopyFS(copied.vault, os.DirFS(s.vault)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.install, "saves", "1.save"), []byte("ONE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(t, copied.vault)
+	for _, args := range [][]string{nil, {"--apply"}, {"--recover"}} {
+		stdout, stderr, code := copied.run(t, args...)
+		if code != 3 || !strings.Contains(stdout+stderr, "copied or moved vault is not supported yet") {
+			t.Fatalf("%v on the copy: exit %d, stderr %q, stdout:\n%s", args, code, stderr, stdout)
+		}
+	}
+	if fingerprint(t, copied.vault) != before {
+		t.Fatal("a refused run changed the copied vault")
+	}
+	if _, stderr, code := s.run(t, "--apply"); code != 0 || publishedLine.FindStringSubmatch(stderr) == nil {
+		t.Fatalf("the original vault: exit %d, stderr %q", code, stderr)
 	}
 }

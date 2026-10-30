@@ -244,6 +244,8 @@ func (s *fakeScope) Identity(name string) (backup.FileID, error) {
 		return backup.FileID{}, err
 	case isLink(n.mode):
 		return backup.FileID{}, &notFollowedError{name}
+	case n.busy:
+		return backup.FileID{}, errors.New(name + ": held without sharing, its identity cannot be read")
 	}
 	return backup.FileID{Volume: 0x1a2b3c4d, Index: uint64(n.id)}, nil //nolint:gosec // G115: node ids count up from 1.
 }

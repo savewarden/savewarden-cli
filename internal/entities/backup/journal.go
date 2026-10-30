@@ -228,7 +228,8 @@ type Journal struct {
 	Plan       *Planned
 	PlanSHA256 [32]byte
 	// Staging is the identity of the staging directory recorded by staged;
-	// Old, that of the current generation recorded by retire-intent.
+	// Old, that of the current a rotation replaces, fixed under lock by the
+	// current_identity of planned and never replaced (ADR 0006 §5, A1).
 	Staging, Old FileID
 	// Taken holds the attempt numbers k already used by temporaries of the
 	// next record: the writer takes the smallest k not in it.
@@ -377,7 +378,7 @@ func (j *Journal) coherent(r Record, v StepValues) error {
 		if !v.Plan.StartedAt.Equal(r.At) {
 			return fmt.Errorf("plan started_at %s differs from the date of its record %s", formatUTC(v.Plan.StartedAt), formatUTC(r.At))
 		}
-		j.Previous, j.Plan, j.PlanSHA256 = v.Previous, v.Plan, v.PlanSHA256
+		j.Previous, j.Plan, j.PlanSHA256, j.Old = v.Previous, v.Plan, v.PlanSHA256, v.Current
 	case StepStaged, StepVerified:
 		want, err := ContentDigest(j.Plan.Sources)
 		if err != nil {
@@ -399,13 +400,27 @@ func (j *Journal) coherent(r Record, v StepValues) error {
 			return fmt.Errorf("current identity %s differs from the staging identity %s", v.Current, j.Staging)
 		}
 	case StepRetireIntent:
-		j.Old = v.Current
+		// Never an identity observed later: the one planned fixed.
+		if v.Current != j.Old {
+			return fmt.Errorf("current identity %s differs from %s recorded by planned", v.Current, j.Old)
+		}
 	case StepRestoreIntent:
 		if v.Retained != j.Old {
-			return fmt.Errorf("retained identity %s differs from %s recorded by retire-intent", v.Retained, j.Old)
+			return fmt.Errorf("retained identity %s differs from %s recorded by planned", v.Retained, j.Old)
 		}
 	}
 	return nil
+}
+
+// Published returns, for an operation terminal in published, the identity
+// of the directory it published, staging_identity of staged as publish-intent
+// or promote-intent repeated it, and the receipt_sha256 of its published
+// record (ADR 0006 §4). ok is false for any other operation.
+func (j Journal) Published() (identity FileID, receipt [32]byte, ok bool) {
+	if j.Last() != StepPublished {
+		return FileID{}, [32]byte{}, false
+	}
+	return j.Staging, j.Values[len(j.Values)-1].Digest, true
 }
 
 // Attempts counts the temporaries of the record that would follow the last

@@ -49,7 +49,11 @@ func valuesFor(t *testing.T, step backup.Step, rotation bool) backup.StepValues 
 	}
 	switch step {
 	case backup.StepPlanned:
-		return backup.StepValues{Previous: plan.Previous, Plan: plan}
+		values := backup.StepValues{Previous: plan.Previous, Plan: plan}
+		if rotation {
+			values.Current = oldID
+		}
+		return values
 	case backup.StepStaged:
 		return backup.StepValues{Staging: stagingID, Digest: content}
 	case backup.StepVerified:
@@ -118,6 +122,13 @@ func obs(c, r, s backup.Presence) backup.Observation {
 	return backup.Observation{Current: c, Retained: r, Staging: s}
 }
 
+// expecting is obs for a game with a published generation expected.
+func expecting(c, r, s backup.Presence) backup.Observation {
+	o := obs(c, r, s)
+	o.Expected = true
+	return o
+}
+
 func steps(prefix []backup.Step, more ...backup.Step) []backup.Step {
 	return append(append([]backup.Step{}, prefix...), more...)
 }
@@ -129,34 +140,39 @@ func TestRecoveryTablesAreClosed(t *testing.T) {
 	cases := []struct {
 		name     string
 		rotation bool
+		expected bool // a published generation is expected (rule M3)
 		steps    []backup.Step
 		rows     row
 	}{
-		{"not started", false, nil, row{obs(a, a, a): backup.ActionAbandon, obs(u, a, a): backup.ActionAbandon, obs(o, a, a): backup.ActionAbandon}},
-		{"first planned", false, pre[:1], row{obs(a, a, a): backup.ActionAbandon}},
-		{"first staging-intent", false, pre[:2], row{obs(a, a, a): backup.ActionAbandon, obs(a, a, u): backup.ActionAbandon}},
-		{"first staged", false, pre[:3], row{obs(a, a, n): backup.ActionAbandon}},
-		{"first verified", false, pre, row{obs(a, a, n): backup.ActionAbandon}},
-		{"first publish-intent", false, steps(pre, backup.StepPublishIntent), row{
+		// Rule M3: without a generation expected, current must be absent;
+		// with one, it must be the recognised previous generation.
+		{"not started", false, false, nil, row{obs(a, a, a): backup.ActionAbandon}},
+		{"not started beside a generation", false, true, nil, row{expecting(o, a, a): backup.ActionAbandon}},
+		{"rotation planned, generation expected", true, true, pre[:1], row{expecting(o, a, a): backup.ActionAbandon}},
+		{"first planned", false, false, pre[:1], row{obs(a, a, a): backup.ActionAbandon}},
+		{"first staging-intent", false, false, pre[:2], row{obs(a, a, a): backup.ActionAbandon, obs(a, a, u): backup.ActionAbandon}},
+		{"first staged", false, false, pre[:3], row{obs(a, a, n): backup.ActionAbandon}},
+		{"first verified", false, false, pre, row{obs(a, a, n): backup.ActionAbandon}},
+		{"first publish-intent", false, false, steps(pre, backup.StepPublishIntent), row{
 			obs(a, a, n): backup.ActionMarkRolledBack, obs(n, a, a): backup.ActionVerifyThenPublish}},
-		{"first unpublish-intent", false, steps(pre, backup.StepPublishIntent, backup.StepUnpublishIntent), row{
+		{"first unpublish-intent", false, false, steps(pre, backup.StepPublishIntent, backup.StepUnpublishIntent), row{
 			obs(n, a, a): backup.ActionFinishUnpublish, obs(a, a, n): backup.ActionMarkRolledBack}},
-		{"first rollback-failed", false, steps(pre, backup.StepPublishIntent, backup.StepUnpublishIntent, backup.StepRollbackFailed), row{
+		{"first rollback-failed", false, false, steps(pre, backup.StepPublishIntent, backup.StepUnpublishIntent, backup.StepRollbackFailed), row{
 			obs(n, a, a): backup.ActionFinishUnpublish, obs(a, a, n): backup.ActionMarkRolledBack}},
-		{"rotation planned", true, pre[:1], row{obs(o, a, a): backup.ActionAbandon}},
-		{"rotation staging-intent", true, pre[:2], row{obs(o, a, a): backup.ActionAbandon, obs(o, a, u): backup.ActionAbandon}},
-		{"rotation verified", true, pre, row{obs(o, a, n): backup.ActionAbandon}},
-		{"rotation retire-intent", true, steps(pre, backup.StepRetireIntent), row{
+		{"rotation planned", true, false, pre[:1], row{obs(o, a, a): backup.ActionAbandon}},
+		{"rotation staging-intent", true, false, pre[:2], row{obs(o, a, a): backup.ActionAbandon, obs(o, a, u): backup.ActionAbandon}},
+		{"rotation verified", true, false, pre, row{obs(o, a, n): backup.ActionAbandon}},
+		{"rotation retire-intent", true, false, steps(pre, backup.StepRetireIntent), row{
 			obs(o, a, n): backup.ActionMarkRolledBack, obs(a, o, n): backup.ActionRestore}},
-		{"rotation promote-intent", true, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent), row{
+		{"rotation promote-intent", true, false, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent), row{
 			obs(a, o, n): backup.ActionRestore, obs(n, o, a): backup.ActionVerifyThenPublish}},
-		{"rotation unpromote-intent", true, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepUnpromoteIntent), row{
+		{"rotation unpromote-intent", true, false, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepUnpromoteIntent), row{
 			obs(n, o, a): backup.ActionFinishUnpromote, obs(a, o, n): backup.ActionRestore}},
-		{"rotation unpromote failed", true, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepUnpromoteIntent, backup.StepRollbackFailed), row{
+		{"rotation unpromote failed", true, false, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepUnpromoteIntent, backup.StepRollbackFailed), row{
 			obs(n, o, a): backup.ActionFinishUnpromote, obs(a, o, n): backup.ActionRestore}},
-		{"rotation restore-intent", true, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepRestoreIntent), row{
+		{"rotation restore-intent", true, false, steps(pre, backup.StepRetireIntent, backup.StepPromoteIntent, backup.StepRestoreIntent), row{
 			obs(a, o, n): backup.ActionFinishRestore, obs(o, a, n): backup.ActionMarkRolledBack}},
-		{"rotation restore failed", true, steps(pre, backup.StepRetireIntent, backup.StepRestoreIntent, backup.StepRollbackFailed), row{
+		{"rotation restore failed", true, false, steps(pre, backup.StepRetireIntent, backup.StepRestoreIntent, backup.StepRollbackFailed), row{
 			obs(a, o, n): backup.ActionFinishRestore, obs(o, a, n): backup.ActionMarkRolledBack}},
 	}
 	for _, tt := range cases {
@@ -165,17 +181,19 @@ func TestRecoveryTablesAreClosed(t *testing.T) {
 			for _, c := range presences {
 				for _, r := range presences {
 					for _, s := range presences {
-						got, err := backup.Classify(j, obs(c, r, s))
-						want, listed := tt.rows[obs(c, r, s)]
+						observed := obs(c, r, s)
+						observed.Expected = tt.expected
+						got, err := backup.Classify(j, observed)
+						want, listed := tt.rows[observed]
 						switch {
 						case listed && (err != nil || got != want):
-							t.Errorf("%v: got %q, %v; want %q", obs(c, r, s), got, err, want)
+							t.Errorf("%v: got %q, %v; want %q", observed, got, err, want)
 						case !listed && err == nil:
-							t.Errorf("%v: got %q; an unlisted observation must fail closed", obs(c, r, s), got)
+							t.Errorf("%v: got %q; an unlisted observation must fail closed", observed, got)
 						case !listed:
 							var ambiguity *backup.AmbiguityError
 							if !errors.As(err, &ambiguity) {
-								t.Errorf("%v: error %v is not an AmbiguityError", obs(c, r, s), err)
+								t.Errorf("%v: error %v is not an AmbiguityError", observed, err)
 							}
 						}
 					}
@@ -248,6 +266,11 @@ func TestPreparedTemporariesMustMatchTheObservation(t *testing.T) {
 		{"restore prepared, retire never happened", true, retiring, backup.StepRestoreIntent, obs(o, a, n), ""},
 		{"staged prepared during the copy", false, pre[:2], backup.StepStaged, obs(a, a, u), backup.ActionAbandon},
 		{"staging-intent prepared, staging exists", false, pre[:1], backup.StepStagingIntent, obs(a, a, u), ""},
+		{"rollback-failed prepared after restore-intent", true, steps(retiring, backup.StepRestoreIntent), backup.StepRollbackFailed, obs(a, o, n), backup.ActionFinishRestore},
+		{"rollback-failed prepared, M3 done", true, steps(retiring, backup.StepRestoreIntent), backup.StepRollbackFailed, obs(o, a, n), ""},
+		{"rollback-failed prepared after unpromote-intent", true, steps(retiring, backup.StepPromoteIntent, backup.StepUnpromoteIntent), backup.StepRollbackFailed, obs(n, o, a), backup.ActionFinishUnpromote},
+		{"rollback-failed prepared, M4 done", true, steps(retiring, backup.StepPromoteIntent, backup.StepUnpromoteIntent), backup.StepRollbackFailed, obs(a, o, n), ""},
+		{"rollback-failed prepared after unpublish-intent", false, steps(publishing, backup.StepUnpublishIntent), backup.StepRollbackFailed, obs(n, a, a), backup.ActionFinishUnpublish},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

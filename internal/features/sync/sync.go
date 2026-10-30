@@ -21,11 +21,25 @@ import (
 	"github.com/savewarden/savewarden-cli/internal/entities/game"
 )
 
-// Request selects the manifest and the vault of a plan.
+// Request selects the manifest and the vault of a plan, and the explicit
+// policies of plan B2 §4.4 (D5, V1).
 type Request struct {
 	ManifestPath string
 	VaultPath    string
+	// AllowRemovals accepts files removed from a source that is present,
+	// and nothing else.
+	AllowRemovals bool
+	// AcceptMissing names, one by one, optional sources physically absent
+	// whose files the receipt of current holds. Naming any other source is
+	// an invalid invocation.
+	AcceptMissing []string
 }
+
+// InvocationError refuses flags that do not apply to the plan: exit code
+// 1, nothing written.
+type InvocationError struct{ Detail string }
+
+func (e *InvocationError) Error() string { return "invalid invocation: " + e.Detail }
 
 // Service plans synchronisations through injected adapters, all of them
 // read-only. Writing needs a Writer, given to --apply and --recover only.
@@ -65,11 +79,19 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	}
 	gameSegments := append(append([]string{}, vaultSegments...), gamesDir, manifest.Game.ID)
 	plan := Plan{
-		ManifestPath: request.ManifestPath,
-		Game:         manifest.Game,
-		Vault:        request.VaultPath,
-		Destination:  windowsPath(vaultVolume, append(append([]string{}, gameSegments...), currentDir)),
-		manifest:     manifest, vaultVolume: vaultVolume, vaultSegments: vaultSegments,
+		ManifestPath:  request.ManifestPath,
+		Game:          manifest.Game,
+		Vault:         request.VaultPath,
+		Destination:   windowsPath(vaultVolume, append(append([]string{}, gameSegments...), currentDir)),
+		AllowRemovals: request.AllowRemovals,
+		manifest:      manifest, vaultVolume: vaultVolume, vaultSegments: vaultSegments,
+	}
+	accepted := map[string]bool{}
+	for _, id := range request.AcceptMissing {
+		if accepted[id] {
+			return Plan{}, &InvocationError{fmt.Sprintf("--accept-missing-source %s is given twice", id)}
+		}
+		accepted[id] = true
 	}
 
 	scope, err := s.files.OpenScope(vaultVolume)
@@ -122,10 +144,13 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 		if err != nil {
 			return Plan{}, err
 		}
-		plan.planSource(source, windowsPath(volume, segments), dir, previous)
+		plan.planSource(source, windowsPath(volume, segments), dir, previous, accepted[source.ID])
 		if strings.EqualFold(volume, vaultVolume) {
 			plan.add(backup.Info, CodeSameVolume, source.ID, vaultVolume, "vault and source share a volume; not an off-disk backup")
 		}
+	}
+	if err := plan.checkAccepted(previous, request.AcceptMissing); err != nil {
+		return Plan{}, err
 	}
 	plan.checkSpace()
 	if previous != nil {
@@ -312,8 +337,9 @@ func relativeTo(p string) string {
 	return rest
 }
 
-// planSource applies plan B2 §4.4 to one source.
-func (p *Plan) planSource(source game.Source, path string, dir backup.Directory, previous *backup.Receipt) {
+// planSource applies plan B2 §4.4 to one source. accepted says that
+// --accept-missing-source names it; its validity is checked afterwards.
+func (p *Plan) planSource(source game.Source, path string, dir backup.Directory, previous *backup.Receipt, accepted bool) {
 	result := SourcePlan{Source: source, Path: path, inventory: dir}
 	var old backup.ReceiptSource
 	hadOld := false
@@ -326,6 +352,10 @@ func (p *Plan) planSource(source game.Source, path string, dir backup.Directory,
 		switch {
 		case source.Required:
 			p.add(backup.Blocking, CodeSourceMissing, source.ID, dir.Missing, "does not exist")
+		case hadOld && old.State == backup.SourceCopied && accepted:
+			result.Accepted = true
+			p.add(backup.Info, CodeSourceVanished, source.ID, dir.Missing,
+				"optional source absent, accepted by --accept-missing-source; its files stay in retained")
 		case hadOld && old.State == backup.SourceCopied:
 			p.add(backup.Blocking, CodeSourceVanished, source.ID, dir.Missing,
 				"optional source absent but present in the receipt of the current generation; an absence is never a deletion")
@@ -348,17 +378,58 @@ func (p *Plan) planSource(source game.Source, path string, dir backup.Directory,
 		}
 		result.Changes = backup.Compare(old.Entries, old.Directories, dir.Entries, dir.Directories)
 		result.Files, result.Bytes = len(dir.Entries), dir.Bytes
+		severity, accepted := backup.Blocking, ""
+		if p.AllowRemovals {
+			severity, accepted = backup.Info, "; accepted by --allow-removals, kept in retained"
+		}
 		for _, change := range result.Changes.Files {
 			if change.Kind == backup.Removed {
-				p.add(backup.Blocking, CodeFilesRemoved, source.ID, change.Entry.Path, "in the current generation but no longer in the source")
+				p.add(severity, CodeFilesRemoved, source.ID, change.Entry.Path, "in the current generation but no longer in the source"+accepted)
 			}
 		}
 		for _, d := range result.Changes.RemovedDirectories {
-			p.add(backup.Blocking, CodeFilesRemoved, source.ID, d, "directory in the current generation but no longer in the source")
+			p.add(severity, CodeFilesRemoved, source.ID, d, "directory in the current generation but no longer in the source"+accepted)
 		}
 		p.checkLength(source.ID, dir.Entries)
 	}
 	p.Sources = append(p.Sources, result)
+}
+
+// checkAccepted refuses every --accept-missing-source that does not name
+// an optional source of the manifest, physically absent, whose files the
+// receipt of current holds (plan B2 §4.4, V1): an invalid invocation, code
+// 1, nothing written.
+func (p *Plan) checkAccepted(previous *backup.Receipt, ids []string) error {
+	for _, id := range ids {
+		var planned *SourcePlan
+		for i := range p.Sources {
+			if p.Sources[i].Source.ID == id {
+				planned = &p.Sources[i]
+			}
+		}
+		var old backup.ReceiptSource
+		known := false
+		if previous != nil {
+			old, known = previous.Source(id)
+		}
+		var why string
+		switch {
+		case planned == nil && known:
+			why = "was removed from the manifest; removing a source needs a separate decision, never this flag"
+		case planned == nil:
+			why = "is not a source of the manifest"
+		case planned.Source.Required:
+			why = "is required; a required source that is absent always blocks"
+		case planned.Status != SourceMissing:
+			why = "is present; files removed from a present source need --allow-removals"
+		case !known || old.State != backup.SourceCopied:
+			why = "is not in the receipt of the current generation; nothing of it would be lost"
+		default:
+			continue
+		}
+		return &InvocationError{fmt.Sprintf("--accept-missing-source %s: the source %s", id, why)}
+	}
+	return nil
 }
 
 func (p *Plan) inherit(source string, findings []backup.Finding) {

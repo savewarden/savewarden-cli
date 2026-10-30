@@ -4,7 +4,7 @@
 
 - Lire le plan demandé intégralement et inspecter statut, branche, remote et
   fichiers existants avant toute écriture. Ne pas écraser du travail existant.
-- Lot courant : **B2b**, première publication sécurisée de `sync`, selon
+- Lot courant : **B2c**, rotation de `current` et récupération complète de `sync`, selon
   `.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md`, plan directeur de B2
   validé par le propriétaire, et ADR 0004 à 0007. B2 est livré en trois
   PR successives : B2a, B2b, B2c, chacune après un GO distinct ; puis Human GO

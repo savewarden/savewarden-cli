@@ -51,6 +51,24 @@ le 24 octobre 2026. Détail dans [le rapport B1](../validation/b1.md). L'étape
 facultative d'écriture en jeu n'est pas consignée ; aucune empreinte
 individuelle n'est versionnée.
 
+### Protocole B2c
+
+Exécuté par le propriétaire après la fusion de B2c, dans le coffre du pilote
+B2b ; l'agent n'y accède pas :
+
+1. jouer et sauvegarder une fois, puis fermer le jeu et son launcher ;
+2. `sync`, plan seul : code `0`, `plan: changes`, `current` égal à
+   l'opération du pilote B2b ;
+3. `sync --apply` : code `0`, `published <op>`, ligne `retained:` qui nomme
+   l'ancienne génération ;
+4. `inspect` d'un manifeste qui pointe sur `retained\<op du pilote B2b>` :
+   SHA-256 égaux à ceux de son receipt, sans les versionner ;
+5. plan suivant `up to date`, puis second `sync --apply` : `not modified`,
+   empreinte du coffre inchangée.
+
+Consigner codes, nombre de fichiers et résultat d'idempotence dans le rapport
+B2c, sans hash individuel, nom de profil, chemin personnel ni receipt réel.
+
 ### Résultat B2b — 29 octobre 2026
 
 Exécuté par le propriétaire sous Windows 11, après la fusion de B2b, avec un
@@ -74,7 +92,7 @@ individuelle, aucun receipt réel ni aucun chemin personnel n'est versionné.
 B2 copie seulement après plan, choix explicite de destination et
 autorisation ; pas de suppression de la source. L'ancien coffre du pilote,
 non vide et sans marqueur, est refusé par la règle générique du coffre,
-jamais adopté. B2c, rotation de `current`, attend son propre GO. B3 ajoutera
+jamais adopté. B3 ajoutera
 un snapshot neuf
 et immuable. B4 restaurera un snapshot dans un dossier **isolé**. B5 contrôlera
 manifestes/receipts/hash et validera le pilote complet avant une RC.

@@ -2,7 +2,8 @@
 
 Date : 29 octobre 2026. Statut : accepté pour B2, contenu normatif du plan B2
 v0.2 §5, validé par le propriétaire le 29 octobre 2026 après revue intégrale ;
-amendé le même jour avant les premières écritures de B2b (voir Amendements).
+amendé le même jour avant les premières écritures de B2b, puis pour le
+cadrage de B2c (voir Amendements).
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -83,14 +84,14 @@ minuscules ; un texte, une ligne de 1 à 1 024 octets.
 
 | Étape | Champs | Cohérence vérifiée à la lecture |
 | --- | --- | --- |
-| `planned` | `previous` : `null` ou identifiant d'opération ; `plan` : objet strict, version de l'outil, jeu, `started_at`, `changes` et `sources` au format du receipt v1 ; `plan_sha256` | `plan_sha256` est le SHA-256 de `plan` ; `previous` égal à celui du plan |
+| `planned` | `previous` : `null` ou identifiant d'opération ; `plan` : objet strict, version de l'outil, jeu, `started_at`, `changes` et `sources` au format du receipt v1 ; `plan_sha256` ; pour une rotation seulement, `current_identity` : l'ancien `current`, relevé sous verrou (§5) | `plan_sha256` est le SHA-256 de `plan` ; `previous` égal à celui du plan ; `current_identity` **obligatoire si `previous` n'est pas `null`, interdit sinon** |
 | `staging-intent` | `staging` : `staging/<op>` | Nom fixé par l'opération |
 | `staged` | `staging_identity` ; `copied_sha256` | `copied_sha256` est l'empreinte du contenu du plan |
 | `verified` | `verified_sha256` | Idem |
 | `publish-intent`, `promote-intent` | `staging_identity` | Égale à celle de `staged` |
 | `unpublish-intent`, `unpromote-intent` | `current_identity` | Égale à celle de `staged`, puisque c'est le staging qui a été publié ou promu |
-| `retire-intent` | `current_identity` : l'ancien `current` | — |
-| `restore-intent` | `retained_identity` | Égale à celle de `retire-intent` |
+| `retire-intent` | `current_identity` : l'ancien `current` | Égale à `current_identity` de `planned`, jamais remplacée par une identité nouvellement observée |
+| `restore-intent` | `retained_identity` | Égale à `current_identity` de `planned`, donc à celle de `retire-intent` |
 | `rollback-failed` | `error` | — |
 | `published` | `receipt_sha256` : SHA-256 du receipt validé | Comparée au receipt observé |
 | `failed`, `abandoned` | `reason` | — |
@@ -100,6 +101,12 @@ L'empreinte du contenu est le SHA-256 de la forme JSON canonique des
 `sources` du plan : identifiants, chemins, tailles, dates et SHA-256 de
 chaque fichier, dossiers. Le receipt reprend `plan_sha256` et les `sources`
 du plan.
+
+**Compatibilité.** Un `planned` de première publication, `previous: null`,
+n'a pas de `current_identity` : les journaux écrits par B2b restent lisibles
+sans changement. Un `planned` de rotation sans `current_identity`, ou une
+première publication qui en porte un, est une ambiguïté ; B2b n'en a jamais
+écrit.
 
 **Validation d'un enregistrement, dans cet ordre :**
 
@@ -220,7 +227,7 @@ ordre exact :
 | I5 | `CreateDirectory(games)`, puis `CreateDirectory(games\<game-id>)`, chacun seulement s'il manque | Dossiers vides | Normal ; un dossier existant est contrôlé sans suivi : dossier ordinaire, aucun point d'analyse |
 | I6 | `sync.lock` : `CREATE_NEW`, ou ouverture de l'existant, sans partage | Verrou vide ; le handle est libéré par l'OS | Normal |
 | I7 | Sous verrou : état du coffre relu, espace revérifié (V2) | Métadonnées seules | En cas d'échec ici : code 1 ou 2, `vault: metadata only; nothing staged or published` |
-| I8 | `CreateDirectory(journal)` s'il manque, puis `CreateDirectory(journal\<op>)`, exclusif | Dossier d'opération vide, ou ne contenant que des temporaires `001-…` | « Opération non commencée » : bloque `--apply` (I8) ; `--recover --apply` valide `001-abandoned` si aucun `staging\<op>` n'existe |
+| I8 | `CreateDirectory(journal)` s'il manque, puis `CreateDirectory(journal\<op>)`, exclusif | Dossier d'opération vide, ou ne contenant que des temporaires `001-…` | « Opération non commencée » : bloque `--apply` (I8) ; `--recover --apply` valide `001-abandoned` aux seules conditions de la règle M3 ci-dessous |
 | I9 | Validation de `001-planned` | Opération commencée | Automate ci-dessous |
 
 Refus sans aucune mutation :
@@ -233,6 +240,54 @@ Refus sans aucune mutation :
   ou dans `games\<game-id>` : code 3 ;
 - lien, jonction ou point d'analyse à n'importe quel niveau : code 1 ;
 - neuf temporaires de marqueur déjà présents : enveloppe E1 épuisée, code 3.
+
+**Génération précédente reconnue.** `current` est reconnu comme la
+génération publiée par l'opération `<prev-op>` seulement si toute la chaîne
+de preuve tient, observation comprise :
+
+1. le receipt `<prev-op>` est le receipt de tête du jeu, valide et du même
+   jeu ;
+2. le journal `<prev-op>` est terminal en `published`, et son
+   `receipt_sha256` est le SHA-256 du fichier receipt ;
+3. l'identité observée de `current`, lue sans suivi de lien, est l'identité
+   que ce journal a publiée : `staging_identity` de `staged`, reprise par
+   `publish-intent` pour une première publication ou par `promote-intent`
+   pour une rotation ;
+4. le contenu de `current` est intégralement conforme au receipt, relu comme
+   au §4.5 du plan B2.
+
+Un dossier présent dont l'une de ces preuves manque est `unidentified` ou
+`other`, jamais `old`. La règle vaut pour une génération publiée par B2b
+comme par une rotation de B2c, et pour un receipt reconstruit par la
+récupération, dont le journal porte les mêmes identités.
+
+**Coffre copié ou déplacé.** Une copie ou un déplacement manuel du coffre
+peut changer les identités NTFS sans altérer les données. B2 ne prend pas en
+charge ce cas : la génération n'est plus reconnue, code 3, rien écrit. Le
+diagnostic constate un écart d'identité, sans prétendre à une corruption ni
+à une compromission ; aucune identité n'est adoptée ni réécrite
+automatiquement. La portabilité d'un coffre relève d'une procédure future,
+explicite, de requalification ou d'import contrôlé, qui ne pourra pas
+affaiblir la récupération fail-closed.
+
+**Opération non commencée (règle M3).** Un dossier d'opération sans aucun
+enregistrement validé, vide ou ne contenant que des temporaires `001-…`, n'a
+fixé ni plan ni identité. Une **génération publiée est attendue** dès que le
+jeu a un receipt, valide ou non, ou un journal terminal en `published`.
+`staging\<op>` doit être absent, et tout `retained\<…>` présent expliqué
+par son receipt, comme le §3 l'exige déjà. Alors :
+
+| Génération publiée attendue | `current` | Action |
+| --- | --- | --- |
+| Non | Absent | `001-abandoned` |
+| Oui | Présent et génération précédente reconnue | `001-abandoned` |
+| Oui | Absent | Contradiction : code 3, rien écrit |
+| Non | Présent | Code 3, rien écrit |
+| Oui | Présent mais non reconnu : identité, contenu, receipt ou journal en défaut | Code 3, rien écrit |
+
+Aucune réparation n'est tentée. Ce cas, antérieur à `001-planned`, est
+distinct de celui d'une rotation dont `planned` est validé, où
+`current_identity` est la référence (§5).
 
 Un coffre incomplet n'est **jamais requalifié automatiquement** en coffre
 sain. La seule reprise d'une initialisation interrompue est `--recover
@@ -260,14 +315,15 @@ n'est pas terminal ; il en existe au plus un par intention (E3).
 **Notation des observations.** Les tableaux de récupération notent l'identité
 trouvée sous chaque nom : `C` pour `current`, `S` pour `staging\<op>`, `R` pour
 `retained\<prev-op>`. `new` est l'identité du staging relevée dans `staged` ;
-`old` celle de `current` relevée dans `retire-intent` ; `—` un nom absent.
-Toute autre identité sous l'un de ces noms est une ambiguïté.
+`old` celle de l'ancien `current`, relevée sous verrou et fixée par
+`current_identity` de `planned` (§5) ; `—` un nom absent. Toute autre
+identité sous l'un de ces noms, notée `other`, est une ambiguïté.
 
 Récupération `--recover --apply` d'une première publication :
 
 | Dernier validé | Observation (`C`, `S`) | Action |
 | --- | --- | --- |
-| Aucun : dossier d'opération vide ou temporaires `001` seuls | (—, —), ou un `current` publié par une opération antérieure : seul `staging\<op>` doit manquer (I8) | `001-abandoned` |
+| Aucun : dossier d'opération vide ou temporaires `001` seuls | Règle M3 : aucune génération publiée attendue et `current` absent, ou génération précédente reconnue ; `staging\<op>` absent | `001-abandoned` ; sinon code 3, rien écrit |
 | `planned` | (—, —) | `abandoned` |
 | `staging-intent` | (—, —), ou (—, dossier ordinaire sans point d'analyse) | `abandoned` ; staging laissé en place, ni lu ni déplacé |
 | `staged`, `verified` | (—, `new`) | `abandoned` ; staging laissé en place |
@@ -279,8 +335,10 @@ Récupération `--recover --apply` d'une première publication :
 | `published` | (`new`, —), receipt conforme | Rien |
 | Tout autre cas, dont un `staging\<op>` présent avant `staging-intent`, un `S` absent après `staged`, ou `C` et `S` tous deux présents | — | Fail-closed, code 3 |
 
-Un `current` existant et différent du plan est refusé avant tout staging
-(`current-exists`, code 2).
+En B2b, un `current` existant et différent du plan est refusé avant tout
+staging (`current-exists`, code 2). En B2c, seule la génération précédente
+reconnue est remplacée, par la rotation du §5 ; tout autre `current` reste
+refusé avant tout staging (§5, point 1).
 
 #### Ordre d'une bascule, handles et identités
 
@@ -355,13 +413,91 @@ Rollback : M4 puis M3 si le nouveau `current` doit être retiré, M3 seul si la
 promotion n'a pas eu lieu. `rollback-failed` : au plus un par intention (E3),
 non terminal.
 
+**Identité persistante de l'ancien `current` (A1, A2).** L'identité de
+l'ancien `current` est relevée une fois, sous verrou, et ne change plus :
+
+1. à l'étape I7, sous verrou et avant `001-planned`, `current` doit être
+   la génération précédente reconnue (§4) : son identité est celle que le
+   journal `<prev-op>` a publiée et son contenu est relu intégralement contre
+   le receipt ; un écart de contenu sous cette identité donne
+   `current-modified`, code 2, sans journal ; une autre identité, une
+   identité indisponible ou un point d'analyse, code 3. Le mode plan
+   applique la même reconnaissance : un `current` dont l'identité n'est pas
+   celle que le journal `<prev-op>` a publiée est signalé
+   `unexpected-entry`, code 3, quel que soit son contenu, jamais comparé
+   comme s'il était la génération précédente ; un receipt absent ou
+   invalide garde `current-modified`, code 2, comme en B2b ;
+2. `planned` fixe cette identité dans `current_identity` : c'est la
+   référence `old` des observations, de `retire-intent` et de
+   `restore-intent` pour toute la suite de l'opération et de sa
+   récupération ;
+3. après `verified` et immédiatement avant `retire-intent`, `current` est
+   relu intégralement contre son receipt et son identité comparée à
+   `current_identity` : contenu différent sous la même identité, `failed`
+   avec `current-modified`, code 2, rien déplacé ; identité différente ou
+   indisponible, objet qu'aucun enregistrement n'explique, code 3, rien
+   enregistré ni déplacé ;
+4. le pré-contrôle de M1 suit l'ordre du §4 : identité égale à
+   `current_identity`, `retained\<prev-op>` absent, portées de lecture
+   fermées ;
+5. après le post-contrôle de M1 et avant `promote-intent`, l'observation
+   doit être exactement (—, `old`, `new`) : `current` absent, staging
+   d'identité `new`, et `retained\<prev-op>` relu intégralement contre le
+   receipt `<prev-op>`, identité égale à `current_identity`. Tout écart,
+   dont un `current` réapparu ou un `retained` modifié, est une
+   contradiction : code 3, **rien n'est enregistré ni déplacé**, ni
+   promotion, ni restauration d'une génération altérée. Un objet apparu
+   sous `current` n'a pas de provenance démontrée : il n'est ni lu comme une
+   génération, ni déplacé, ni écrasé, et l'ancienne génération reste dans
+   `retained\<prev-op>`, momentanément indisponible sous son nom courant ;
+   le diagnostic nomme l'ambiguïté. Le journal reste à `retire-intent`. Sa
+   récupération ne déduit rien de cet écart : elle classe l'observation
+   qu'elle trouve, selon le tableau ci-dessous :
+   - objet inattendu sous `current`, (`other`, `old`, `new`), ou
+     `retained\<prev-op>` d'une autre identité, (—, `other`, `new`) : aucune
+     ligne ne s'applique ; fail-closed, code 3, rien écrit, enregistré ni
+     déplacé tant que cet objet reste présent ; `retained\<prev-op>` et
+     `staging\<op>` restent intacts ;
+   - `retained\<prev-op>` de même identité au contenu altéré, (—, `old`,
+     `new`) : la ligne prévue exige une restauration vérifiée, qui échoue :
+     code 3, rien écrit ;
+   - une récupération n'est possible que lorsqu'une observation ultérieure
+     correspond entièrement à une ligne du tableau, toutes ses vérifications
+     comprises.
+
+**Fenêtres résiduelles.** `sync.lock` n'exclut qu'une autre opération
+Savewarden : il n'empêche pas un autre processus d'écrire dans `current` ou
+`retained\<prev-op>`. Les relectures des points 3 et 5 bornent ces fenêtres
+sans les fermer : une écriture entre la relecture du point 3 et M1, entre
+celle du point 5 et M2, ou entre la relecture d'une restauration vérifiée et
+M3, n'est pas détectée ; de même dans `staging\<op>` entre sa relecture
+(`verified`) et M2, une fenêtre qu'une rotation allonge des relectures de
+`current` et de `retained`. Le plan suivant relit la génération publiée
+contre son receipt et signale tout écart. Chaque relecture relit l'identité
+après le contenu : un dossier remplacé pendant la lecture est une ambiguïté,
+code 3, jamais pris pour un changement de contenu. Jeu, launcher et tout outil qui
+touche le coffre doivent être fermés, comme pour la source.
+
+**Restaurations vérifiées.** Toute restauration M3, en cours d'exécution
+comme en récupération, est précédée de la relecture intégrale de
+`retained\<prev-op>` contre son receipt, identité égale à
+`current_identity` : conforme, M3 a lieu ; non conforme, code 3, rien
+déplacé ni enregistré. Une génération altérée n'est jamais remise en place
+comme si elle était intacte.
+
 En cours d'exécution :
 
 - M1 échoue : l'observation confirme (`old`, —, `new`) : `rolled-back`, code 1,
   `vault: rolled back <op>; current unchanged` ;
-- M2 échoue : `restore-intent`, M3, post-contrôle, `rolled-back`, code 1 ;
-  si M3 échoue : `rollback-failed`, code 3, diagnostic nommant les deux
-  emplacements, tous deux intacts ;
+- relecture du point 5 en écart : code 3, `vault: intervention required for
+  <op>: …`, diagnostic nommant le nom en écart ; aucun enregistrement, aucun
+  déplacement ;
+- M2 échoue : nouvelle observation avant toute restauration ; (—, `old`,
+  `new`) confirmé : restauration vérifiée, puis `restore-intent`, M3,
+  post-contrôle, `rolled-back`, code 1 ; si M3 échoue : `rollback-failed`,
+  code 3, diagnostic nommant les deux emplacements, tous deux intacts ;
+  `retained` non conforme, `current` réapparu ou toute autre observation :
+  code 3, rien d'autre enregistré ni déplacé ;
 - post-contrôle de M2 contraire à l'intention : code 3, aucun autre
   déplacement.
 
@@ -377,16 +513,18 @@ Récupération, tableau fermé :
 
 | Dernier validé | Observation (`C`, `R`, `S`) | Action |
 | --- | --- | --- |
-| `planned` à `verified` | (`old`, —, `S` selon les règles du §4) | `abandoned` |
+| Aucun : dossier d'opération vide ou temporaires `001` seuls | Règle M3 du §4 | `001-abandoned` ; sinon code 3, rien écrit |
+| `planned` à `verified` | (`old`, —, `S` selon les règles du §4), `old` étant `current_identity` de `planned` | `abandoned` |
 | `retire-intent` | (`old`, —, `new`) | M1 non effectué : `rolled-back` |
-| `retire-intent` | (—, `old`, `new`) | M1 effectué : `restore-intent`, puis M3, puis `rolled-back` |
-| `promote-intent` | (—, `old`, `new`) | M2 non effectué : `restore-intent`, puis M3, puis `rolled-back` |
-| `promote-intent` | (`new`, `old`, —) | M2 effectué : revérification intégrale ; égal : receipt, `published` ; différent : `unpromote-intent`, puis M4 |
-| `unpromote-intent` | (`new`, `old`, —) | M4 non effectué : M4, puis `restore-intent`, M3, `rolled-back` |
-| `unpromote-intent` | (—, `old`, `new`) | M4 effectué : `restore-intent`, puis M3, puis `rolled-back` |
-| `restore-intent` | (—, `old`, `new`) | M3 non effectué : M3, puis `rolled-back` |
+| `retire-intent` | (—, `old`, `new`) | M1 effectué : restauration vérifiée ; `retained` conforme : `restore-intent`, puis M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
+| `promote-intent` | (—, `old`, `new`) | M2 non effectué : restauration vérifiée ; conforme : `restore-intent`, puis M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
+| `promote-intent` | (`new`, `old`, —) | M2 effectué : revérification intégrale ; égal : receipt, `published` ; différent : `unpromote-intent`, puis M4, sauf si le receipt de `<op>` est déjà validé : code 3, rien écrit, comme en A5 et A6 |
+| `unpromote-intent` | (`new`, `old`, —) | M4 non effectué : M4, puis restauration vérifiée ; conforme : `restore-intent`, M3, `rolled-back` ; non conforme : code 3, rien d'autre écrit |
+| `unpromote-intent` | (—, `old`, `new`) | M4 effectué : restauration vérifiée ; conforme : `restore-intent`, puis M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
+| `restore-intent` | (—, `old`, `new`) | M3 non effectué : restauration vérifiée ; conforme : M3, puis `rolled-back` ; non conforme : code 3, rien écrit |
 | `restore-intent` | (`old`, —, `new`) | M3 effectué : `rolled-back` |
 | `rollback-failed` | L'une des observations prévues pour l'intention qui le précède | Comme la ligne de cette intention ; nouvel échec du déplacement : code 3, sans nouvel enregistrement (E3) |
+| `retire-intent`, `promote-intent`, `unpromote-intent`, `restore-intent` ou `rollback-failed` | (`other`, `old`, `new`) : objet inattendu sous `current` | Aucune ligne ne s'applique : fail-closed, code 3, rien écrit, enregistré ni déplacé ; objet, `retained\<prev-op>` et `staging\<op>` laissés en place, à chaque exécution, tant que l'objet est présent |
 | `published` | (`new`, `old`, —), receipt conforme | Rien |
 | Tout autre cas | — | Fail-closed, code 3 |
 
@@ -543,3 +681,58 @@ relève de son propriétaire.
   renommage ; codes d'erreur observés consignés au §7
   (`TestOpenHandlesBlockTheRename`, `TestMoveNeverReplaces`). Aucun écart au
   protocole.
+- **29 octobre 2026, cadrage de B2c**, sur décision du propriétaire, avant
+  tout code de rotation : identité persistante de l'ancien `current`,
+  `current_identity` de `planned`, obligatoire pour une rotation et interdit
+  pour une première publication, reprise sans substitution par
+  `retire-intent` et `restore-intent` (A1, §3) ; vérification intégrale de
+  `current` contre son receipt sous verrou avant `planned` et de nouveau juste
+  avant le retrait (A2, §5) ; règle M3 de l'opération non commencée, qui
+  n'abandonne en présence d'un `current` qu'une génération précédente dont
+  receipt, journal publié et contenu sont vérifiés (§4) ; receipt déjà validé
+  protégé de la même façon en rotation qu'en première publication (§5). Sans
+  cette identité, toute rotation interrompue avant `retire-intent` aurait été
+  ambiguë. Les journaux B2b restent lisibles ; les enveloppes E1 à E4 sont
+  inchangées. Ces amendements prévalent sur le §5 du plan B2 v0.2 ; leurs
+  tests sont exigés par son §9.3 amendé.
+- **29 octobre 2026, revue du cadrage de B2c** par le propriétaire :
+  définition unique de la génération précédente reconnue, dont l'identité
+  observée doit être celle que son journal a publiée (P0-2, §4) ; règle M3
+  qui tient l'absence de `current` pour une contradiction dès qu'une
+  génération publiée est attendue (P0-1, §4) ; relecture de
+  `retained\<prev-op>` entre M1 et M2, nouvelle observation avant toute
+  restauration après un échec de M2, et restaurations toujours vérifiées,
+  sans promotion ni restauration d'une génération altérée (P1, §5) ;
+  fenêtres résiduelles du verrou explicitées (P1, §5) ; mode plan aligné,
+  `unexpected-entry` pour un `current` d'une autre identité que celle
+  publiée ; `current-exists` conservé comme règle de B2b (§4).
+- **29 octobre 2026, arbitrage des effets de la revue** par le
+  propriétaire : coffre copié ou déplacé refusé en code 3 sans écriture ni
+  adoption d'identité, diagnostic sans présomption de corruption,
+  portabilité renvoyée à une procédure future de requalification ou
+  d'import contrôlé (§4) ; règle M3 plus stricte que le code B2b validée ;
+  `current` réapparu entre M1 et M2 : code 3, ni promotion ni restauration,
+  objets conservés en place (§5).
+- **29 octobre 2026, cohérence de la récupération après M1**, sur revue du
+  propriétaire : un objet inattendu sous `current`, noté `other`, ou un
+  `retained\<prev-op>` d'une autre identité ne relève d'aucune ligne du
+  tableau : code 3, rien écrit, enregistré ni déplacé tant qu'il reste
+  présent ; une récupération ne reprend que sur une observation entièrement
+  conforme à une ligne, toutes ses vérifications comprises (§4, §5).
+- **29 octobre 2026, revue indépendante du remplacement** (B2c, commit 4) :
+  la troisième fenêtre résiduelle, entre la relecture d'une restauration
+  vérifiée et M3, est nommée au §5 ; aucune règle ne change. Le code applique
+  désormais strictement le §3 au pré-contrôle d'une bascule : une identité
+  illisible, un lien ou une cible qui ne peut être observée sont une
+  ambiguïté, code 3, sans `rolled-back` ni `rollback-failed`.
+- **29 octobre 2026, revue de sécurité indépendante** (B2c) : un receipt de
+  `<op>` validé alors que la bascule de `<op>` n'est pas observée est une
+  contradiction du §3 : code 3, rien écrit, quelle que soit la ligne du
+  tableau, première publication comprise ; la récupération d'une rotation
+  vérifie, par recoupement, le receipt de `<prev-op>` contre le journal
+  publié de cette génération et l'identité fixée par `planned` avant toute
+  restauration vérifiée : une altération accidentelle ou partielle est
+  refusée, pas une réécriture délibérée du receipt et du journal, hors
+  modèle ; la fenêtre du staging entre `verified` et M2 est nommée au §5, et
+  chaque relecture relit l'identité après le contenu, récupération et règle
+  M3 comprises.

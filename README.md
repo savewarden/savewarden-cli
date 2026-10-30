@@ -6,13 +6,13 @@ Savewarden vise à inspecter, centraliser, vérifier et restaurer les sauvegarde
 de jeux à partir de sources explicitement choisies. Le moteur sera indépendant
 de la CLI, local-first et Windows-first.
 
-**État actuel : lot B2b, version `dev`.** La commande `inspect` lit un
+**État actuel : lot B2c, version `dev`.** La commande `inspect` lit un
 [manifeste v1](docs/manifest-v1.md) et inventorie en lecture seule les dossiers
 de sauvegarde qu'il déclare. La commande `sync` planifie, en lecture seule,
-leur copie vers un [coffre](docs/vault.md) ; avec `--apply`, elle y publie la
-première génération du jeu, vérifiée, et `--recover` reprend une opération
-interrompue. Remplacer une génération existante arrive avec le lot B2c. Les
-sources ne sont que lues ; rien n'est jamais supprimé ni écrasé. Les commandes
+leur copie vers un [coffre](docs/vault.md) ; avec `--apply`, elle y publie une
+nouvelle génération vérifiée du jeu, l'ancienne étant conservée dans
+`retained`, et `--recover` reprend toute opération interrompue. Les sources ne
+sont que lues ; rien n'est jamais supprimé ni écrasé. Les commandes
 `snapshot`, `restore` et `doctor` ne sont pas encore disponibles. Aucune
 release ni installation via package manager.
 

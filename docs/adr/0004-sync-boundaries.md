@@ -99,4 +99,10 @@ plan B2 §3.2, sans changer les frontières :
   refusé dans `features/sync`.
 - `Volumes.Describe(path)` reçoit un dossier existant, le coffre ou son
   parent, et rapporte les octets disponibles pour l'utilisateur.
+- Correction consignée en B2c : la portée de lecture `Scope` a reçu en B2b
+  `Identity(name)`, l'identité volume et index d'un fichier ou dossier lue
+  sans suivi de lien, et `platform/filesystem` décrit un fichier tenu sans
+  partage sans l'ouvrir. B2c n'ajoute ni frontière ni port : la rotation et
+  sa récupération n'emploient que `Vault`, `Files`, `Inventories`, `Volumes`
+  et `Clock`.
 

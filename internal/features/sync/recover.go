@@ -12,10 +12,10 @@ import (
 )
 
 // RecoveryAction says what sync --recover --apply does, per the recovery
-// tables of ADR 0006 §4.
+// tables of ADR 0006 §4 and §5.
 type RecoveryAction string
 
-// Recovery actions of a first publication.
+// Recovery actions of a first publication and of a rotation.
 const (
 	RecoverNothing        RecoveryAction = "nothing to recover"
 	RecoverInitialization RecoveryAction = "commit the vault marker; its temporaries stay in place"
@@ -23,6 +23,10 @@ const (
 	RecoverRolledBack     RecoveryAction = "record rolled-back; nothing to move"
 	RecoverVerifyPublish  RecoveryAction = "verify current against the plan, then commit its receipt and published; if it differs, move it back to staging"
 	RecoverUnpublish      RecoveryAction = "move current back to staging, then record rolled-back"
+	RecoverVerifyPromote  RecoveryAction = "verify current against the plan, then commit its receipt and published; if it differs, move it back to staging and restore the retained generation"
+	RecoverRestore        RecoveryAction = "verify the retained generation, record restore-intent, move it back to current, then record rolled-back"
+	RecoverFinishRestore  RecoveryAction = "verify the retained generation, move it back to current, then record rolled-back"
+	RecoverUnpromote      RecoveryAction = "move current back to staging, verify the retained generation and move it back to current, then record rolled-back"
 )
 
 // Recovery is what sync --recover found, without writing anything.
@@ -35,8 +39,12 @@ type Recovery struct {
 	// Operation is the interrupted operation, empty when there is none.
 	Operation string
 	Last      backup.Step
-	// Observed holds the presences of current and of the staging, by
-	// identity; nil when no operation is pending.
+	// Previous is the generation an interrupted rotation replaces, empty
+	// for a first publication.
+	Previous string
+	// Observed holds the presences of current, of the retained generation of
+	// a rotation and of the staging, by identity; nil when no operation is
+	// pending.
 	Observed *backup.Observation
 	Action   RecoveryAction
 
@@ -114,18 +122,51 @@ func (s *Service) recoverPlan(ctx context.Context, request Request, probe bool) 
 	rec.Operation = v.pending[0].Operation
 	rec.journal = v.journals[rec.Operation]
 	rec.Last = rec.journal.Last()
-	if rec.journal.Rotation() {
-		return rec, &InterventionError{Operation: rec.Operation, Cause: "the interrupted operation replaces a current generation; its recovery is not available in this build"}
-	}
+	j := rec.journal
+	rec.Previous = j.Previous
 	game := join(strings.Join(vaultSegments, "/"), gamesDir+"/"+manifest.Game.ID)
+	var head *backup.Receipt
+	if j.Rotation() {
+		if head = findReceipt(v, j.Previous); head == nil {
+			return rec, &InterventionError{Operation: rec.Operation, Cause: "the receipt of " + j.Previous + ", the generation this rotation replaces, is missing"}
+		}
+		// The receipt a restoration checks retained against must be the one
+		// the journal of that generation published, for the identity
+		// planned fixed (ADR 0006 §4).
+		previous, ok := v.journals[j.Previous]
+		if !ok {
+			return rec, &InterventionError{Operation: rec.Operation, Cause: "the journal of " + j.Previous + ", the generation this rotation replaces, is missing"}
+		}
+		if err := backup.RecognizePrevious(*head, v.receiptSum[j.Previous], previous, j.Old); err != nil {
+			return rec, &InterventionError{Operation: rec.Operation, Cause: "the generation this rotation replaces is not proven: " + err.Error()}
+		}
+	}
 	observed := backup.Observation{
-		Current: presence(scope, game+"/"+currentDir, rec.journal.Staging),
-		Staging: presence(scope, game+"/"+backup.StagingName(rec.Operation), rec.journal.Staging),
+		Current: presence(scope, game+"/"+currentDir, j),
+		Staging: presence(scope, game+"/"+backup.StagingName(rec.Operation), j),
+	}
+	if j.Rotation() {
+		observed.Retained = presence(scope, game+"/"+retainedDir+"/"+j.Previous, j)
+	}
+	if len(j.Records) == 0 {
+		// Rule M3: nothing was fixed, so current must prove it is the
+		// published generation, or be absent when none is expected.
+		observed.Expected = v.generationExpected()
+		if observed.Current != backup.Absent {
+			if observed.Current, err = s.previousGeneration(ctx, scope, v, rec, game); err != nil {
+				return rec, err
+			}
+		}
 	}
 	rec.Observed = &observed
 	action, err := backup.Classify(rec.journal, observed)
 	if err != nil {
 		return rec, &InterventionError{Operation: rec.Operation, Cause: err.Error()}
+	}
+	if _, committed := v.receiptSum[rec.Operation]; committed && action != backup.ActionVerifyThenPublish {
+		// A receipt is committed only after its switch: without the switch
+		// observed, journal and vault contradict each other (ADR 0006 §3).
+		return rec, &InterventionError{Operation: rec.Operation, Cause: "the receipt of " + rec.Operation + " is committed but its generation is not current; nothing written"}
 	}
 	switch action {
 	case backup.ActionAbandon:
@@ -138,25 +179,98 @@ func (s *Service) recoverPlan(ctx context.Context, request Request, probe bool) 
 			return rec, &InterventionError{Operation: rec.Operation, Cause: backup.ErrEnvelopeExhausted.Error() + ": nine receipt temporaries"}
 		}
 		rec.Action = RecoverVerifyPublish
+		if j.Rotation() {
+			rec.Action = RecoverVerifyPromote
+		}
 	case backup.ActionFinishUnpublish:
 		rec.Action = RecoverUnpublish
+	case backup.ActionRestore:
+		rec.Action = RecoverRestore
+	case backup.ActionFinishRestore:
+		rec.Action = RecoverFinishRestore
+	case backup.ActionFinishUnpromote:
+		rec.Action = RecoverUnpromote
 	default:
 		return rec, &InterventionError{Operation: rec.Operation, Cause: fmt.Sprintf("recovery %q is not available in this build", action)}
+	}
+	if rec.Action == RecoverRestore || rec.Action == RecoverFinishRestore {
+		// Verified restoration: an altered generation is never put back.
+		segments := append(append([]string{}, vaultSegments...), gamesDir, manifest.Game.ID, retainedDir, j.Previous)
+		dir, err := s.inventories.Directory(ctx, vaultVolume, segments)
+		if err != nil {
+			return rec, err
+		}
+		if differences := compareWithReceipt(dir, *head); len(differences) > 0 {
+			first := differences[0]
+			return rec, &InterventionError{Operation: rec.Operation, Cause: fmt.Sprintf(
+				"%s/%s/%s no longer matches the receipt of %s: %s %s, %s; %d difference(s) in all; nothing restored",
+				gamesDir+"/"+manifest.Game.ID, retainedDir, j.Previous, j.Previous, orDash(first.source), orDash(first.path),
+				strings.ReplaceAll(first.detail, "current", "retained"), len(differences))}
+		}
 	}
 	return rec, nil
 }
 
-// presence describes what a name holds, by identity, without following it.
-func presence(scope Scope, name string, staged backup.FileID) backup.Presence {
+// generationExpected reports whether the game has a receipt, valid or not,
+// or a journal terminal in published: a published generation should then
+// exist (ADR 0006 §4, rule M3).
+func (v *vault) generationExpected() bool {
+	if len(v.receipts) > 0 || len(v.invalid) > 0 {
+		return true
+	}
+	for _, j := range v.journals {
+		if j.Last() == backup.StepPublished {
+			return true
+		}
+	}
+	return false
+}
+
+// previousGeneration applies the whole proof chain of ADR 0006 §4 to the
+// current found beside an operation without any record: Old when it is the
+// published generation, its content included, Other otherwise.
+func (s *Service) previousGeneration(ctx context.Context, scope Scope, v *vault, rec Recovery, game string) (backup.Presence, error) {
+	head, err := v.head()
+	if err != nil {
+		return backup.Other, nil
+	}
+	j, ok := v.journals[head.Operation]
+	if !ok {
+		return backup.Other, nil
+	}
+	id, err := scope.Identity(game + "/" + currentDir)
+	if err != nil || backup.RecognizePrevious(head, v.receiptSum[head.Operation], j, id) != nil {
+		return backup.Other, nil
+	}
+	segments := append(append([]string{}, rec.vaultSegments...), gamesDir, rec.Game.ID, currentDir)
+	dir, err := s.inventories.Directory(ctx, rec.vaultVolume, segments)
+	if err != nil {
+		return backup.Other, err
+	}
+	if len(compareWithReceipt(dir, head)) > 0 {
+		return backup.Other, nil
+	}
+	if again, err := scope.Identity(game + "/" + currentDir); err != nil || again != id {
+		return backup.Other, nil
+	}
+	return backup.Old, nil
+}
+
+// presence describes what a name holds, by identity, without following
+// it: Old is the current the journal's planned record fixed, New its
+// staging; before staged, a plain directory is Unidentified, never Old.
+func presence(scope Scope, name string, j backup.Journal) backup.Presence {
 	id, err := scope.Identity(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return backup.Absent
 	case err != nil:
 		return backup.Other
-	case staged != (backup.FileID{}) && id == staged:
+	case j.Old != (backup.FileID{}) && id == j.Old:
+		return backup.Old
+	case j.Staging != (backup.FileID{}) && id == j.Staging:
 		return backup.New
-	case staged == (backup.FileID{}):
+	case j.Staging == (backup.FileID{}):
 		if info, err := scope.Lstat(name); err == nil && info.IsDir() && !isLink(info.Mode()) {
 			return backup.Unidentified
 		}
@@ -254,14 +368,26 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 		o.receipt[k] = true
 	}
 	o.planned, o.planSum, o.staging = j.Plan, j.PlanSHA256, j.Staging
+	if j.Rotation() {
+		o.previous, o.old, o.head = j.Previous, j.Old, *findReceipt(rec.observed, j.Previous)
+	}
 	for _, r := range j.Records {
-		if r.Step == backup.StepPublishIntent {
+		if r.Step == backup.StepPublishIntent || r.Step == backup.StepPromoteIntent {
 			o.intentAt = r.At
 		}
 	}
-	if rec.Action == RecoverVerifyPublish || rec.Action == RecoverUnpublish {
-		// current may move back below it; it exists since staging-intent.
+	switch rec.Action {
+	case RecoverVerifyPublish, RecoverUnpublish, RecoverVerifyPromote, RecoverUnpromote, RecoverRestore, RecoverFinishRestore:
+		// current may move back below it, and a restoration checks the
+		// staging by its identity; it exists since staging-intent.
 		if err := o.vault.Hold(o.game + "/" + stagingDir); err != nil {
+			return errVault(rec.Vault, "%w", err)
+		}
+	}
+	switch rec.Action {
+	case RecoverVerifyPromote, RecoverUnpromote, RecoverRestore, RecoverFinishRestore:
+		// The old generation moves back from it; it exists since M1.
+		if err := o.vault.Hold(o.game + "/" + retainedDir); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
 	}
@@ -277,10 +403,16 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 			return err
 		}
 		o.effect = EffectRolledBack
-	case RecoverVerifyPublish:
+	case RecoverVerifyPublish, RecoverVerifyPromote:
 		return o.verifyThenPublish(rec)
 	case RecoverUnpublish:
 		return o.unpublish(rec.Last == backup.StepRollbackFailed)
+	case RecoverRestore:
+		return o.restoreOld("", true, false)
+	case RecoverFinishRestore:
+		return o.restoreOld("", false, rec.Last == backup.StepRollbackFailed)
+	case RecoverUnpromote:
+		return o.unpromote(rec.Last == backup.StepRollbackFailed)
 	}
 	return nil
 }
@@ -288,12 +420,16 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 // verifyThenPublish handles a staging already renamed to current: current
 // is verified in full against the plan; equal, its receipt and published
 // are committed, the receipt rebuilt if missing; different, it is moved
-// back to staging.
+// back to staging, and a rotation restores its retained generation.
 func (o *operation) verifyThenPublish(rec *Recovery) error {
 	segments := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, currentDir)
 	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
 	if err != nil {
 		return err
+	}
+	if id, err := o.vault.Identity(o.game + "/" + currentDir); err != nil || id != o.staging {
+		// Swapped while it was read: nothing is recorded on its strength.
+		return o.intervene(fmt.Sprintf("current was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
 	}
 	_, receiptCommitted := rec.observed.receiptSum[o.op]
 	if differences := compareWithReceipt(dir, backup.Receipt{Sources: o.planned.Sources}); len(differences) > 0 {
@@ -302,6 +438,12 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 			// longer matches; moving it back would leave the receipt orphan.
 			return o.intervene(fmt.Sprintf("current no longer matches the plan of %s, whose receipt is committed: %s %s, %s",
 				o.op, orDash(differences[0].source), orDash(differences[0].path), differences[0].detail))
+		}
+		if o.rotation() {
+			if err := o.record(backup.StepUnpromoteIntent, backup.StepValues{Current: o.staging}); err != nil {
+				return err
+			}
+			return o.unpromote(false)
 		}
 		if err := o.record(backup.StepUnpublishIntent, backup.StepValues{Current: o.staging}); err != nil {
 			return err

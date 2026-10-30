@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -97,7 +98,7 @@ func TestRenderFirstPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if planner.request != (sync.Request{ManifestPath: `D:\Manifests\synthetic-game.yaml`, VaultPath: `D:\Vault`}) {
+	if !reflect.DeepEqual(planner.request, sync.Request{ManifestPath: `D:\Manifests\synthetic-game.yaml`, VaultPath: `D:\Vault`}) {
 		t.Fatalf("request = %+v", planner.request)
 	}
 	want := `manifest: D:\Manifests\synthetic-game.yaml
@@ -188,8 +189,6 @@ func TestSyncInvocationErrors(t *testing.T) {
 	}{
 		{"no flags", nil, `required flag(s) "manifest", "vault" not set`},
 		{"no vault", []string{"--manifest", "m.yaml"}, `required flag(s) "vault" not set`},
-		{"removals are not available", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "--allow-removals"}, "unknown flag: --allow-removals"},
-		{"missing sources cannot be accepted", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "--accept-missing-source", "saves"}, "unknown flag: --accept-missing-source"},
 		{"positional argument", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "extra"}, "unknown command"},
 		{"service error", []string{"--manifest", "m.yaml", "--vault", `D:\Vault`}, failure.Error()},
 	}
@@ -349,10 +348,70 @@ func TestRecoverModes(t *testing.T) {
 	}
 }
 
-func TestRemovalFlagsAreNotAvailable(t *testing.T) {
-	for _, flag := range []string{"--allow-removals", "--accept-missing-source=saves"} {
-		if _, err := runSync(t, &fakePlanner{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply", flag); err == nil {
-			t.Errorf("%s accepted", flag)
+// D5 and V1: the policy flags reach the plan and --apply, the second one
+// once per source.
+func TestPolicyFlagsReachTheRequest(t *testing.T) {
+	for _, mode := range [][]string{nil, {"--apply"}} {
+		planner := &fakePlanner{plan: firstPlan(), result: published()}
+		args := append([]string{"--manifest", "m.yaml", "--vault", `D:\Vault`, "--allow-removals",
+			"--accept-missing-source", "profile", "--accept-missing-source=extra"}, mode...)
+		_, _, _ = runSyncAll(t, planner, &bytes.Buffer{}, args...)
+		want := sync.Request{ManifestPath: "m.yaml", VaultPath: `D:\Vault`, AllowRemovals: true, AcceptMissing: []string{"profile", "extra"}}
+		if !reflect.DeepEqual(planner.request, want) {
+			t.Fatalf("%v: request %+v", mode, planner.request)
 		}
+	}
+}
+
+// --recover takes no policy flag: code 1, nothing called.
+func TestRecoverRefusesPolicyFlags(t *testing.T) {
+	for _, flag := range []string{"--allow-removals", "--accept-missing-source=saves"} {
+		for _, mode := range [][]string{{"--recover"}, {"--recover", "--apply"}} {
+			planner := &fakePlanner{}
+			_, err := runSync(t, planner, append([]string{"--manifest", "m.yaml", "--vault", `D:\Vault`, flag}, mode...)...)
+			var exit *cli.ExitError
+			if !errors.As(err, &exit) || exit.Code != 1 || planner.called != "" || !strings.Contains(err.Error(), "--recover takes neither") {
+				t.Errorf("%s %v: %v, called %q", flag, mode, err, planner.called)
+			}
+		}
+	}
+}
+
+// An invalid --accept-missing-source is reported by the feature: code 1.
+func TestInvalidPolicyIsCode1(t *testing.T) {
+	invalid := &sync.InvocationError{Detail: "--accept-missing-source saves: the source is required"}
+	_, stderr, err := runSyncAll(t, &fakePlanner{result: sync.Result{Plan: firstPlan()}, err: invalid}, &bytes.Buffer{},
+		"--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply", "--accept-missing-source", "saves")
+	var exit *cli.ExitError
+	if !errors.As(err, &exit) || exit.Code != 1 || !strings.Contains(stderr, "invalid invocation: --accept-missing-source saves") ||
+		!strings.HasSuffix(stderr, "savewarden: vault: not modified\n") {
+		t.Fatalf("err %v, stderr %q", err, stderr)
+	}
+}
+
+// A published rotation names where the previous generation is kept.
+func TestApplyReportsTheRetainedGeneration(t *testing.T) {
+	result := published()
+	result.Retained = `D:\Vault\games\synthetic-game\retained\20261020T080000-0badc0de`
+	stdout, _, err := runSyncAll(t, &fakePlanner{result: result}, &bytes.Buffer{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--apply")
+	if err != nil || !strings.Contains(stdout, ".json\nretained: "+result.Retained+"\n") {
+		t.Fatalf("err %v, stdout:\n%s", err, stdout)
+	}
+}
+
+// The recovery of a rotation names the generation it replaces and what is
+// observed under retained.
+func TestRecoverRendersARotation(t *testing.T) {
+	recovery := sync.Recovery{
+		ManifestPath: "m.yaml", Game: game.Game{ID: "synthetic-game", Name: "Synthetic Game"}, Vault: `D:\Vault`,
+		VaultState: sync.VaultInitialized, Volume: backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed},
+		Operation: applyOp, Last: backup.StepRetireIntent, Previous: "20261020T080000-0badc0de",
+		Observed: &backup.Observation{Current: backup.Absent, Retained: backup.Old, Staging: backup.New}, Action: sync.RecoverRestore,
+	}
+	stdout, _, err := runSyncAll(t, &fakePlanner{recovery: recovery}, &bytes.Buffer{}, "--manifest", "m.yaml", "--vault", `D:\Vault`, "--recover")
+	want := "last committed step: retire-intent\nreplaces: 20261020T080000-0badc0de\nobserved: current absent, retained old, staging new\naction: " +
+		string(sync.RecoverRestore) + "\n"
+	if err != nil || !strings.Contains(stdout, want) {
+		t.Fatalf("err %v, stdout:\n%s", err, stdout)
 	}
 }

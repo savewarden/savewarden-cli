@@ -2,9 +2,9 @@
 
 Un coffre est un dossier que Savewarden crée et dont il est le seul à écrire
 le contenu. `sync --apply` y publie une copie vérifiée des sources d'un
-manifeste ; le plan, sans `--apply`, le lit sans rien écrire. Cette version
-publie la première génération d'un jeu ; la remplacer arrive avec le lot
-B2c. Les règles de publication et de
+manifeste ; le plan, sans `--apply`, le lit sans rien écrire. Une nouvelle
+génération remplace la précédente par rotation : l'ancienne est renommée dans
+`retained`, jamais supprimée. Les règles de publication et de
 récupération sont fixées par
 [ADR 0006](adr/0006-publication-recovery-protocol.md), le contrat de la
 commande par [ADR 0007](adr/0007-sync-contract-receipt-v1.md).
@@ -45,6 +45,14 @@ Ne modifiez pas le contenu d'un coffre à la main. Savewarden compare la
 génération courante à son receipt avant toute publication : un écart bloque
 tout, et il ne déplace jamais un `current` qu'il ne reconnaît plus.
 
+Ne copiez ni ne déplacez un coffre. Savewarden reconnaît `current` aussi par
+son identité NTFS, que le journal a enregistrée à la publication ; une copie
+la change sans altérer les données. Un coffre copié ou déplacé est refusé en
+code 3, sans rien écrire : ce n'est pas le signe d'une corruption, et
+Savewarden n'adopte ni ne réécrit aucune identité. Utilisez le coffre
+d'origine, ou un nouveau coffre ; une procédure de requalification ou
+d'import contrôlé est prévue plus tard.
+
 Des fichiers `*.tmp-<k>` peuvent subsister à la racine, dans `receipts` ou
 dans un journal, à côté du fichier validé : ce sont des essais interrompus,
 conservés exprès et jamais lus. Ne les supprimez pas.
@@ -59,7 +67,7 @@ supprime quoi que ce soit.
 | --- | --- | --- |
 | `initialization-interrupted` | La création du coffre s'est arrêtée avant que son marqueur soit validé : le dossier ne contient que des fichiers `savewarden-vault.json.tmp-<k>` | `sync --recover --apply` valide un nouveau marqueur ; les temporaires restent en place. Un autre dossier vide reste toujours possible |
 | `pending-operation` | Une opération s'est interrompue : son journal n'atteint pas d'étape terminale | Lancer `sync --recover` pour voir l'action prévue, puis `sync --recover --apply` |
-| `unexpected-entry` | Une entrée n'a pas sa place : fichier ajouté à la main, staging sans journal, génération conservée sans receipt | Examiner l'entrée nommée ; si elle a été ajoutée à la main, la déplacer hors du coffre vous-même |
+| `unexpected-entry` | Une entrée n'a pas sa place : fichier ajouté à la main, staging sans journal, génération conservée sans receipt ; ou `current` n'est pas le dossier que son journal a publié, coffre copié ou déplacé compris | Examiner l'entrée nommée ; si elle a été ajoutée à la main, la déplacer hors du coffre vous-même. Pour `current` d'une autre identité, reprendre le coffre d'origine ou un nouveau coffre |
 | `journal-ambiguous` | Un journal est incomplet, corrompu, incohérent, ou deux opérations sont en attente pour un même jeu | Ne rien modifier. Conserver le coffre tel quel et demander une analyse ; Savewarden ne réparera jamais un journal ambigu |
 
 Et pour une anomalie bloquante (code 2) liée au coffre :
@@ -71,8 +79,8 @@ Et pour une anomalie bloquante (code 2) liée au coffre :
 ## Récupérer une opération interrompue
 
 `sync --recover` lit le journal de l'opération et observe, par leur identité
-de fichier, ce que contiennent `current` et `staging\<op>`. Il n'agit que
-dans les cas prévus par
+de fichier, ce que contiennent `current`, `staging\<op>` et, pour une
+rotation, `retained\<op précédente>`. Il n'agit que dans les cas prévus par
 [ADR 0006](adr/0006-publication-recovery-protocol.md) :
 
 | Situation | Action de `--recover --apply` | Ligne d'état |
@@ -82,6 +90,13 @@ dans les cas prévus par
 | Publication voulue, renommage non effectué | Enregistre `rolled-back` | `rolled back <op>; current unchanged` |
 | Staging déjà devenu `current`, receipt absent ou non clos | Vérifie `current` entier contre le plan ; égal : écrit le receipt, reconstruit avec `recovered_at` et `recovered_by`, puis clôt ; différent : remet `current` en staging | `published <op>` ou `rolled back <op>; …` |
 | Remise en staging interrompue | La termine ; un échec est enregistré une fois, `rollback-failed`, code 3 | `rolled back <op>; …` ou `intervention required …` |
+| Opération sans aucun enregistrement | Enregistre `abandoned` seulement si aucune génération n'a été publiée et que `current` est absent, ou si `current` est la génération précédente reconnue ; une génération publiée sans `current` est une contradiction, code 3 | `current unchanged; …` ou `intervention required …` |
+| Rotation, retrait non effectué | Enregistre `rolled-back` | `rolled back <op>; current unchanged` |
+| Rotation, ancienne génération déjà dans `retained`, nouvelle pas promue | **Restauration vérifiée** : relit la génération retenue contre son receipt ; intacte, la remet en `current`, puis `rolled-back` ; altérée ou remplacée, code 3, rien n'est déplacé | `rolled back <op>; …` ou `intervention required …` |
+| Rotation, nouvelle génération promue | Vérifie `current` entier contre le plan ; égal : receipt et `published` ; différent : la remet en staging, puis restauration vérifiée ; receipt déjà validé : code 3 | `published <op>`, `rolled back <op>; …` ou `intervention required …` |
+| Receipt de l'opération validé alors que sa bascule n'est pas observée | Contradiction, quelle que soit l'étape : code 3, rien écrit, à chaque exécution | `intervention required …` |
+| Rotation arrêtée avant le retrait, `current` disparu ou remplacé entre-temps | Aucune ligne ne s'applique : code 3, rien écrit, à chaque exécution. L'ancienne génération n'a pas été déplacée par Savewarden ; remettez-la à sa place si vous l'avez déplacée, sinon conservez le coffre tel quel et utilisez un nouveau coffre | `intervention required …` |
+| Rotation, objet inattendu sous `current` après le retrait | Aucune ligne ne s'applique : code 3, rien écrit ni déplacé, à chaque exécution, tant que l'objet est là ; une fois l'objet déplacé hors du coffre par vous, la ligne de restauration vérifiée s'applique | `intervention required …` |
 
 Une interruption pendant la récupération elle-même laisse un état que la
 récupération suivante reconnaît. Tout le reste est une ambiguïté : code 3,
@@ -98,11 +113,15 @@ besoin, un nouveau coffre.
 
 Chaque publication copie la génération complète en staging. Savewarden exige,
 au plan puis sous verrou, la taille de la génération plus max(64 Mio, 5 %)
-d'espace disponible pour l'utilisateur, quotas compris. Les générations
-remplacées et les stagings échoués ne sont jamais supprimés automatiquement :
-l'espace qu'ils occupent relève du propriétaire du coffre.
+d'espace disponible pour l'utilisateur, quotas compris ; une rotation ne fait
+que renommer l'ancienne génération, sans la copier. Les générations
+remplacées s'accumulent dans `retained`, une de plus à chaque publication, et
+ni elles ni les stagings échoués ne sont supprimés automatiquement : l'espace
+qu'ils occupent relève du propriétaire du coffre.
 
 ## Confidentialité
 
-Receipts et journaux contiennent des chemins locaux et le nom du jeu.
-Anonymisez-les avant tout partage.
+Receipts et journaux contiennent des chemins locaux et le nom du jeu ;
+journaux et diagnostics contiennent aussi des identités de fichiers NTFS, dont
+le numéro de série du volume, identifiant stable du disque. Anonymisez-les
+avant tout partage.

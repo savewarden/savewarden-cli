@@ -4,7 +4,7 @@ Décision propre à Savewarden : **FSD-inspired, Go-idiomatic**, documentée dan
 [ADR 0001](adr/0001-fsd-inspired-go.md). Mosaera est une inspiration de
 conception, pas une spécification à laquelle le produit prétend être conforme.
 
-## Existant B2b
+## Existant B2c
 
 ```text
 cmd/savewarden → app ─┬─► cli ─┬─► features/inspect ──► entities/game, entities/backup
@@ -29,7 +29,7 @@ découverte de configuration. Seul `platform/vault` écrit, en création seule
 | `entities/game` | Manifeste, jeu, installation, sources ; validation pure et grammaire des chemins et noms Windows, indépendante de l'hôte |
 | `entities/backup` | Types partagés : `Entry`, `Directory`, `Finding` ; différence pure ; receipt v1 et marqueur du coffre stricts ; journal d'opération, son automate et le classement des observations d'[ADR 0006](adr/0006-publication-recovery-protocol.md) ; aucune I/O |
 | `features/inspect` | Inventaire en lecture seule ; ports `ManifestReader`, `FileSystem` et `Scope` ; `Report` typé ; `Directory`, inventaire sans suivi d'un dossier quelconque |
-| `features/sync` | Plan, première publication et récupération selon [ADR 0006](adr/0006-publication-recovery-protocol.md) ; ports `ManifestReader`, `Inventories`, `Files`, `Volumes`, et pour écrire `Vaults` et `Clock` ; `Plan`, `Result` et `Recovery` typés |
+| `features/sync` | Plan, première publication, rotation de `current` et récupération selon [ADR 0006](adr/0006-publication-recovery-protocol.md) ; politique des retraits et des sources absentes ; ports `ManifestReader`, `Inventories`, `Files`, `Volumes`, et pour écrire `Vaults` et `Clock` ; `Plan`, `Result` et `Recovery` typés |
 | `platform/manifests` | Lecture stricte du YAML vers `game.Manifest`, [ADR 0002](adr/0002-manifest-v1-strict-yaml.md) |
 | `platform/filesystem` | Portée ancrée sans suivi de liens ; implémentation Windows supportée, Unix pour les tests du contrat ; fichiers EFS signalés ; identité de fichier ; un fichier tenu sans partage est décrit, jamais ouvert |
 | `platform/vault` | Session de coffre en création seule, Windows seulement : dossiers et fichiers `CREATE_NEW`, flush, date, `MoveFileEx` sans drapeau, identité, verrou, type de volume et espace disponible ; dossiers épinglés sans suivi de lien |
@@ -106,7 +106,9 @@ OS sont isolés par build tags.
   de récupération d'[ADR 0006](adr/0006-publication-recovery-protocol.md),
   contrat d'[ADR 0007](adr/0007-sync-contract-receipt-v1.md). B2b, livré :
   écritures confinées à `platform/vault` ([ADR 0005](adr/0005-write-allowed-package.md)),
-  première publication et sa récupération. B2c : rotation de `current` et
+  première publication et sa récupération. B2c, livré : rotation de
+  `current` vers `retained`, reconnaissance de la génération précédente par
+  son identité publiée, retraits et sources absentes acceptés par drapeau,
   récupération complète.
 - B3 : identifiants uniques, snapshot `.incomplete` avant validation,
   contenu publié immuable et indépendant de `current`.
@@ -114,8 +116,8 @@ OS sont isolés par build tags.
   écrasement ni restauration en place.
 - B5 : diagnostic read-only et campagne pilote.
 
-Les contrats encore futurs ne sont pas implémentés : la copie de B2b ne
-publie qu'une première génération, et la CLI n'a pas de sortie JSON. Les erreurs futures utilisent contexte et
+Les contrats encore futurs ne sont pas implémentés : aucune rétention des
+générations conservées, et la CLI n'a pas de sortie JSON. Les erreurs futures utilisent contexte et
 `errors.Is/As` lorsqu'un consommateur doit les distinguer. Les chemins utilisent
 `filepath`, les contenus `io.Reader` et les opérations `context.Context`.
 
