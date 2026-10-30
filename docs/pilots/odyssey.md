@@ -112,8 +112,8 @@ après une sauvegarde en jeu :
   `operation: none`, `not modified`, plan identique, empreinte d'inventaire et
   de contenu du coffre inchangée ; `IdempotencePassed = True`.
 
-Qualification fonctionnelle : à prononcer par le propriétaire. Le pilote
-qualifie la rotation nominale ; rollback, crashs et récupération restent
+Qualification fonctionnelle validée par le propriétaire le 30 octobre 2026.
+Le pilote qualifie la rotation nominale ; rollback, crashs et récupération restent
 prouvés par les tests synthétiques, les tests Windows réels et la CI. Détail
 dans [le rapport B2c](../validation/b2c.md#pilote-b2c). Aucune empreinte
 individuelle, aucun receipt réel, aucun identifiant d'opération, aucun nom de

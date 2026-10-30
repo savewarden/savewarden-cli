@@ -3,7 +3,8 @@
 Date : 29 octobre 2026. Statut : accepté pour B2, contenu normatif du plan B2
 v0.2 §5, validé par le propriétaire le 29 octobre 2026 après revue intégrale ;
 amendé le même jour avant les premières écritures de B2b, puis pour le
-cadrage de B2c (voir Amendements).
+cadrage et les revues de B2c ; amendements de B2c postérieurs au cadrage
+ratifiés par le propriétaire le 30 octobre 2026 (voir Amendements).
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -736,3 +737,10 @@ relève de son propriétaire.
   modèle ; la fenêtre du staging entre `verified` et M2 est nommée au §5, et
   chaque relecture relit l'identité après le contenu, récupération et règle
   M3 comprises.
+- **30 octobre 2026, ratification** par le propriétaire, après la fusion de
+  B2c et son pilote, des deux entrées précédentes, postérieures au cadrage
+  certifié ; aucune règle ne change. Le propriétaire accepte le compromis
+  fail-closed de la ligne `unpromote-intent` (§5) : M4 précède la
+  restauration vérifiée ; si `retained\<prev-op>` est altéré, rien n'est
+  restauré et `current` reste absent jusqu'à une intervention, plutôt qu'une
+  restauration non vérifiée.
