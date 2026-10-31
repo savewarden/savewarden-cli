@@ -1,14 +1,15 @@
 # Modèle de sécurité
 
-## Garantie actuelle (B2c)
+## Garantie actuelle (B3)
 
 `inspect` lit un manifeste désigné par l'utilisateur et les fichiers des
-sources qu'il déclare. `sync`, en mode plan, lit en plus le coffre désigné
-par `--vault`, s'il existe. `sync --apply` et `sync --recover --apply`
-écrivent, mais **seulement dans ce coffre**, et seulement par créations
-exclusives et renommages qui ne remplacent rien. Aucune découverte
-d'installation, création de lien ou mutation de configuration ; aucune
-écriture dans une source.
+sources qu'il déclare. `sync` et `snapshot`, en mode plan, lisent en plus le
+coffre désigné par `--vault`, s'il existe ; `snapshot` ne lit pas le contenu
+des sources. `--apply` et `--recover --apply` écrivent, mais **seulement dans
+ce coffre**, et seulement par créations exclusives et renommages qui ne
+remplacent rien ; `snapshot` n'écrit que sous `snapshots\`, hormis le verrou
+vide que `sync` créerait aussi. Aucune découverte d'installation, création
+de lien ou mutation de configuration ; aucune écriture dans une source.
 
 | Garantie | Mécanisme | Preuve |
 | --- | --- | --- |
@@ -16,6 +17,7 @@ d'installation, création de lien ou mutation de configuration ; aucune
 | Rien n'est remplacé ni supprimé | `CREATE_NEW`, `CreateDirectory`, `MoveFileEx` avec le littéral `0` ; aucun fichier existant rouvert en écriture ; temporaires jamais supprimés | Tests Windows réels : création et renommage refusés sur cible existante, erreur 183 ; garde AST des drapeaux |
 | Publication vérifiée | Copie hachée, source inventoriée deux fois, staging relu depuis le disque, identité du staging contrôlée avant et après le renommage | Fautes injectées : source changée, écriture refusée, octet altéré, course sur le renommage |
 | Rotation sans perte | `current` reconnu par receipt, journal publié et identité, relu en entier sous verrou et juste avant le retrait ; identité fixée par `planned` ; génération retirée relue avant la promotion ; restauration seulement si elle est intacte ; toute anomalie après le retrait : code 3, rien déplacé | Fautes injectées à chaque fenêtre : contenu ou identité changés, `current` réapparu, génération retenue altérée ; crash avant et après chaque appel, puis récupération ; test Windows réel de bout en bout |
+| Snapshot fidèle, jamais réécrit | `current` reconnu et relu en entier sous verrou ; copie relue depuis le disque et comparée au receipt de `current` ; porte de provenance avant toute approbation ; aucune écriture sous un snapshot publié ; domaines séparés, une anomalie des snapshots ne bloque jamais `sync` | Fautes injectées : `current` changé pendant la copie, receipt source altéré ou disparu, copie altérée ; crash avant et après chaque appel, puis récupération ; test croisé des deux domaines ; test Windows réel de bout en bout |
 | Interruption récupérable, jamais devinée | Journal validé par renommage avant chaque action, contrat strict des champs, récupération explicite selon les tableaux d'ADR 0006 ; ambiguïté ou enveloppe épuisée : code 3 sans écriture | Crash avant et après chaque appel au coffre, puis récupération ; crash pendant la récupération ; processus tué pendant le staging |
 | Aucun lien suivi, parents compris | Contrôle de chaque composant depuis la racine du volume ; ouverture Windows avec `FILE_FLAG_OPEN_REPARSE_POINT` et contrôle des attributs sur le handle ; refus des placeholders | Faux système de fichiers sur trois OS ; vraies jonctions Windows dans la portée, en ancre, et substituées après `Lstat` ; lien symbolique relatif qu'`os.Root` seul aurait suivi |
 | Pas de substitution pendant l'inspection | Dossiers traversés gardés ouverts sans partage de suppression jusqu'à la fin | Renommage refusé tant que la portée est ouverte, accepté après fermeture |
@@ -30,6 +32,11 @@ Limites assumées :
 - L'inventaire est vérifié au mieux, **pas atomique** : une modification qui
   préserverait taille, date et identité d'un fichier passerait inaperçue.
 - Lire peut mettre à jour la date de dernier accès selon les réglages NTFS.
+- Un snapshot est relu avant sa publication, pas entre sa relecture et son
+  receipt : une écriture d'un autre programme dans cette fenêtre n'est
+  détectée que si un plan suivant relit son contenu, tant qu'il est le
+  candidat `up to date` ; il est alors dégradé. Après une rotation, il n'est
+  plus relu en B3.
 - Le garde statique ne prouve pas l'absence de tout effet indirect ; les
   tests dynamiques couvrent le comportement livré, sur leurs fixtures.
 - Sous Unix, l'adaptateur sert aux tests du contrat ; un échange suivi d'une
@@ -62,8 +69,14 @@ B1 et B2a implémentent les invariants 1 à 3 pour la lecture : source
 déclarée par l'utilisateur, chemins canoniques sans `..` ni chevauchement,
 coffre distinct de l'installation, liens jamais suivis, rien d'exécuté. B2b
 et B2c implémentent les invariants 4 à 6 pour la première publication et
-la rotation, selon [ADR 0006](adr/0006-publication-recovery-protocol.md) ;
-le 7 relève des snapshots de B3.
+la rotation, selon [ADR 0006](adr/0006-publication-recovery-protocol.md).
+B3 implémente le 7 avec la commande [`snapshot`](commands/snapshot.md),
+selon ADR 0006 §10 : un snapshot publié n'est jamais rouvert en écriture,
+déplacé, remplacé ni supprimé par Savewarden, et aucun snapshot créé hors de
+Savewarden n'est adopté. Cette garantie est **protocolaire, pas matérielle** :
+ce n'est pas un stockage WORM, et un autre programme peut toujours modifier
+un snapshot. Savewarden le signale alors comme dégradé, sans jamais le
+réparer.
 
 ## Windows et remplacement de current
 

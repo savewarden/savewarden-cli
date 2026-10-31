@@ -21,7 +21,7 @@ func (o *operation) stage() error {
 	if err := o.record(backup.StepStagingIntent, backup.StepValues{}); err != nil {
 		return err
 	}
-	if err := o.ensureDir(o.game + "/" + stagingDir); err != nil {
+	if err := o.ensureDir(o.game + "/" + o.domain.stagings); err != nil {
 		return err
 	}
 	if err := o.vault.CreateDir(o.stagingDir()); err != nil {
@@ -39,7 +39,7 @@ func (o *operation) stage() error {
 	if err != nil {
 		return fmt.Errorf("staging identity: %w", err)
 	}
-	digest, err := backup.ContentDigest(o.planned.Sources)
+	digest, err := backup.ContentDigest(o.content)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (o *operation) copySource(index int, source SourcePlan) error {
 // must hash to the planned SHA-256 (plan B2 §4.3).
 func (o *operation) copyFile(scope Scope, sourceID, from, to string, want backup.Entry) error {
 	changed := func(why string) error {
-		return &BlockedError{Code: CodeChangedDuringSync, Detail: fmt.Sprintf("source %s, %s: %s since the plan", sourceID, want.Path, why)}
+		return &BlockedError{Code: o.domain.changed, Detail: fmt.Sprintf("source %s, %s: %s since the plan", sourceID, want.Path, why)}
 	}
 	same := func(info fs.FileInfo) bool {
 		return info.Mode().IsRegular() && info.Size() == want.Size && info.ModTime().Equal(want.ModTime)
@@ -214,14 +214,14 @@ func (o *operation) verify() error {
 	if err != nil {
 		return err
 	}
-	receipt := backup.Receipt{Sources: o.planned.Sources}
+	receipt := backup.Receipt{Sources: o.content}
 	if differences := compareWithReceipt(dir, receipt); len(differences) > 0 {
 		first := differences[0]
 		return &BlockedError{Code: CodeVerificationMismatch,
 			Detail: fmt.Sprintf("staging %s %s: %s; %d difference(s) in all", orDash(first.source), orDash(first.path),
 				strings.ReplaceAll(strings.ReplaceAll(first.detail, "its receipt", "the plan"), "current", "staging"), len(differences))}
 	}
-	digest, err := backup.ContentDigest(o.planned.Sources)
+	digest, err := backup.ContentDigest(o.content)
 	if err != nil {
 		return err
 	}

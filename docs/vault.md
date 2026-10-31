@@ -4,10 +4,12 @@ Un coffre est un dossier que Savewarden crée et dont il est le seul à écrire
 le contenu. `sync --apply` y publie une copie vérifiée des sources d'un
 manifeste ; le plan, sans `--apply`, le lit sans rien écrire. Une nouvelle
 génération remplace la précédente par rotation : l'ancienne est renommée dans
-`retained`, jamais supprimée. Les règles de publication et de
-récupération sont fixées par
-[ADR 0006](adr/0006-publication-recovery-protocol.md), le contrat de la
-commande par [ADR 0007](adr/0007-sync-contract-receipt-v1.md).
+`retained`, jamais supprimée. `snapshot --apply` y range en outre des
+snapshots : des copies vérifiées et immuables de `current`. Les règles de
+publication et de récupération sont fixées par
+[ADR 0006](adr/0006-publication-recovery-protocol.md), le contrat des
+commandes par [ADR 0007](adr/0007-sync-contract-receipt-v1.md) pour `sync` et
+[ADR 0008](adr/0008-snapshot-contract-receipt-v1.md) pour `snapshot`.
 
 ## Disposition
 
@@ -21,13 +23,22 @@ commande par [ADR 0007](adr/0007-sync-contract-receipt-v1.md).
     staging\<op-id>\<source-id>\...   opération en cours, échouée ou abandonnée
     receipts\<op-id>.json             receipt de chaque génération publiée
     journal\<op-id>\NNN-<étape>.rec   enregistrements validés, jamais réécrits
+    snapshots\                        domaine des snapshots
+      <snap-id>\<source-id>\...         snapshot publié, immuable
+      <snap-id>.incomplete\...          copie en cours, échouée ou abandonnée
+      receipts\<snap-id>.json           receipt de chaque snapshot
+      journal\<snap-id>\NNN-<étape>.rec journal de chaque opération de snapshot
 ```
 
-- `<op-id>` a la forme `AAAAMMJJTHHMMSS-xxxxxxxx` : date et heure UTC, puis
-  huit chiffres hexadécimaux.
+- `<op-id>` et `<snap-id>` ont la forme `AAAAMMJJTHHMMSS-xxxxxxxx` : date et
+  heure UTC, puis huit chiffres hexadécimaux.
 - Le [receipt v1](receipt-v1.md) décrit exactement une génération : chemins,
-  tailles, dates, SHA-256.
-- `snapshots\` est réservé au lot B3.
+  tailles, dates, SHA-256. Le [receipt de snapshot](snapshot-receipt-v1.md)
+  décrit un snapshot et la génération qu'il copie.
+- `sync` accepte le dossier `snapshots` et ne lit rien dedans : aucune
+  anomalie des snapshots ne bloque la protection de `current`, récupération
+  comprise. Un binaire antérieur à B3 refuse un coffre qui contient
+  `snapshots`, en code 3, sans rien écrire.
 
 ## Choisir un coffre
 
@@ -109,6 +120,24 @@ exhausted` : Savewarden ne fait plus rien sur ce coffre. Ne supprimez aucun
 temporaire ; conservez le coffre tel quel pour analyse et utilisez, au
 besoin, un nouveau coffre.
 
+## Snapshots : interventions et récupération
+
+`snapshot` applique les mêmes causes d'intervention, mais au seul domaine des
+snapshots, et sa récupération ne dépend jamais de `current` :
+
+| Situation | Que faire |
+| --- | --- |
+| `pending-operation` d'un snapshot | `snapshot --recover` montre l'action prévue, `snapshot --recover --apply` l'exécute ; `sync` n'en est pas bloqué. Si un autre processus Savewarden tient le verrou, l'opération est en cours : code 1, attendre qu'elle se termine |
+| `pending-operation` de `current` au moment d'un snapshot | Récupérer d'abord par `sync --recover --apply` ; un snapshot exige un `current` reconnu |
+| `source-unverified` | Le receipt de la génération copiée est absent, modifié ou illisible. Avant la publication, l'opération est close sans rien publier ; après le renommage, une preuve contraire remet la copie en `.incomplete`, une preuve illisible laisse l'opération en attente : relancer `snapshot --recover --apply` une fois le fichier lisible |
+| `snapshot-missing`, `snapshot-rename-lost`, `snapshot-modified` | Snapshot dégradé, signalé sans blocage : Savewarden ne le répare jamais. Un nouveau snapshot de la même génération est possible. Après `snapshot-rename-lost`, la copie complète reste sous `.incomplete` |
+
+Une ambiguïté du domaine des snapshots, journal incohérent, entrée
+inexpliquée ou `snapshots\receipts` absent à côté d'opérations, bloque la
+création de snapshots et leur récupération jusqu'à votre intervention,
+jamais `sync`. Ne supprimez aucun fichier ; un nouveau coffre reste possible.
+Les copies `.incomplete` des opérations closes ne sont ni relues ni exigées.
+
 ## Espace disque
 
 Chaque publication copie la génération complète en staging. Savewarden exige,
@@ -117,7 +146,10 @@ d'espace disponible pour l'utilisateur, quotas compris ; une rotation ne fait
 que renommer l'ancienne génération, sans la copier. Les générations
 remplacées s'accumulent dans `retained`, une de plus à chaque publication, et
 ni elles ni les stagings échoués ne sont supprimés automatiquement : l'espace
-qu'ils occupent relève du propriétaire du coffre.
+qu'ils occupent relève du propriétaire du coffre. Il en va de même des
+snapshots et de leurs copies `.incomplete` : un snapshot copie la génération
+complète, avec la même réserve d'espace, et un seul snapshot conforme est
+créé par génération.
 
 ## Confidentialité
 

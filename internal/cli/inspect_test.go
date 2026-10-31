@@ -49,7 +49,7 @@ func baseReport() inspect.Report {
 func execute(t *testing.T, inspector cli.Inspector, args ...string) (string, error) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	root := cli.NewRootCommand("dev", &stdout, &stderr, inspector, nil)
+	root := cli.NewRootCommand("dev", &stdout, &stderr, inspector, nil, nil)
 	root.SetArgs(args)
 	err := root.ExecuteContext(context.Background())
 	return stdout.String(), err
@@ -184,7 +184,7 @@ func TestFailedWriteLeavesOnlyAPrefixAndAnError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			full := cli.Render(report)
 			stdout := &partialWriter{limit: 40}
-			root := cli.NewRootCommand("dev", stdout, &bytes.Buffer{}, &fakeInspector{report: report}, nil)
+			root := cli.NewRootCommand("dev", stdout, &bytes.Buffer{}, &fakeInspector{report: report}, nil, nil)
 			root.SetArgs([]string{"inspect", "--manifest", "m.yaml"})
 			err := root.ExecuteContext(context.Background())
 			var exit *cli.ExitError

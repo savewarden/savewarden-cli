@@ -434,32 +434,43 @@ func (r Receipt) validate() error {
 	if r.ToolVersion == "" || r.GameID == "" || r.GameName == "" {
 		return fail("tool_version, game.id and game.name must not be empty")
 	}
-	if r.PublishIntentAt.Before(r.StartedAt) {
-		return fail("publish_intent_at precedes started_at")
-	}
-	switch {
-	case r.RecoveredAt == nil && r.RecoveredBy == "":
-		if r.PublishedAt == nil {
-			return fail("published_at: required unless the receipt was reconstructed by recovery")
-		}
-		if r.PublishedAt.Before(r.PublishIntentAt) {
-			return fail("published_at precedes publish_intent_at")
-		}
-	case r.RecoveredAt != nil && r.RecoveredBy != "":
-		if r.PublishedAt != nil {
-			return fail("published_at: must be null in a reconstructed receipt, the moment of the rename is unknown")
-		}
-		if r.RecoveredAt.Before(r.PublishIntentAt) {
-			return fail("recovered_at precedes publish_intent_at")
-		}
-	default:
-		return fail("recovered_at and recovered_by must be both null or both set")
+	if err := checkPublicationTimes(r.StartedAt, r.PublishIntentAt, r.PublishedAt, r.RecoveredAt, r.RecoveredBy); err != nil {
+		return fail("%v", err)
 	}
 	if r.Changes.Added < 0 || r.Changes.Modified < 0 || r.Changes.Removed < 0 || r.Changes.Unchanged < 0 {
 		return fail("changes: counts must not be negative")
 	}
 	if err := validateSources(r.Sources); err != nil {
 		return fail("%v", err)
+	}
+	return nil
+}
+
+// checkPublicationTimes applies the rules of dates and provenance shared by
+// every receipt (ADR 0007): a receipt written at publication knows
+// published_at; one reconstructed by recovery names recovered_at and
+// recovered_by instead.
+func checkPublicationTimes(startedAt, publishIntentAt time.Time, publishedAt, recoveredAt *time.Time, recoveredBy string) error {
+	if publishIntentAt.Before(startedAt) {
+		return errors.New("publish_intent_at precedes started_at")
+	}
+	switch {
+	case recoveredAt == nil && recoveredBy == "":
+		if publishedAt == nil {
+			return errors.New("published_at: required unless the receipt was reconstructed by recovery")
+		}
+		if publishedAt.Before(publishIntentAt) {
+			return errors.New("published_at precedes publish_intent_at")
+		}
+	case recoveredAt != nil && recoveredBy != "":
+		if publishedAt != nil {
+			return errors.New("published_at: must be null in a reconstructed receipt, the moment of the rename is unknown")
+		}
+		if recoveredAt.Before(publishIntentAt) {
+			return errors.New("recovered_at precedes publish_intent_at")
+		}
+	default:
+		return errors.New("recovered_at and recovered_by must be both null or both set")
 	}
 	return nil
 }

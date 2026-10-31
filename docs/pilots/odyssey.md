@@ -119,13 +119,40 @@ dans [le rapport B2c](../validation/b2c.md#pilote-b2c). Aucune empreinte
 individuelle, aucun receipt réel, aucun identifiant d'opération, aucun nom de
 profil ni aucun chemin personnel n'est versionné.
 
+### Protocole B3
+
+Exécuté par le propriétaire après la fusion de B3, avec un binaire du commit
+de fusion, dans un **coffre neuf**, distinct de celui des pilotes B2, qui
+reste intact : un binaire antérieur refuserait un coffre muni de
+`snapshots\`. L'agent n'y accède pas.
+
+1. `sync --apply` vers le coffre neuf : code `0`, `published <op>` ;
+   facultatif : sauvegarder en jeu, fermer, puis second `sync --apply`, pour
+   un coffre qui a connu une rotation.
+2. `snapshot`, plan seul : code `0`, `current` reconnu, `plan: new snapshot`,
+   14 fichiers attendus, aucune anomalie ; coffre inchangé.
+3. `snapshot --apply` : code `0`, `published snapshot <snap-id>`.
+4. `inspect` d'un manifeste écrit hors du dépôt, dont la source pointe sur
+   `snapshots\<snap-id>\saves` : fichiers, tailles et SHA-256 égaux au
+   receipt du snapshot et à celui de `current`, sans les versionner.
+5. Plan suivant `up to date`, puis second `snapshot --apply` : `not
+   modified`, empreinte du coffre inchangée.
+6. `sync`, plan seul : code `0`, `up to date` ; empreinte de tout le coffre
+   hors `snapshots\` inchangée depuis l'étape 2.
+
+Consigner codes, nombres et verdicts dans le rapport B3, sans hash
+individuel, identifiant d'opération, receipt réel, nom de profil ni chemin
+personnel. Le pilote qualifie le chemin nominal ; crashs, porte de
+provenance, récupération et dégradations restent prouvés par les tests
+synthétiques, les tests Windows réels et la CI.
+
 B2 copie seulement après plan, choix explicite de destination et
 autorisation ; pas de suppression de la source. L'ancien coffre du pilote,
 non vide et sans marqueur, est refusé par la règle générique du coffre,
-jamais adopté. B3 ajoutera
-un snapshot neuf
-et immuable. B4 restaurera un snapshot dans un dossier **isolé**. B5 contrôlera
-manifestes/receipts/hash et validera le pilote complet avant une RC.
+jamais adopté, et son snapshot `20261009T183208-cacd3cae` n'est ni lu ni
+importé. B3 ajoute des snapshots neufs et immuables. B4 restaurera un
+snapshot dans un dossier **isolé**. B5 contrôlera manifestes/receipts/hash et
+validera le pilote complet avant une RC.
 
 Les autorisations d'un lot ne valent pas consentement pour relocation,
 symlink/junction, changement de `SavePath` ou restauration en place.

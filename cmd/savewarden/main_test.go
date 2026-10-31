@@ -45,15 +45,19 @@ func TestBinarySmoke(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("synthetic fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"--help"}, {"version"}, {"--version"}, {"sync"}, {"inspect"}} {
+	for _, args := range [][]string{{"--help"}, {"version"}, {"--version"}, {"sync"}, {"snapshot"}, {"inspect"}} {
 		cmd := exec.Command(binary, args...)
 		cmd.Dir = work
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
-		if args[0] == "sync" || args[0] == "inspect" {
+		want, missing := map[string]string{
+			"sync":     `required flag(s) "manifest", "vault" not set`,
+			"snapshot": `required flag(s) "manifest", "vault" not set`,
+			"inspect":  `required flag(s) "manifest" not set`,
+		}[args[0]]
+		if missing {
 			var exit *exec.ExitError
-			want := map[string]string{"sync": `required flag(s) "manifest", "vault" not set`, "inspect": `required flag(s) "manifest" not set`}[args[0]]
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), want) {
 				t.Fatalf("%v: err=%v stdout=%q stderr=%q", args, err, stdout.String(), stderr.String())
 			}
@@ -62,7 +66,8 @@ func TestBinarySmoke(t *testing.T) {
 				t.Fatalf("%v: err=%v stderr=%q", args, err, stderr.String())
 			}
 			if args[0] == "--help" {
-				if !strings.Contains(stdout.String(), "plans their synchronisation") || !strings.Contains(stdout.String(), "inspect") || !strings.Contains(stdout.String(), "sync") {
+				if !strings.Contains(stdout.String(), "plans their synchronisation") || !strings.Contains(stdout.String(), "inspect") || !strings.Contains(stdout.String(), "sync") ||
+					!strings.Contains(stdout.String(), "snapshot") {
 					t.Fatalf("help: %q", stdout.String())
 				}
 			} else if stdout.String() != "savewarden dev\n" {
@@ -274,6 +279,27 @@ func TestSyncPlanDoesNotWrite(t *testing.T) {
 	})
 }
 
+// The plan mode of snapshot writes nothing either; without a vault it
+// refuses in code 1, snapshot never creating one.
+func TestSnapshotPlanDoesNotWrite(t *testing.T) {
+	assertReadOnlyRuns(t, func(base, manifest string) []string {
+		vault := `D:\Coffre synthétique`
+		if runtime.GOOS == "windows" {
+			vault = filepath.Join(base, "Coffre synthétique")
+		}
+		return []string{"snapshot", "--manifest", manifest, "--vault", vault}
+	}, func(t *testing.T, stdout, stderr string, err error) {
+		if runtime.GOOS != "windows" {
+			expectWindowsOnly(t, stdout, stderr, err)
+			return
+		}
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout != "" || !strings.Contains(stderr, "snapshot never does") {
+			t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		}
+	})
+}
+
 func values(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for _, v := range m {
@@ -296,6 +322,8 @@ func TestReadmeCommandExamples(t *testing.T) {
 		"docs/commands/inspect.md",
 		`.\bin\savewarden.exe sync --manifest '`,
 		"docs/commands/sync.md",
+		`.\bin\savewarden.exe snapshot --manifest '`,
+		"docs/commands/snapshot.md",
 	} {
 		if !strings.Contains(string(content), example) {
 			t.Errorf("missing tested README example %q", example)

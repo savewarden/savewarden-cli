@@ -1,7 +1,10 @@
-// Package sync plans and, from B2b, performs the copy of a manifest's
-// sources into a vault. This build plans only: it reads the manifest, the
-// sources and the vault, and writes nothing anywhere. Publication and
-// recovery follow ADR 0006; the contract of the command is ADR 0007.
+// Package sync plans and performs every publication into the vault of a
+// game: the copy of a manifest's sources into current, and the snapshots
+// of current. A plan reads the manifest, the vault and, for current, the
+// sources, and writes nothing; --apply and --recover --apply write only
+// into the vault, through the Vaults port, by exclusive creations and
+// renames that replace nothing. Publication and recovery follow ADR 0006;
+// the contracts of the commands are ADR 0007 and ADR 0008.
 //
 // The plan never follows links: sources are inventoried by the no-follow
 // walk of inspect, received through the Inventories port, and the vault is

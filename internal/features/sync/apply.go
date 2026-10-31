@@ -125,6 +125,7 @@ type operation struct {
 	ctx     context.Context
 	plan    Plan
 	vault   Vault
+	domain  domain
 	game    string // games/<id>
 	op      string
 	started time.Time
@@ -150,13 +151,21 @@ type operation struct {
 	recovering bool
 	planned    *backup.Planned
 	planSum    [32]byte
-	staging    backup.FileID
-	intentAt   time.Time
+	// content is the sources the planned record fixed: what the staging
+	// must hold once copied.
+	content  []backup.ReceiptSource
+	staging  backup.FileID
+	intentAt time.Time
 	// A rotation replaces the generation of previous, described by head,
 	// whose current has the identity old, fixed by planned (ADR 0006 §5).
 	previous string
 	head     backup.Receipt
 	old      backup.FileID
+	// A snapshot copies the generation of source, whose current had the
+	// identity sourceIdentity under lock, after its plan (ADR 0006 §10).
+	snapshotPlan   *backup.SnapshotPlan
+	source         backup.SnapshotSource
+	sourceIdentity backup.FileID
 }
 
 // rotation reports whether the operation replaces an existing current.
@@ -213,7 +222,7 @@ func (s *Service) begin(ctx context.Context, plan Plan, w Writer) (*operation, e
 		return nil, errVault(plan.Vault, "%v", err)
 	}
 	return &operation{
-		s: s, w: w, ctx: ctx, plan: plan, vault: session,
+		s: s, w: w, ctx: ctx, plan: plan, vault: session, domain: currentDomain,
 		game:     gamesDir + "/" + plan.Game.ID,
 		op:       now.Format("20060102T150405") + "-" + hex.EncodeToString(random),
 		started:  now,
@@ -252,7 +261,7 @@ func (o *operation) unfinished(err error) error {
 		// Resuming a vault initialization: only its marker was at stake.
 		return &InterventionError{Cause: oneLine(err.Error()) + "; the vault initialization is still interrupted, run sync --recover --apply again"}
 	}
-	return &InterventionError{Operation: o.op, Cause: oneLine(err.Error()) + "; the operation is not closed, run sync --recover"}
+	return &InterventionError{Operation: o.op, Cause: oneLine(err.Error()) + "; the operation is not closed, run " + o.domain.command + " --recover"}
 }
 
 func (o *operation) result() Result {
@@ -285,9 +294,9 @@ func (o *operation) wrote() {
 
 func (o *operation) now() time.Time { return o.w.Clock.Now().UTC() }
 
-func (o *operation) journalDir() string { return o.game + "/" + journalDir + "/" + o.op }
+func (o *operation) journalDir() string { return o.game + "/" + o.domain.journals + "/" + o.op }
 
-func (o *operation) stagingDir() string { return o.game + "/" + backup.StagingName(o.op) }
+func (o *operation) stagingDir() string { return o.game + "/" + o.domain.staging(o.op) }
 
 // initialize follows steps I2 to I9 of ADR 0006 §4, made only of exclusive
 // creations, up to the planned record.
@@ -323,7 +332,7 @@ func (o *operation) initialize() error {
 	if err := o.vault.Lock(o.game + "/" + lockFile); err != nil {
 		var busy interface{ Busy() bool }
 		if errors.As(err, &busy) && busy.Busy() {
-			return errVault(o.plan.Vault, "another sync is running on this game")
+			return errVault(o.plan.Vault, "%s", o.domain.busy)
 		}
 		return errVault(o.plan.Vault, "lock: %w", err)
 	}
@@ -335,7 +344,7 @@ func (o *operation) initialize() error {
 		return err
 	}
 	// I8: the operation directory, exclusive.
-	if err := o.ensureDir(o.game + "/" + journalDir); err != nil {
+	if err := o.ensureDir(o.game + "/" + o.domain.journals); err != nil {
 		return errVault(o.plan.Vault, "%w", err)
 	}
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
@@ -435,7 +444,7 @@ func (o *operation) plannedContent() (*backup.Planned, error) {
 	if _, sum, err := p.Encode(); err != nil {
 		return nil, err
 	} else {
-		o.planned, o.planSum = p, sum
+		o.planned, o.planSum, o.content = p, sum, p.Sources
 	}
 	return p, nil
 }
@@ -461,7 +470,7 @@ func (o *operation) record(step backup.Step, values backup.StepValues) error {
 		// The plan was dated when it was built; its record carries that date.
 		at = o.started
 	}
-	r, err := backup.NewRecord(seq, step, o.op, at, o.prev, values)
+	r, err := o.domain.newRecord(seq, step, o.op, at, o.prev, values)
 	if err != nil {
 		return err
 	}

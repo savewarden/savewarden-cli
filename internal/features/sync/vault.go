@@ -25,6 +25,8 @@ const (
 	stagingDir  = "staging"
 	receiptsDir = "receipts"
 	journalDir  = "journal"
+	// snapshotsDir holds the snapshot domain (ADR 0006 §10).
+	snapshotsDir = "snapshots"
 )
 
 // vault is what the plan read from the vault, without writing anything.
@@ -145,17 +147,24 @@ func (v *vault) readProbing(scope Scope, vaultPath string, segments []string, ga
 	if err := v.readGame(scope, vaultPath, root, gameID, hasEntry(entries, gamesDir)); err != nil {
 		return err
 	}
-	if probe && v.lock && len(v.pending) > 0 {
-		lock, err := scope.OpenRegular(join(root, gamesDir+"/"+gameID+"/"+lockFile))
-		var busy interface{ Busy() bool }
-		if errors.As(err, &busy) && busy.Busy() {
-			return errVault(vaultPath, "another sync is running on this game; run it again once it ends")
-		}
-		if err == nil {
-			_ = lock.Close()
-		}
+	if probe && v.lock && len(v.pending) > 0 && lockBusy(scope, join(root, gamesDir+"/"+gameID+"/"+lockFile)) {
+		return errVault(vaultPath, "another sync is running on this game; run it again once it ends")
 	}
 	return nil
+}
+
+// lockBusy reports whether another process holds the lock file name: an
+// operation it runs is pending, not interrupted.
+func lockBusy(scope Scope, name string) bool {
+	lock, err := scope.OpenRegular(name)
+	var busy interface{ Busy() bool }
+	if errors.As(err, &busy) && busy.Busy() {
+		return true
+	}
+	if err == nil {
+		_ = lock.Close()
+	}
+	return false
 }
 
 func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool) error {
@@ -202,6 +211,9 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 			v.currentLink = true
 		case (entry.Name == retainedDir || entry.Name == stagingDir || entry.Name == receiptsDir || entry.Name == journalDir) &&
 			entry.Kind == backup.KindDirectory:
+		case entry.Name == snapshotsDir && entry.Kind == backup.KindDirectory:
+			// The snapshot domain, accepted as a plain directory and never
+			// read: nothing under it decides for current (ADR 0007, B3).
 		default:
 			v.intervene(CauseUnexpectedEntry, gamesDir+"/"+gameID+"/"+entry.Name, "has no place in the game directory")
 		}
@@ -347,6 +359,14 @@ func (v *vault) readJournals(scope Scope, name, subject string, found map[string
 // readJournal parses one operation journal and returns the SHA-256 of its
 // last record file, empty if none.
 func readJournal(scope Scope, name, op string) (backup.Journal, string, error) {
+	return readJournalWith(scope, name, op, func(names []string, contents map[string][]byte) (backup.Journal, error) {
+		return backup.ParseJournal(op, names, contents)
+	})
+}
+
+// readJournalWith reads the listing and records of one operation journal
+// and parses them with parse, the reader of the operation's domain.
+func readJournalWith(scope Scope, name, op string, parse func(names []string, contents map[string][]byte) (backup.Journal, error)) (backup.Journal, string, error) {
 	entries, err := list(scope, name)
 	if err != nil {
 		return backup.Journal{}, "", err
@@ -366,7 +386,7 @@ func readJournal(scope Scope, name, op string) (backup.Journal, string, error) {
 			contents[entry.Name] = data
 		}
 	}
-	journal, err := backup.ParseJournal(op, names, contents)
+	journal, err := parse(names, contents)
 	if err != nil || len(journal.Records) == 0 {
 		return journal, "", err
 	}
@@ -491,9 +511,20 @@ func readFile(scope Scope, name string, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("read %s: larger than %d bytes", name, limit)
+		return nil, &tooLargeError{name: name, limit: limit}
 	}
 	return data, nil
+}
+
+// tooLargeError reports a file larger than what its kind may hold: never a
+// file the protocol wrote.
+type tooLargeError struct {
+	name  string
+	limit int64
+}
+
+func (e *tooLargeError) Error() string {
+	return fmt.Sprintf("read %s: larger than %d bytes", e.name, e.limit)
 }
 
 // join builds a scope name below dir, "." being the anchor.

@@ -10,15 +10,15 @@ import (
 
 // NewRootCommand constructs the CLI with explicit version, streams and
 // services.
-func NewRootCommand(version string, stdout, stderr io.Writer, inspector Inspector, syncer Syncer) *cobra.Command {
+func NewRootCommand(version string, stdout, stderr io.Writer, inspector Inspector, syncer Syncer, snapshotter Snapshotter) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "savewarden",
 		Short: "Your progress. Always protected.",
 		Long: "Savewarden protects game saves.\n\n" +
 			"This build inspects declared save sources, plans their synchronisation\n" +
-			"into a vault and, with sync --apply, publishes a first generation there.\n" +
-			"Sources are only read; nothing is ever deleted or overwritten. Snapshots\n" +
-			"and restoration come later.",
+			"into a vault and, with sync --apply, publishes a generation there; snapshot\n" +
+			"plans an immutable copy of that generation. Sources are only read; nothing\n" +
+			"is ever deleted or overwritten. Restoration comes later.",
 		Version:       version,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -34,6 +34,7 @@ func NewRootCommand(version string, stdout, stderr io.Writer, inspector Inspecto
 	root.DisableSuggestions = true
 	root.AddCommand(newInspectCommand(inspector))
 	root.AddCommand(newSyncCommand(syncer))
+	root.AddCommand(newSnapshotCommand(snapshotter))
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the build version",

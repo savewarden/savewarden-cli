@@ -29,6 +29,12 @@ type StepValues struct {
 	Digest [32]byte
 	// Text: reason of failed and abandoned, error of rollback-failed.
 	Text string
+	// Planned of a snapshot operation (ADR 0006 §10): the generation it
+	// copies and the SHA-256 of its receipt file, the identity of current
+	// under lock, and the plan. PlanSHA256 is computed from SnapshotPlan.
+	SnapshotSource SnapshotSource
+	SourceIdentity FileID
+	SnapshotPlan   *SnapshotPlan
 }
 
 type fieldKind int
@@ -43,6 +49,10 @@ const (
 	fieldRetained
 	fieldDigest
 	fieldText
+	fieldSourceOperation
+	fieldSourceReceipt
+	fieldSourceIdentity
+	fieldSnapshotPlan
 )
 
 // stepContract names, for every step, its only fields; all are required,
@@ -77,15 +87,29 @@ const plannedCurrent = "current_identity"
 // directory, as the staging-intent record names it.
 func StagingName(op string) string { return "staging/" + op }
 
-// NewRecord builds the record of one step from its values, which must
-// follow the step's contract.
+// NewRecord builds the record of one step of the current domain from its
+// values, which must follow the step's contract.
 func NewRecord(seq int, step Step, op string, at time.Time, prev string, v StepValues) (Record, error) {
-	contract, ok := stepContract[step]
+	if step == StepPlanned && v.Previous != "" && v.Current == (FileID{}) {
+		return Record{}, fmt.Errorf("planned record of a rotation: %s of the replaced current required", plannedCurrent)
+	}
+	r, err := newRecord(stepContract, StagingName(op), seq, step, op, at, prev, v)
+	if err != nil {
+		return Record{}, err
+	}
+	if _, err := r.Values(); err != nil {
+		return Record{}, err
+	}
+	return r, nil
+}
+
+func newRecord(contracts map[Step]map[string]fieldKind, staging string, seq int, step Step, op string, at time.Time, prev string, v StepValues) (Record, error) {
+	contract, ok := contracts[step]
 	if !ok {
 		return Record{}, fmt.Errorf("unknown step %q", step)
 	}
-	if step == StepPlanned && v.Previous != "" && v.Current == (FileID{}) {
-		return Record{}, fmt.Errorf("planned record of a rotation: %s of the replaced current required", plannedCurrent)
+	if v.Plan != nil && v.SnapshotPlan != nil {
+		return Record{}, errors.New("planned record: the values carry two plans")
 	}
 	fields := map[string]json.RawMessage{}
 	for name, kind := range contract {
@@ -109,16 +133,39 @@ func NewRecord(seq int, step Step, op string, at time.Time, prev string, v StepV
 			fields[name] = plan
 			continue
 		case fieldPlanSHA256:
-			if v.Plan == nil {
-				return Record{}, errors.New("planned record: plan required")
+			// The digest of the plan the contract names, never of another.
+			var sum [32]byte
+			var err error
+			switch {
+			case contract["plan"] == fieldSnapshotPlan && v.SnapshotPlan != nil:
+				_, sum, err = v.SnapshotPlan.Encode()
+			case contract["plan"] == fieldPlan && v.Plan != nil:
+				_, sum, err = v.Plan.Encode()
+			default:
+				err = errors.New("planned record: plan required")
 			}
-			_, sum, err := v.Plan.Encode()
 			if err != nil {
 				return Record{}, err
 			}
 			value = hex.EncodeToString(sum[:])
+		case fieldSnapshotPlan:
+			if v.SnapshotPlan == nil {
+				return Record{}, errors.New("planned record: plan required")
+			}
+			plan, _, err := v.SnapshotPlan.Encode()
+			if err != nil {
+				return Record{}, err
+			}
+			fields[name] = plan
+			continue
+		case fieldSourceOperation:
+			value = v.SnapshotSource.Operation
+		case fieldSourceReceipt:
+			value = hex.EncodeToString(v.SnapshotSource.ReceiptSHA256[:])
+		case fieldSourceIdentity:
+			value = v.SourceIdentity.String()
 		case fieldStagingName:
-			value = StagingName(op)
+			value = staging
 		case fieldStaging:
 			value = v.Staging.String()
 		case fieldCurrent:
@@ -136,17 +183,18 @@ func NewRecord(seq int, step Step, op string, at time.Time, prev string, v StepV
 		}
 		fields[name] = data
 	}
-	r := Record{Seq: seq, Step: step, Op: op, At: at, Prev: prev, Fields: fields}
-	if _, err := r.Values(); err != nil {
-		return Record{}, err
-	}
-	return r, nil
+	return Record{Seq: seq, Step: step, Op: op, At: at, Prev: prev, Fields: fields}, nil
 }
 
-// Values decodes the fields of r strictly against the contract of its
-// step: every field required, no other accepted, each of its exact type.
+// Values decodes the fields of a record of the current domain strictly
+// against the contract of its step: every field required, no other
+// accepted, each of its exact type.
 func (r Record) Values() (StepValues, error) {
-	contract, ok := stepContract[r.Step]
+	return r.values(stepContract, StagingName(r.Op))
+}
+
+func (r Record) values(contracts map[Step]map[string]fieldKind, staging string) (StepValues, error) {
+	contract, ok := contracts[r.Step]
 	if !ok {
 		return StepValues{}, fmt.Errorf("unknown step %q", r.Step)
 	}
@@ -197,10 +245,29 @@ func (r Record) Values() (StepValues, error) {
 			}
 			v.PlanSHA256 = sum
 		case fieldStagingName:
-			if name, err := decodeString(raw); err != nil || name != StagingName(r.Op) {
-				return StepValues{}, fail(`"staging" must be %q`, StagingName(r.Op))
+			if name, err := decodeString(raw); err != nil || name != staging {
+				return StepValues{}, fail(`"staging" must be %q`, staging)
 			}
-		case fieldStaging, fieldCurrent, fieldRetained:
+		case fieldSnapshotPlan:
+			plan, err := DecodeSnapshotPlan(raw)
+			if err != nil {
+				return StepValues{}, fail("%v", err)
+			}
+			v.SnapshotPlan = &plan
+			planSum = sha256.Sum256(raw)
+		case fieldSourceOperation:
+			source, err := decodeString(raw)
+			if err != nil || ValidOperationID(source) != nil || source == r.Op {
+				return StepValues{}, fail(`%q must be another operation id`, name)
+			}
+			v.SnapshotSource.Operation = source
+		case fieldSourceReceipt:
+			sum, err := decodeSHA256(raw)
+			if err != nil {
+				return StepValues{}, fail("%q: %v", name, err)
+			}
+			v.SnapshotSource.ReceiptSHA256 = sum
+		case fieldStaging, fieldCurrent, fieldRetained, fieldSourceIdentity:
 			text, err := decodeString(raw)
 			if err != nil {
 				return StepValues{}, fail("%q: %v", name, err)
@@ -214,6 +281,8 @@ func (r Record) Values() (StepValues, error) {
 				v.Staging = id
 			case fieldCurrent:
 				v.Current = id
+			case fieldSourceIdentity:
+				v.SourceIdentity = id
 			default:
 				v.Retained = id
 			}
@@ -245,6 +314,9 @@ func (r Record) Values() (StepValues, error) {
 		case v.Previous == "" && recorded:
 			return StepValues{}, fail(`%q is forbidden for a first publication`, plannedCurrent)
 		}
+	}
+	if v.SnapshotPlan != nil && v.PlanSHA256 != planSum {
+		return StepValues{}, fail(`"plan_sha256" does not match the plan`)
 	}
 	return v, nil
 }
