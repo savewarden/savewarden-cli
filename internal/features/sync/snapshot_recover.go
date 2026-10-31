@@ -240,7 +240,8 @@ func (s *Service) SnapshotRecover(ctx context.Context, request SnapshotRequest, 
 	result.Effect = o.effect
 	if errors.As(err, &intervention) {
 		result.Cause = intervention.Cause
-		if o.effect == EffectNone || o.effect == EffectStaged {
+		// Code 3 announces its cause, whatever was written before (ADR 0008).
+		if o.effect == EffectNone || o.effect == EffectMetadata || o.effect == EffectStaged {
 			result.Effect = EffectIntervention
 		}
 	}

@@ -38,6 +38,8 @@ type fakeFS struct {
 	// onOpen, if set, runs when a file is opened for reading, before its
 	// content is read: tests change the source there.
 	onOpen func(name string, n *node)
+	// onLstat, if set, runs before a name is looked up by Lstat.
+	onLstat func(name string)
 	// later, if set, is what fakeVolumes reports from its second call on,
 	// such as the check under lock.
 	later     *backup.Volume
@@ -189,6 +191,9 @@ func (s *fakeScope) lookup(name string) (*node, string, error) {
 }
 
 func (s *fakeScope) Lstat(name string) (fs.FileInfo, error) {
+	if s.fs.onLstat != nil {
+		s.fs.onLstat(name)
+	}
 	n, base, err := s.lookup(name)
 	if err != nil {
 		return nil, err

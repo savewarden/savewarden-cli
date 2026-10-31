@@ -244,6 +244,16 @@ func TestSnapshotRecoveryReportsTheLockItCreated(t *testing.T) {
 		f.get(gameDir+`\sync.lock`) == nil {
 		t.Fatalf("recovery: %q, %v", result.State(), err)
 	}
+	// An ambiguity found under the lock it created is still code 3, with
+	// its cause on the state line.
+	f = interruptedAt(t, snapCommit(2, "staging-intent"), true)
+	delete(f.get(gameDir).children, "sync.lock")
+	vaults = &lockThen{fakeVaults: newFakeVaults(f), then: func() { f.put(gameDir+`\snapshots\notes.txt`, f.file("x")) }}
+	result, err = snapshotRecoverWith(f, vaults)
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.HasPrefix(result.State(), "intervention required for ") {
+		t.Fatalf("ambiguity under lock: %q, %v", result.State(), err)
+	}
 }
 
 func TestSnapshotRecoverPlanWritesNothing(t *testing.T) {

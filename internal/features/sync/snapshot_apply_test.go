@@ -361,6 +361,38 @@ func TestOversizedSourceReceiptIsContradictory(t *testing.T) {
 		!strings.HasSuffix(snapshotJournal(f, snapApplied), "006-unpublish-intent.rec,007-rolled-back.rec") {
 		t.Fatalf("oversized source receipt: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
 	}
+	// The same evidence, met by recovery.
+	f = interruptedAt(t, snapMove, true)
+	receiptNode(f).data = bytes.Repeat([]byte(" "), 64<<20+1)
+	if result, err := snapshotRecoverWith(f, newFakeVaults(f)); !errors.As(err, &intervention) || result.Effect != sync.EffectRolledBack ||
+		!strings.HasSuffix(snapshotJournal(f, snapApplied), "006-unpublish-intent.rec,007-rolled-back.rec") {
+		t.Fatalf("recovery: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
+	}
+}
+
+// A source receipt that cannot be opened is unavailable while it is still
+// a plain file, contradictory once it is gone: observed again after the
+// failed open (ADR 0006 §10).
+func TestSourceReceiptGoneDuringItsOpeningIsContradictory(t *testing.T) {
+	f := generation(t)
+	h := hooked(f)
+	h.after[snapMove] = func() {
+		receiptNode(f).busy = true
+		seen := 0
+		f.onLstat = func(name string) {
+			if strings.HasSuffix(name, "/receipts/"+op1+".json") {
+				if seen++; seen == 2 {
+					delete(f.get(gameDir+`\receipts`).children, op1+".json")
+					f.onLstat = nil
+				}
+			}
+		}
+	}
+	result, err := snapshotApply(f, h)
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.Contains(intervention.Cause, "rolled back") || result.Effect != sync.EffectRolledBack {
+		t.Fatalf("gone during its opening: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
+	}
 }
 
 func TestSnapshotRenameRefusedRollsBack(t *testing.T) {

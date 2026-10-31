@@ -174,8 +174,12 @@ func TestDeeplyNestedJSONIsRefused(t *testing.T) {
 	if _, err := backup.DecodeReceipt(nested); err == nil {
 		t.Fatal("receipt accepted")
 	}
-	if _, err := backup.DecodeRecord(nested); err == nil {
-		t.Fatal("record accepted")
+	// A record reaches its JSON only past its own checksum.
+	line := append(nested, '\n')
+	sum := sha256.Sum256(line)
+	record := append(append([]byte{}, line...), []byte("sha256 "+hex.EncodeToString(sum[:])+"\n")...)
+	if _, err := backup.DecodeRecord(record); err == nil || !strings.Contains(err.Error(), "depth") {
+		t.Fatalf("record: %v", err)
 	}
 }
 
