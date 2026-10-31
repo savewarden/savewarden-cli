@@ -55,7 +55,14 @@ func writeManifest(t *testing.T, path, install string) {
 
 func (s synthetic) run(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
-	cmd := exec.Command(s.binary, append([]string{"sync", "--manifest", s.manifest, "--vault", s.vault}, args...)...)
+	return s.command(t, "sync", args...)
+}
+
+// command runs the binary's command name on the synthetic manifest and
+// vault, and returns its stdout, stderr and exit code.
+func (s synthetic) command(t *testing.T, name string, args ...string) (string, string, int) {
+	t.Helper()
+	cmd := exec.Command(s.binary, append([]string{name, "--manifest", s.manifest, "--vault", s.vault}, args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()

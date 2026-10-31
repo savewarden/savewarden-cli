@@ -7,6 +7,28 @@ Aucun tag ni release n'est publié par le bootstrap.
 
 ### Added
 
+- Commande `snapshot --manifest <chemin> --vault <dossier>` (B3, ADR 0006 §10,
+  ADR 0008) : plan sans écriture, `--apply` qui copie la génération `current`
+  reconnue dans `snapshots\<opération>.incomplete`, relit la copie, recoupe
+  sa provenance avec le receipt de la génération copiée, puis la publie sous
+  `snapshots\<opération>` avec un receipt de snapshot ; `--recover` et
+  `--recover --apply` pour une opération interrompue. Un snapshot ne lit pas
+  la source du jeu ; une fois publié, il n'est jamais rouvert en écriture,
+  déplacé, remplacé ni supprimé. Un seul snapshot conforme par génération :
+  un second `--apply` répond `up to date`.
+- Domaines séparés dans un coffre : `sync` accepte `games\<id>\snapshots\` et
+  n'y lit rien ; une anomalie des snapshots ne bloque jamais `sync` ni la
+  récupération de `current`, et la récupération d'un snapshot ne dépend ni de
+  `current` ni d'une opération de `sync` en attente. Verrou commun aux deux
+  commandes.
+- Snapshots dégradés signalés sans blocage, sur stdout et par un
+  avertissement sur stderr : `snapshot-missing`, `snapshot-rename-lost`,
+  `snapshot-modified`. Codes `no-current` et cause `source-unverified`.
+- [Receipt de snapshot v1](docs/snapshot-receipt-v1.md), schéma
+  `savewarden.snapshot`, relu strictement ; journal de snapshot et son
+  automate dans `entities/backup`.
+- Moteur de publication de `features/sync` paramétré par le domaine de
+  l'opération, sans changement de comportement ni de sortie pour `sync`.
 - Commande `sync --manifest <chemin> --vault <dossier>`, **plan seulement** :
   ce que copierait une synchronisation vers un coffre, fichier par fichier,
   sans rien écrire, pas même le coffre. Codes de sortie 0, 1, 2 et 3, ce
@@ -117,6 +139,14 @@ Aucun tag ni release n'est publié par le bootstrap.
 
 ### Limits
 
+- L'immutabilité des snapshots est protocolaire, pas matérielle : ce n'est
+  pas un stockage WORM. Un snapshot absent ou altéré est signalé, jamais
+  réparé ; le contenu de tous les snapshots n'est pas revérifié à chaque
+  exécution, ce sera le rôle de `doctor`. Le recoupement de provenance
+  vérifie la cohérence de preuves du même coffre, pas une signature.
+  Snapshots et copies `.incomplete` s'accumulent, sans suppression. Un
+  binaire antérieur refuse en code 3, sans rien écrire, un coffre qui contient
+  `snapshots\`.
 - Les générations remplacées s'accumulent dans `retained` : aucune
   suppression ni rétention automatique en B2. Pendant une rotation, `current`
   est absent un court instant. Le verrou n'exclut qu'une autre opération
@@ -126,8 +156,7 @@ Aucun tag ni release n'est publié par le bootstrap.
 - ReFS n'est pas encore qualifié ; la durabilité d'un renommage après une
   coupure de courant n'est pas garantie par Windows, la récupération repose
   sur l'observation.
-- snapshot, restore et doctor restent à implémenter ; pas de sortie JSON de
-  la CLI.
+- restore et doctor restent à implémenter ; pas de sortie JSON de la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et
   autres placeholders cloud sont refusés ; `subst` n'est pas détecté.
 - Schéma de manifeste v1 provisoire jusqu'à `v0.1.0`.

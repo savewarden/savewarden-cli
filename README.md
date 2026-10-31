@@ -6,15 +6,16 @@ Savewarden vise à inspecter, centraliser, vérifier et restaurer les sauvegarde
 de jeux à partir de sources explicitement choisies. Le moteur sera indépendant
 de la CLI, local-first et Windows-first.
 
-**État actuel : lot B2c, version `dev`.** La commande `inspect` lit un
+**État actuel : lot B3, version `dev`.** La commande `inspect` lit un
 [manifeste v1](docs/manifest-v1.md) et inventorie en lecture seule les dossiers
 de sauvegarde qu'il déclare. La commande `sync` planifie, en lecture seule,
 leur copie vers un [coffre](docs/vault.md) ; avec `--apply`, elle y publie une
 nouvelle génération vérifiée du jeu, l'ancienne étant conservée dans
-`retained`, et `--recover` reprend toute opération interrompue. Les sources ne
-sont que lues ; rien n'est jamais supprimé ni écrasé. Les commandes
-`snapshot`, `restore` et `doctor` ne sont pas encore disponibles. Aucune
-release ni installation via package manager.
+`retained`, et `--recover` reprend toute opération interrompue. La commande
+`snapshot` fige une copie vérifiée et immuable de cette génération. Les
+sources ne sont que lues ; rien n'est jamais supprimé ni écrasé. Les commandes
+`restore` et `doctor` ne sont pas encore disponibles. Aucune release ni
+installation via package manager.
 
 ## Compiler et utiliser
 
@@ -99,6 +100,25 @@ par exemple `savewarden: vault: published <opération>`. Après une
 interruption, `sync --recover` montre la récupération prévue et
 `sync --recover --apply` l'exécute. Détails : [`savewarden sync`](docs/commands/sync.md).
 
+## Figer un snapshot
+
+Un snapshot copie la génération que le coffre détient déjà, vérifiée contre
+son receipt : l'état sauvegardé par le dernier `sync --apply`. Il ne lit pas
+la source du jeu, qui peut rester ouvert :
+
+```powershell
+.\bin\savewarden.exe snapshot --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre'
+.\bin\savewarden.exe snapshot --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre' --apply
+```
+
+Le premier plan liste les snapshots déjà publiés et ce que `--apply`
+copierait ; le second copie, relit, recoupe la provenance et publie le
+snapshot sous `snapshots\<opération>`, avec son receipt. Une fois publié, un
+snapshot n'est jamais rouvert en écriture, déplacé ni supprimé par
+Savewarden. Cette garantie est protocolaire, pas un stockage WORM. Un même
+état n'est figé qu'une fois : `--apply` répond alors `up to date`. Détails :
+[`savewarden snapshot`](docs/commands/snapshot.md).
+
 ## Sécurité et support
 
 - `inspect` ne lit que les dossiers déclarés. Il ne suit aucun lien,
@@ -111,8 +131,8 @@ interruption, `sync --recover` montre la récupération prévue et
 - Le code de production est gardé par un test qui refuse les API d'écriture,
   d'exécution et de réseau, sauf dans le seul package `platform/vault`, en
   création seule. Les tests utilisent des données synthétiques.
-- Les sauvegardes sources et les snapshots approuvés ne seront jamais supprimés
-  silencieusement.
+- Les sauvegardes sources et les snapshots approuvés ne sont jamais supprimés.
+  Un snapshot absent ou altéré est signalé, jamais réparé.
 - Une copie sur le même disque physique ne protège pas contre la panne du disque.
 
 Windows est le pilote fonctionnel. La CI teste sur Windows, Linux et macOS ;
@@ -134,8 +154,9 @@ plan en lecture seule, B2b première publication, B2c rotation et récupération
 complète ; B3 snapshots immuables ; B4 restauration isolée ; B5 `doctor` et
 validation pilote.
 La [roadmap originale](.plans/Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md),
-le [plan B1](.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md) et le
-[plan B2](.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md) restent les
+le [plan B1](.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md), le
+[plan B2](.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md) et le
+[plan B3](.plans/Savewarden_Plan_B3_Snapshots_v0.2.md) restent les
 sources du périmètre, et le [changelog](CHANGELOG.md) décrit l'existant.
 
 Licence [MIT](LICENSE), choisie explicitement pour ce bootstrap.
