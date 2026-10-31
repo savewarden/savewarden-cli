@@ -14,11 +14,22 @@ import (
 )
 
 type fakeSnapshotter struct {
-	plan    sync.SnapshotPlan
-	result  sync.SnapshotResult
-	err     error
-	request sync.SnapshotRequest
-	called  string
+	plan     sync.SnapshotPlan
+	result   sync.SnapshotResult
+	recovery sync.SnapshotRecovery
+	err      error
+	request  sync.SnapshotRequest
+	called   string
+}
+
+func (f *fakeSnapshotter) SnapshotRecoverPlan(_ context.Context, request sync.SnapshotRequest) (sync.SnapshotRecovery, error) {
+	f.request, f.called = request, "recover plan"
+	return f.recovery, f.err
+}
+
+func (f *fakeSnapshotter) SnapshotRecover(_ context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error) {
+	f.request, f.called = request, "recover"
+	return f.result, f.err
 }
 
 func (f *fakeSnapshotter) SnapshotApply(_ context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error) {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -17,13 +18,15 @@ import (
 type Snapshotter interface {
 	SnapshotPlan(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotPlan, error)
 	SnapshotApply(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error)
+	SnapshotRecoverPlan(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotRecovery, error)
+	SnapshotRecover(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error)
 }
 
 func newSnapshotCommand(snapshotter Snapshotter) *cobra.Command {
 	var manifest, vault string
-	var apply bool
+	var apply, recover bool
 	command := &cobra.Command{
-		Use:   "snapshot --manifest <path> --vault <directory> [--apply]",
+		Use:   "snapshot --manifest <path> --vault <directory> [--apply] [--recover]",
 		Short: "Plan an immutable snapshot of the current generation of a vault",
 		Long: `Plan an immutable snapshot of the current generation of a vault.
 
@@ -44,6 +47,11 @@ snapshot is never opened for writing, moved, replaced or deleted. Nothing
 is written outside snapshots\, but the empty lock file, created as sync
 creates it.
 
+--recover shows how an interrupted snapshot operation would be recovered,
+without writing anything; --recover --apply performs that recovery. It
+relies on the snapshot domain alone: neither current nor an operation of
+sync can block it, and it never reads current.
+
 Exit codes: 0 plan without blocking findings, up to date or published; 1
 invalid invocation, manifest or vault, or failure, the last stderr line
 telling what the vault holds; 2 blocked, nothing published by this run; 3
@@ -54,6 +62,27 @@ presence of output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			request := sync.SnapshotRequest{ManifestPath: manifest, VaultPath: vault}
+			switch {
+			case recover && apply:
+				result, err := snapshotter.SnapshotRecover(cmd.Context(), request)
+				report := ""
+				if result.Recovery != nil && result.Recovery.ManifestPath != "" {
+					report = RenderSnapshotRecovery(*result.Recovery, "recovery")
+				}
+				return finish(cmd, report, result.State(), err)
+			case recover:
+				recovery, err := snapshotter.SnapshotRecoverPlan(cmd.Context(), request)
+				report := ""
+				if recovery.ManifestPath != "" {
+					report = RenderSnapshotRecovery(recovery, "recovery plan only, nothing written")
+				}
+				state := sync.SnapshotResult{}.State()
+				var intervention *sync.InterventionError
+				if errors.As(err, &intervention) {
+					state = sync.SnapshotResult{Operation: intervention.Operation, Effect: sync.EffectIntervention, Cause: intervention.Cause}.State()
+				}
+				return finish(cmd, report, state, err)
+			}
 			if apply {
 				result, err := snapshotter.SnapshotApply(cmd.Context(), request)
 				report := ""
@@ -83,7 +112,8 @@ presence of output.`,
 	}
 	command.Flags().StringVar(&manifest, "manifest", "", "path to the game's manifest.yaml (required)")
 	command.Flags().StringVar(&vault, "vault", "", "vault directory, absolute Windows path (required)")
-	command.Flags().BoolVar(&apply, "apply", false, "copy, verify and publish the snapshot")
+	command.Flags().BoolVar(&apply, "apply", false, "copy, verify and publish the snapshot; with --recover, perform the recovery")
+	command.Flags().BoolVar(&recover, "recover", false, "show how an interrupted snapshot operation would be recovered")
 	_ = command.MarkFlagRequired("manifest")
 	_ = command.MarkFlagRequired("vault")
 	return command
@@ -113,6 +143,35 @@ func RenderSnapshotApply(result sync.SnapshotResult) string {
 		fmt.Fprintf(&b, "published: %s\n", printable(result.Snapshot))
 		fmt.Fprintf(&b, "receipt: %s\n", printable(result.Receipt))
 	}
+	return b.String()
+}
+
+// RenderSnapshotRecovery formats what snapshot --recover found and would
+// do, or did.
+func RenderSnapshotRecovery(r sync.SnapshotRecovery, mode string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "manifest: %s\n", printable(r.ManifestPath))
+	fmt.Fprintf(&b, "game: %s (%s)\n", r.Game.ID, printable(r.Game.Name))
+	fmt.Fprintf(&b, "vault: %s\n", printable(r.Vault))
+	fmt.Fprintf(&b, "volume: %s, %s drive\n", printable(r.Volume.FileSystem), r.Volume.Drive)
+	operation, last := r.Operation, string(r.Last)
+	if operation == "" {
+		operation = "none"
+	}
+	if last == "" {
+		last = "none"
+	}
+	fmt.Fprintf(&b, "snapshot operation: %s\n", operation)
+	fmt.Fprintf(&b, "last committed step: %s\n", last)
+	if r.Observed != nil {
+		fmt.Fprintf(&b, "observed: snapshot %s, incomplete %s", r.Observed.Published, r.Observed.Incomplete)
+		if r.Observed.Receipt {
+			b.WriteString(", receipt committed")
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "action: %s\n", r.Action)
+	fmt.Fprintf(&b, "mode: %s\n", mode)
 	return b.String()
 }
 

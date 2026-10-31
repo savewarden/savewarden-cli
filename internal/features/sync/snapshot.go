@@ -384,7 +384,11 @@ func readSnapshots(scope Scope, vaultPath, gameName, prefix, gameID string, v *v
 			d.intervene(CauseUnexpectedEntry, subject+"/"+entry.Name, "has no place in the snapshot domain")
 		}
 	}
+	// v is nil for a recovery, which never reads the current domain.
 	for op := range d.journals {
+		if v == nil {
+			break
+		}
 		if _, used := v.journals[op]; used || v.receiptSum[op] != ([32]byte{}) {
 			d.intervene(CauseJournalAmbiguous, subject+"/"+journalDir+"/"+op, "the operation id is also one of current; ids are never shared")
 		}

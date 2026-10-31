@@ -38,6 +38,8 @@ func TestCLIContract(t *testing.T) {
 		{name: "snapshot help", args: []string{"snapshot", "--help"}, out: "the state saved in the vault, not necessarily the"},
 		{name: "snapshot without flags", args: []string{"snapshot"}, code: 1, err: `required flag(s) "manifest", "vault" not set`},
 		{name: "snapshot missing manifest", args: []string{"snapshot", "--manifest", "missing-manifest.yaml", "--vault", `D:\Vault`}, code: 1, err: "missing-manifest.yaml"},
+		{name: "snapshot recover missing manifest", args: []string{"snapshot", "--manifest", "missing-manifest.yaml", "--vault", `D:\Vault`, "--recover"},
+			code: 1, err: "missing-manifest.yaml", state: true},
 		{name: "snapshot apply missing manifest", args: []string{"snapshot", "--manifest", "missing-manifest.yaml", "--vault", `D:\Vault`, "--apply"},
 			code: 1, err: "missing-manifest.yaml", state: true},
 		{name: "inspect help", args: []string{"inspect", "--help"}, out: "Exit codes: 0 complete inventory"},

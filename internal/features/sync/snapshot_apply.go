@@ -44,6 +44,8 @@ type SnapshotResult struct {
 	Receipt  string
 	Files    int
 	Bytes    int64
+	// Recovery is what --recover found and did, nil for --apply.
+	Recovery *SnapshotRecovery
 }
 
 // State is the vault state of the run, as "savewarden: vault: <state>"
