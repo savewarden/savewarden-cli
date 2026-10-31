@@ -442,6 +442,9 @@ func TestPartialSnapshotStructureIsAmbiguous(t *testing.T) {
 func TestRunningSnapshotIsNotInterrupted(t *testing.T) {
 	f := interruptedAt(t, snapCommit(2, "staging-intent"), true)
 	f.get(gameDir + `\sync.lock`).busy = true
+	// What the running operation writes is not judged: a receipt it would
+	// be committing does not make the domain ambiguous.
+	f.put(gameDir+`\snapshots\receipts\`+snapApplied+".json", f.file("{}"))
 	for name, run := range map[string]func() error{
 		"plan":          func() error { return snapshotPlanError(f, vaultPath) },
 		"recovery plan": func() error { _, err := snapshotRecoverPlan(f); return err },
@@ -452,6 +455,7 @@ func TestRunningSnapshotIsNotInterrupted(t *testing.T) {
 		}
 	}
 	f.get(gameDir + `\sync.lock`).busy = false
+	delete(f.get(gameDir+`\snapshots\receipts`).children, snapApplied+".json")
 	if p := snapshotPlanOf(t, f); !slices.Equal(snapshotCauses(p), []string{"pending-operation " + snapApplied}) {
 		t.Fatalf("interrupted: %q", snapshotCauses(p))
 	}

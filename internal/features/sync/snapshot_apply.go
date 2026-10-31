@@ -186,7 +186,8 @@ func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPl
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
 		return errVault(o.plan.Vault, "operation directory: %w", err)
 	}
-	o.effect, o.open = EffectStaged, true
+	// Metadata only until a copy exists to be kept (ADR 0008).
+	o.effect, o.open = EffectMetadata, true
 	head := again.head
 	o.started = o.now()
 	o.snapshotPlan = &backup.SnapshotPlan{ToolVersion: o.w.ToolVersion, GameID: head.GameID, GameName: head.GameName,
@@ -232,6 +233,7 @@ func (o *operation) copyCurrent() error {
 	if err := o.vault.CreateDir(o.stagingDir()); err != nil {
 		return fmt.Errorf("incomplete copy: %w", err)
 	}
+	o.effect = EffectStaged
 	scope, err := o.s.files.OpenScope(o.plan.vaultVolume)
 	if err != nil {
 		return fmt.Errorf("open volume %s: %w", o.plan.vaultVolume, err)

@@ -140,6 +140,11 @@ func (s *Service) snapshotRecoverPlan(ctx context.Context, request SnapshotReque
 		return rec, err
 	}
 	rec.Snapshots = rec.domain.snapshots
+	// An operation whose lock another process holds is running, not
+	// interrupted (ADR 0008): what it is writing is not judged.
+	if probe && len(rec.domain.pending) > 0 && lockBusy(scope, join(gameName, lockFile)) {
+		return rec, errVault(request.VaultPath, "%s; run it again once it ends", snapshotDomain.busy)
+	}
 	for _, intervention := range rec.domain.interventions {
 		if intervention.Cause != CausePendingOperation {
 			return rec, &InterventionError{Cause: string(intervention.Cause) + " " + intervention.Subject + ": " + intervention.Detail}
@@ -147,11 +152,6 @@ func (s *Service) snapshotRecoverPlan(ctx context.Context, request SnapshotReque
 	}
 	if len(rec.domain.pending) == 0 {
 		return rec, nil
-	}
-	// An operation whose lock another process holds is running, not
-	// interrupted (ADR 0008).
-	if probe && lockBusy(scope, join(gameName, lockFile)) {
-		return rec, errVault(request.VaultPath, "%s; run it again once it ends", snapshotDomain.busy)
 	}
 	rec.Operation = rec.domain.pending[0].Operation
 	rec.journal = rec.domain.journals[rec.Operation]
@@ -293,7 +293,11 @@ func (o *operation) recoverSnapshot(rec *SnapshotRecovery, request SnapshotReque
 		if err := o.record(backup.StepAbandoned, backup.StepValues{Text: "recovered: interrupted before publication"}); err != nil {
 			return err
 		}
-		o.effect = EffectStaged
+		// "kept incomplete" only when a copy is there to be kept (ADR 0008).
+		o.effect = EffectMetadata
+		if rec.Observed != nil && rec.Observed.Incomplete != backup.Absent {
+			o.effect = EffectStaged
+		}
 	case RecoverRolledBack:
 		if err := o.record(backup.StepRolledBack, backup.StepValues{}); err != nil {
 			return err

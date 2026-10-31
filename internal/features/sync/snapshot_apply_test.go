@@ -187,6 +187,7 @@ func TestCurrentIsReadAgainBeforeStagingIntent(t *testing.T) {
 	result, err := snapshotApply(f, newFakeVaults(f))
 	var blocked *sync.BlockedError
 	if !errors.As(err, &blocked) || blocked.Code != sync.CodeCurrentModified || snapshotJournal(f, snapApplied) != "001-planned.rec,002-failed.rec" ||
+		result.State() != "metadata only; nothing staged or published" ||
 		f.get(gameDir+`\snapshots\`+snapApplied+".incomplete") != nil {
 		t.Fatalf("content changed: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
 	}
@@ -385,7 +386,8 @@ func TestSnapshotStructureCreationIsResumable(t *testing.T) {
 			t.Run(fmt.Sprintf("%d %v %s", k, crashAfter, calls[k-1]), func(t *testing.T) {
 				f := interrupted(t, k, crashAfter)
 				if p := snapshotPlanOf(t, f); len(p.Pending) > 0 {
-					if result, err := snapshotRecoverWith(f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectStaged {
+					// Nothing was copied: nothing is announced as kept.
+					if result, err := snapshotRecoverWith(f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectMetadata {
 						t.Fatalf("recovery: %+v, %v", result, err)
 					}
 				} else if len(p.Interventions) != 0 {
@@ -473,6 +475,14 @@ func TestOnlyJournalAncestorsStayPinnedAcrossTheSwitch(t *testing.T) {
 		t.Fatalf("contradictory provenance: %+v, %v", result, err)
 	}
 	check(p, snapMove, unmove)
+	// The same move back, decided by recovery.
+	f = interruptedAt(t, snapMove, true)
+	delete(f.get(gameDir+`\receipts`).children, op1+".json")
+	p = newPinsAtSwitch(f)
+	if result, err := snapshotRecoverWith(f, p); err == nil || result.Effect != sync.EffectRolledBack {
+		t.Fatalf("recovery: %+v, %v", result, err)
+	}
+	check(p, unmove)
 }
 
 // A crash just before and just after every vault call of a snapshot leaves

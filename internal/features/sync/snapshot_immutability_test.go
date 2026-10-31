@@ -163,6 +163,50 @@ func TestSnapshotRollbackFailedIsRecordedOnce(t *testing.T) {
 	}
 }
 
+// After rollback-failed, the recovery that moves the snapshot back, killed
+// at any of its calls, is recovered again to rolled-back.
+func TestSnapshotRecoveryAfterRollbackFailedIsInterruptible(t *testing.T) {
+	prepare := func(t *testing.T) *fakeFS {
+		f := generation(t)
+		h := contradicted(f)
+		h.deny[snapRel+"/"+snapApplied] = errors.New("access denied")
+		if _, err := snapshotApply(f, h); err == nil || !strings.HasSuffix(snapshotJournal(f, snapApplied), "007-rollback-failed.rec") {
+			t.Fatalf("refused move back: %v, journal %s", err, snapshotJournal(f, snapApplied))
+		}
+		return f
+	}
+	clean := newFakeVaults(prepare(t))
+	if result, err := snapshotRecoverWith(clean.f, clean); err != nil || result.Effect != sync.EffectRolledBack {
+		t.Fatalf("recovery: %+v, %v", result, err)
+	}
+	for k := 1; k <= len(clean.calls); k++ {
+		for _, crashAfter := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d %v %s", k, crashAfter, clean.calls[k-1]), func(t *testing.T) {
+				f := prepare(t)
+				crashing := newFakeVaults(f)
+				if crashAfter {
+					crashing.crashAfter = k
+				} else {
+					crashing.crashBefore = k
+				}
+				if _, err := snapshotRecoverWith(f, crashing); err == nil {
+					t.Fatal("no crash")
+				}
+				if rec, err := snapshotRecoverPlan(f); err != nil {
+					t.Fatalf("second recovery plan: %v", err)
+				} else if rec.Action != sync.RecoverNothing {
+					if result, err := snapshotRecoverWith(f, newFakeVaults(f)); result.Effect != sync.EffectRolledBack {
+						t.Fatalf("second recovery: %+v, %v", result, err)
+					}
+				}
+				if last := settled(t, f); last != "rolled-back.rec" {
+					t.Fatalf("settled in %s", last)
+				}
+			})
+		}
+	}
+}
+
 // Plan B3 §6: once published, a snapshot, its receipt and its journal are
 // never created, written or moved again, through snapshot, sync, a
 // rotation and its recovery, and the recovery of another snapshot.
