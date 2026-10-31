@@ -154,13 +154,74 @@ func TestSnapshotPlanWritesNothing(t *testing.T) {
 	}
 }
 
-func TestSnapshotIsUpToDateForTheSameGeneration(t *testing.T) {
+// S7: one generation gives one snapshot; the plan is then up to date, and
+// --apply writes nothing.
+func TestSnapshotIsIdempotentForTheSameGeneration(t *testing.T) {
 	f := generation(t)
 	publishSnapshot(t, f, snapOp, snapAt)
 	p := snapshotPlanOf(t, f)
 	if p.UpToDate != snapOp || p.Degraded() != 0 || len(p.Snapshots) != 1 || p.Snapshots[0].Source != op1 ||
 		p.Snapshots[0].Files != 2 || p.Snapshots[0].Bytes != 6 || p.Files != 0 || p.Needed != 0 {
 		t.Fatalf("plan %+v", p)
+	}
+	before := snapshot(f, `F:\`)
+	vaults := newFakeVaults(f)
+	if result, err := snapshotApply(f, vaults); err != nil || result.Effect != sync.EffectNone || len(vaults.calls) != 0 || snapshot(f, `F:\`) != before {
+		t.Fatalf("--apply: %+v, %v, calls %q", result, err, vaults.calls)
+	}
+}
+
+// ADR 0008: content is read only for the snapshot that would make the plan
+// up to date; the others are judged by receipt and identity.
+func TestOnlyTheUpToDateSnapshotIsReadInFull(t *testing.T) {
+	f := generation(t)
+	publishSnapshot(t, f, snapOp, snapAt)
+	if result, err := rotateWith(context.Background(), f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectPublished {
+		t.Fatalf("rotation: %+v, %v", result, err)
+	}
+	publishSnapshot(t, f, snapOp2, snapAt.Add(timeLater))
+	var opened []string
+	f.onOpen = func(name string, _ *node) { opened = append(opened, name) }
+	p := snapshotPlanOf(t, f)
+	if p.UpToDate != snapOp2 || len(p.Snapshots) != 2 {
+		t.Fatalf("plan: up to date %q, %d snapshots", p.UpToDate, len(p.Snapshots))
+	}
+	read := func(op string) int {
+		count := 0
+		for _, name := range opened {
+			if strings.Contains(name, "/snapshots/"+op+"/") {
+				count++
+			}
+		}
+		return count
+	}
+	if read(snapOp2) != 3 || read(snapOp) != 0 {
+		t.Fatalf("files read: %d of %s, %d of %s; opened %q", read(snapOp2), snapOp2, read(snapOp), snapOp, opened)
+	}
+}
+
+// ADR 0006 §10: an operation id is never shared between the two domains;
+// a snapshot journal named after an operation of current is ambiguous for
+// snapshot, never for sync.
+func TestSnapshotIDSharedWithCurrentIsAmbiguous(t *testing.T) {
+	f := generation(t)
+	if result, err := rotateWith(context.Background(), f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectPublished {
+		t.Fatalf("rotation: %+v, %v", result, err)
+	}
+	head, data := headReceipt(t, f)
+	writeSnapshotRecords(t, f, op1, snapAt, []backup.Step{backup.StepPlanned, backup.StepAbandoned}, func(step backup.Step) backup.StepValues {
+		if step == backup.StepAbandoned {
+			return backup.StepValues{Text: "interrupted"}
+		}
+		return backup.StepValues{SnapshotSource: backup.SnapshotSource{Operation: head.Operation, ReceiptSHA256: sha256.Sum256(data)},
+			SourceIdentity: identityOf(f.get(gameDir + `\current`)),
+			SnapshotPlan:   &backup.SnapshotPlan{ToolVersion: "dev", GameID: head.GameID, GameName: head.GameName, StartedAt: snapAt, Sources: head.Sources}}
+	})
+	if want := "journal-ambiguous " + gameRel + "/snapshots/journal/" + op1; !slices.Equal(snapshotCauses(snapshotPlanOf(t, f)), []string{want}) {
+		t.Fatalf("causes %q", snapshotCauses(snapshotPlanOf(t, f)))
+	}
+	if p := plan(t, f, manifest(), vaultPath); len(p.Interventions) != 0 || p.Outcome() != "up to date" {
+		t.Fatalf("sync plan: %s %q", p.Outcome(), causes(p))
 	}
 }
 
@@ -431,7 +492,7 @@ func TestSnapshotDomainAnomaliesAreInterventions(t *testing.T) {
 		{"corrupt journal", func(f *fakeFS) {
 			f.put(gameDir+`\snapshots\journal\`+snapOp2+`\001-planned.rec`, f.file("not a record"))
 		}, "journal-ambiguous " + gameRel + "/snapshots/journal/" + snapOp2},
-		{"id shared with current", func(f *fakeFS) {
+		{"records of another operation", func(f *fakeFS) {
 			journal := f.get(gameDir + `\snapshots\journal`)
 			journal.children[op1] = journal.children[snapOp]
 		}, "journal-ambiguous " + gameRel + "/snapshots/journal/" + op1},

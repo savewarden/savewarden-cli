@@ -2,6 +2,7 @@ package sync_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -116,6 +117,28 @@ func TestSnapshotAnomaliesNeverBlockSync(t *testing.T) {
 	}
 	if after := snapshot(f, base); after != planted {
 		t.Fatalf("snapshots changed:\n%s\nwant\n%s", after, planted)
+	}
+}
+
+// I8 by domain: an incoherent snapshot journal stops snapshot in code 3,
+// and sync plans and rotates as before.
+func TestSnapshotDomainAmbiguityNeverBlocksSync(t *testing.T) {
+	f := generation(t)
+	before := plan(t, f, manifest(), vaultPath)
+	f.mkdir(gameDir + `\snapshots\receipts`)
+	f.put(gameDir+`\snapshots\journal\`+snapOp+`\001-planned.rec`, f.file("not a record"))
+	if p := snapshotPlanOf(t, f); p.Outcome() != "intervention required" {
+		t.Fatalf("snapshot plan: %s %q", p.Outcome(), snapshotCauses(p))
+	}
+	var intervention *sync.InterventionError
+	if _, err := snapshotApply(f, newFakeVaults(f)); !errors.As(err, &intervention) {
+		t.Fatalf("snapshot --apply: %v", err)
+	}
+	if p := plan(t, f, manifest(), vaultPath); len(p.Interventions) != 0 || p.Outcome() != before.Outcome() || p.Current != before.Current {
+		t.Fatalf("sync plan: %s %q", p.Outcome(), causes(p))
+	}
+	if result, err := rotateWith(context.Background(), f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectPublished {
+		t.Fatalf("rotation: %+v, %v", result, err)
 	}
 }
 

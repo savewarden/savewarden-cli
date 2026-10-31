@@ -359,6 +359,48 @@ func TestSnapshotRenameRefusedRollsBack(t *testing.T) {
 	}
 }
 
+// I8 by domain: a pending operation of current blocks a new snapshot, code
+// 3, before the lock is taken or anything written.
+func TestPendingCurrentOperationBlocksSnapshotApply(t *testing.T) {
+	f := generation(t)
+	writeJournal(t, f, op2, backup.StepPlanned)
+	before := snapshot(f, `F:\`)
+	vaults := newFakeVaults(f)
+	result, err := snapshotApply(f, vaults)
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.Contains(intervention.Cause, "pending-operation") || result.Effect != sync.EffectIntervention ||
+		len(vaults.calls) != 0 || snapshot(f, `F:\`) != before {
+		t.Fatalf("pending current operation: %+v, %v, calls %q", result, err, vaults.calls)
+	}
+}
+
+// ADR 0006 §10, structure: a crash between the creations of the structure
+// leaves a state the next run recognises: --apply completes it, after
+// --recover --apply when the operation directory was created.
+func TestSnapshotStructureCreationIsResumable(t *testing.T) {
+	calls := snapshotCalls(t)
+	structure := slices.Index(calls, snapCommit(1, "planned")) - 3 // NewFile, Write, Close of planned
+	for k := 1; k <= structure; k++ {
+		for _, crashAfter := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d %v %s", k, crashAfter, calls[k-1]), func(t *testing.T) {
+				f := interrupted(t, k, crashAfter)
+				if p := snapshotPlanOf(t, f); len(p.Pending) > 0 {
+					if result, err := snapshotRecoverWith(f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectStaged {
+						t.Fatalf("recovery: %+v, %v", result, err)
+					}
+				} else if len(p.Interventions) != 0 {
+					t.Fatalf("plan after the crash: %q", snapshotCauses(p))
+				}
+				result, err := service(f, manifest()).SnapshotApply(context.Background(), sync.SnapshotRequest{ManifestPath: "m.yaml", VaultPath: vaultPath},
+					snapWriter(newFakeVaults(f), "\x6f\x7a\x8b\x9c"))
+				if err != nil || result.Effect != sync.EffectPublished {
+					t.Fatalf("next --apply: %+v, %v", result, err)
+				}
+			})
+		}
+	}
+}
+
 // pinsAtSwitch records, at every rename of a snapshot copy, the
 // directories its session holds, and runs after[call] once that rename is
 // done.
