@@ -32,6 +32,9 @@ Limites assumées :
 - L'inventaire est vérifié au mieux, **pas atomique** : une modification qui
   préserverait taille, date et identité d'un fichier passerait inaperçue.
 - Lire peut mettre à jour la date de dernier accès selon les réglages NTFS.
+- Un snapshot est relu avant sa publication, pas entre sa relecture et son
+  receipt : une écriture d'un autre programme dans cette fenêtre n'est
+  détectée qu'à la relecture suivante de son contenu, qui le dégrade.
 - Le garde statique ne prouve pas l'absence de tout effet indirect ; les
   tests dynamiques couvrent le comportement livré, sur leurs fixtures.
 - Sous Unix, l'adaptateur sert aux tests du contrat ; un échange suivi d'une

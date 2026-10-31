@@ -42,6 +42,7 @@ type SnapshotRecovery struct {
 	vaultSegments []string
 	domain        *snapshotVault
 	journal       backup.Journal
+	lock          bool // sync.lock was there when the recovery was planned
 }
 
 // SnapshotRecoverPlan finds the interrupted snapshot operation of the
@@ -140,9 +141,11 @@ func (s *Service) snapshotRecoverPlan(ctx context.Context, request SnapshotReque
 		return rec, err
 	}
 	rec.Snapshots = rec.domain.snapshots
-	// An operation whose lock another process holds is running, not
-	// interrupted (ADR 0008): what it is writing is not judged.
-	if probe && len(rec.domain.pending) > 0 && lockBusy(scope, join(gameName, lockFile)) {
+	_, lockErr := scope.Lstat(join(gameName, lockFile))
+	rec.lock = lockErr == nil
+	// While another process holds the lock, an operation is running: what
+	// it is writing, pending or seen half-written, is not judged (ADR 0008).
+	if probe && rec.lock && (len(rec.domain.pending) > 0 || len(rec.domain.interventions) > 0) && lockBusy(scope, join(gameName, lockFile)) {
 		return rec, errVault(request.VaultPath, "%s; run it again once it ends", snapshotDomain.busy)
 	}
 	for _, intervention := range rec.domain.interventions {
@@ -258,6 +261,10 @@ func (o *operation) recoverSnapshot(rec *SnapshotRecovery, request SnapshotReque
 			return errVault(rec.Vault, "%s", o.domain.busy)
 		}
 		return errVault(rec.Vault, "lock: %w", err)
+	}
+	// A lock created here is a write, whatever follows.
+	if !rec.lock {
+		o.wrote()
 	}
 	again, err := o.s.snapshotRecoverPlan(o.ctx, request, false)
 	if err != nil {

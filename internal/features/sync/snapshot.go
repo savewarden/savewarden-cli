@@ -183,9 +183,11 @@ func (s *Service) snapshotPlan(ctx context.Context, request SnapshotRequest, pro
 			return SnapshotPlan{}, err
 		}
 	}
-	// A pending operation of either domain whose lock another process
-	// holds is running, not interrupted (ADR 0008).
-	if probe && v.lock && (len(v.pending) > 0 || len(plan.domain.pending) > 0) && lockBusy(scope, join(gameName, lockFile)) {
+	// While another process holds the lock, an operation of either domain
+	// is running: what it is writing, pending or seen half-written, is not
+	// judged (ADR 0008).
+	running := len(v.pending) > 0 || len(plan.domain.pending) > 0 || len(v.interventions) > 0 || len(plan.domain.interventions) > 0
+	if probe && v.lock && running && lockBusy(scope, join(gameName, lockFile)) {
 		return SnapshotPlan{}, errVault(request.VaultPath, "%s; run it again once it ends", snapshotDomain.busy)
 	}
 	plan.Snapshots, plan.Incomplete, plan.Pending = plan.domain.snapshots, plan.domain.incomplete, plan.domain.pending

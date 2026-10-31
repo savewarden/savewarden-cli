@@ -58,7 +58,7 @@ de développement est explicite ; aucune date ou version calculée depuis Git.
 [l'exemple de référence](docs/manifest-v1.md), puis, jeu et launcher fermés :
 
 ```powershell
-.\bin\savewarden.exe inspect --manifest 'D:\Savewarden\games\mon-jeu\manifest.yaml'
+.\bin\savewarden.exe inspect --manifest 'D:\Manifests\mon-jeu.yaml'
 ```
 
 La sortie liste chaque fichier avec son SHA-256, sa taille et sa date de

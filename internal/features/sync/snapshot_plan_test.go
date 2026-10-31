@@ -459,6 +459,21 @@ func TestRunningSnapshotIsNotInterrupted(t *testing.T) {
 	if p := snapshotPlanOf(t, f); !slices.Equal(snapshotCauses(p), []string{"pending-operation " + snapApplied}) {
 		t.Fatalf("interrupted: %q", snapshotCauses(p))
 	}
+	// Security review of B3: an anomaly seen while the lock is held, with
+	// no pending operation parsed, is not judged either.
+	f = generation(t)
+	publishSnapshot(t, f, snapOp, snapAt)
+	f.put(gameDir+`\snapshots\journal\`+snapOp2+`\001-planned.rec`, f.file("half written"))
+	f.get(gameDir + `\sync.lock`).busy = true
+	for name, run := range map[string]func() error{
+		"plan":          func() error { return snapshotPlanError(f, vaultPath) },
+		"recovery plan": func() error { _, err := snapshotRecoverPlan(f); return err },
+	} {
+		var intervention *sync.InterventionError
+		if err := run(); err == nil || errors.As(err, &intervention) || !strings.Contains(err.Error(), "another operation is running on this game") {
+			t.Fatalf("%s beside an anomaly: %v", name, err)
+		}
+	}
 }
 
 func TestIncompleteBeforeStagedIsExplainedByName(t *testing.T) {

@@ -164,6 +164,21 @@ func TestSnapshotReceiptRoundTrip(t *testing.T) {
 	}
 }
 
+// Security review of B3: vault content nested beyond any schema is refused
+// with an error, never a crash, whatever the decoder reads it as.
+func TestDeeplyNestedJSONIsRefused(t *testing.T) {
+	nested := []byte(`{"schema":` + strings.Repeat("[", 10_000_000))
+	if _, err := backup.DecodeSnapshotReceipt(nested); err == nil {
+		t.Fatal("snapshot receipt accepted")
+	}
+	if _, err := backup.DecodeReceipt(nested); err == nil {
+		t.Fatal("receipt accepted")
+	}
+	if _, err := backup.DecodeRecord(nested); err == nil {
+		t.Fatal("record accepted")
+	}
+}
+
 func TestSnapshotReceiptIsStrict(t *testing.T) {
 	data, err := backup.EncodeSnapshotReceipt(snapshotReceipt(t))
 	if err != nil {

@@ -511,9 +511,20 @@ func readFile(scope Scope, name string, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("read %s: larger than %d bytes", name, limit)
+		return nil, &tooLargeError{name: name, limit: limit}
 	}
 	return data, nil
+}
+
+// tooLargeError reports a file larger than what its kind may hold: never a
+// file the protocol wrote.
+type tooLargeError struct {
+	name  string
+	limit int64
+}
+
+func (e *tooLargeError) Error() string {
+	return fmt.Sprintf("read %s: larger than %d bytes", e.name, e.limit)
 }
 
 // join builds a scope name below dir, "." being the anchor.

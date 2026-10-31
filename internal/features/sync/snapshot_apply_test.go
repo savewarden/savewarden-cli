@@ -348,6 +348,21 @@ func TestUnavailableProvenanceWritesNothing(t *testing.T) {
 	}
 }
 
+// Security review of B3: a source receipt larger than any receipt the plan
+// could have read is contradictory evidence, rolled back, never left
+// pending as unavailable (ADR 0006 §10).
+func TestOversizedSourceReceiptIsContradictory(t *testing.T) {
+	f := generation(t)
+	h := hooked(f)
+	h.after[snapMove] = func() { receiptNode(f).data = bytes.Repeat([]byte(" "), 64<<20+1) }
+	result, err := snapshotApply(f, h)
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.Contains(intervention.Cause, "rolled back") || result.Effect != sync.EffectRolledBack ||
+		!strings.HasSuffix(snapshotJournal(f, snapApplied), "006-unpublish-intent.rec,007-rolled-back.rec") {
+		t.Fatalf("oversized source receipt: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
+	}
+}
+
 func TestSnapshotRenameRefusedRollsBack(t *testing.T) {
 	f := generation(t)
 	h := hooked(f)

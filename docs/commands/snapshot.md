@@ -177,5 +177,12 @@ interrompue : code 1, `another operation is running on this game`.
 - Les snapshots et les copies `.incomplete` s'accumulent : aucun n'est
   supprimé.
 - Le contenu de tous les snapshots n'est pas revérifié à chaque exécution.
-- Le receipt de snapshot contient des chemins locaux et le nom du jeu :
-  anonymisez-le avant tout partage.
+- Le verrou n'exclut qu'une autre opération Savewarden : une écriture d'un
+  autre programme dans la copie, entre sa relecture et le receipt du
+  snapshot, n'est pas détectée à la publication. Le snapshot apparaît
+  dégradé, `snapshot-modified`, quand un plan suivant relit son contenu, tant
+  qu'il est le candidat `up to date`.
+- Le receipt et le journal de snapshot, comme la sortie de la commande,
+  contiennent des chemins locaux et le nom du jeu ; journaux et diagnostics
+  contiennent aussi des identités de fichiers NTFS, dont le numéro de série
+  du volume. Anonymisez-les avant tout partage.

@@ -437,7 +437,18 @@ func (o *operation) checkProvenance() (contradictory bool, err error) {
 		}
 	}
 	data, err := readFile(scope, name, recordReadLimit)
-	if err != nil {
+	var tooLarge *tooLargeError
+	var notFollowed interface{ NotFollowed() bool }
+	switch {
+	case err == nil:
+	case errors.As(err, &tooLarge), errors.Is(err, fs.ErrNotExist), errors.As(err, &notFollowed) && notFollowed.NotFollowed():
+		// Larger than the plan could have read, gone or a link since its
+		// Lstat: evidence against the plan, not evidence unavailable.
+		return true, err
+	default:
+		if info, lstatErr := scope.Lstat(name); errors.Is(lstatErr, fs.ErrNotExist) || (lstatErr == nil && (isLink(info.Mode()) || !info.Mode().IsRegular())) {
+			return true, fmt.Errorf("%s changed while it was opened: %w", name, err)
+		}
 		return false, err
 	}
 	j := backup.Journal{Op: o.op, Snapshot: true, SnapshotPlan: o.snapshotPlan, SnapshotSource: o.source}

@@ -205,6 +205,47 @@ func TestRepeatedSnapshotRecoveryIsStable(t *testing.T) {
 	}
 }
 
+// lockThen runs then once the lock is taken: another change of the vault,
+// before the recovery reads it again under lock.
+type lockThen struct {
+	*fakeVaults
+	then func()
+}
+
+func (l *lockThen) Open(path string) (sync.Vault, error) {
+	v, err := l.fakeVaults.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return &lockThenVault{Vault: v, then: l.then}, nil
+}
+
+type lockThenVault struct {
+	sync.Vault
+	then func()
+}
+
+func (v *lockThenVault) Lock(name string) error {
+	if err := v.Vault.Lock(name); err != nil {
+		return err
+	}
+	v.then()
+	return nil
+}
+
+// Security review of B3: a recovery that creates the missing lock, then
+// stops because the vault changed, says that it wrote.
+func TestSnapshotRecoveryReportsTheLockItCreated(t *testing.T) {
+	f := interruptedAt(t, snapCommit(2, "staging-intent"), true)
+	delete(f.get(gameDir).children, "sync.lock")
+	vaults := &lockThen{fakeVaults: newFakeVaults(f), then: func() { f.mkdir(gameDir + `\snapshots\` + snapApplied + ".incomplete") }}
+	result, err := snapshotRecoverWith(f, vaults)
+	if err == nil || !strings.Contains(err.Error(), "vault-changed") || result.State() != "metadata only; nothing staged or published" ||
+		f.get(gameDir+`\sync.lock`) == nil {
+		t.Fatalf("recovery: %q, %v", result.State(), err)
+	}
+}
+
 func TestSnapshotRecoverPlanWritesNothing(t *testing.T) {
 	f := interruptedAt(t, snapMove, true)
 	before := snapshot(f, `F:\`)
