@@ -164,7 +164,8 @@ func (s *Service) snapshotPlan(ctx context.Context, request SnapshotRequest, pro
 	if err := s.checkSources(manifest, installVolume, vaultVolume, scope); err != nil {
 		return SnapshotPlan{}, err
 	}
-	if err := v.readProbing(scope, request.VaultPath, vaultSegments, manifest.Game.ID, probe); err != nil {
+	// The lock is probed below, for the pending operations of both domains.
+	if err := v.readProbing(scope, request.VaultPath, vaultSegments, manifest.Game.ID, false); err != nil {
 		return SnapshotPlan{}, err
 	}
 	if v.state == VaultEmpty {
@@ -182,11 +183,19 @@ func (s *Service) snapshotPlan(ctx context.Context, request SnapshotRequest, pro
 			return SnapshotPlan{}, err
 		}
 	}
+	// A pending operation of either domain whose lock another process
+	// holds is running, not interrupted (ADR 0008).
+	if probe && v.lock && (len(v.pending) > 0 || len(plan.domain.pending) > 0) && lockBusy(scope, join(gameName, lockFile)) {
+		return SnapshotPlan{}, errVault(request.VaultPath, "%s; run it again once it ends", snapshotDomain.busy)
+	}
 	plan.Snapshots, plan.Incomplete, plan.Pending = plan.domain.snapshots, plan.domain.incomplete, plan.domain.pending
 	plan.Interventions = append(append([]Intervention{}, v.interventions...), plan.domain.interventions...)
 	if len(plan.Interventions) > 0 {
 		sort.SliceStable(plan.Interventions, func(a, b int) bool { return plan.Interventions[a].Subject < plan.Interventions[b].Subject })
 		plan.CurrentUnchecked = v.current || v.currentLink
+		// Degraded snapshots are named in every outcome (ADR 0008).
+		plan.degradations()
+		plan.sortFindings()
 		return plan, nil
 	}
 	gameSegments := append(append([]string{}, vaultSegments...), gamesDir, manifest.Game.ID)
@@ -207,6 +216,8 @@ func (s *Service) snapshotPlan(ctx context.Context, request SnapshotRequest, pro
 		if id, err := scope.Identity(join(gameName, currentDir)); err != nil || id != v.currentID {
 			plan.Interventions = append(plan.Interventions, Intervention{Cause: CauseUnexpectedEntry, Subject: gamesDir + "/" + manifest.Game.ID + "/" + currentDir,
 				Detail: "was replaced while it was read, or cannot be checked; nothing planned"})
+			plan.degradations()
+			plan.sortFindings()
 			return plan, nil
 		}
 		plan.head, plan.Recognized = head, true
@@ -330,6 +341,8 @@ type snapshotVault struct {
 	receipts     map[string][]byte // final snapshot receipt files, by operation
 	receiptTaken map[string]map[int]bool
 	present      map[string]bool // snapshots\<op> and snapshots\<op>.incomplete found
+	odd          map[string]bool // those of them that are not plain directories
+	oddReceipts  map[string]string
 	snapshots    []PublishedSnapshot
 	incomplete   int
 	pending      []Pending
@@ -352,7 +365,7 @@ var (
 // block a new snapshot, never sync.
 func readSnapshots(scope Scope, vaultPath, gameName, prefix, gameID string, v *vault) (*snapshotVault, error) {
 	d := &snapshotVault{journals: map[string]backup.Journal{}, lastRecord: map[string]string{}, receipts: map[string][]byte{},
-		receiptTaken: map[string]map[int]bool{}, present: map[string]bool{}}
+		receiptTaken: map[string]map[int]bool{}, present: map[string]bool{}, odd: map[string]bool{}, oddReceipts: map[string]string{}}
 	base, subject := join(gameName, snapshotsDir), prefix+snapshotsDir
 	info, err := scope.Lstat(base)
 	if errors.Is(err, fs.ErrNotExist) || (err == nil && (isLink(info.Mode()) || !info.IsDir())) {
@@ -366,23 +379,37 @@ func readSnapshots(scope Scope, vaultPath, gameName, prefix, gameID string, v *v
 	if err != nil {
 		return nil, errVault(vaultPath, "%v", err)
 	}
+	receipts := false
 	for _, entry := range entries {
 		directory := entry.Kind == backup.KindDirectory
 		switch {
-		case entry.Name == receiptsDir && directory:
-			if err := d.readReceipts(scope, vaultPath, join(base, receiptsDir), subject+"/"+receiptsDir); err != nil {
+		case entry.Name == receiptsDir:
+			receipts = true
+			if !directory {
+				d.intervene(CauseUnexpectedEntry, subject+"/"+entry.Name, "has no place in the snapshot domain")
+			} else if err := d.readReceipts(scope, vaultPath, join(base, receiptsDir), subject+"/"+receiptsDir); err != nil {
 				return nil, err
 			}
 		case entry.Name == journalDir && directory:
 			d.readJournals(scope, join(base, journalDir), subject+"/"+journalDir, gameID)
-		case directory && (snapshotName.MatchString(entry.Name) || incompleteName.MatchString(entry.Name)):
+		case snapshotName.MatchString(entry.Name) || incompleteName.MatchString(entry.Name):
+			// Whatever it is, the name of an approved snapshot is judged by
+			// its identity; any other is judged by explain.
 			d.present[entry.Name] = true
-			if incompleteName.MatchString(entry.Name) {
+			if !directory {
+				d.odd[entry.Name] = true
+			} else if incompleteName.MatchString(entry.Name) {
 				d.incomplete++
 			}
 		default:
 			d.intervene(CauseUnexpectedEntry, subject+"/"+entry.Name, "has no place in the snapshot domain")
 		}
+	}
+	// The structure is created in order, receipts before journal: an
+	// operation without receipts is a partial state the protocol never
+	// leaves, never completed beside it (ADR 0006 §10, structure).
+	if !receipts && (len(d.journals) > 0 || len(d.present) > 0) {
+		d.intervene(CauseJournalAmbiguous, subject+"/"+receiptsDir, "is missing beside snapshot operations; only an empty structure is completed")
 	}
 	// v is nil for a recovery, which never reads the current domain.
 	for op := range d.journals {
@@ -443,6 +470,10 @@ func (d *snapshotVault) readReceipts(scope Scope, vaultPath, name, subject strin
 	for _, entry := range entries {
 		m := receiptName.FindStringSubmatch(entry.Name)
 		switch {
+		case m != nil && m[2] == "" && entry.Kind != backup.KindRegular:
+			// Judged by explain: the receipt of an approved snapshot only
+			// degrades it.
+			d.oddReceipts[m[1]] = subject + "/" + entry.Name
 		case m == nil || entry.Kind != backup.KindRegular:
 			d.intervene(CauseUnexpectedEntry, subject+"/"+entry.Name, "is not a snapshot receipt")
 		case m[2] != "":
@@ -471,8 +502,13 @@ func (d *snapshotVault) explain(scope Scope, base, subject string) {
 		switch {
 		case !ok:
 			d.intervene(CauseUnexpectedEntry, subject+"/"+name, "is not explained by any snapshot journal")
-		case !j.Terminal() || j.Last() == backup.StepPublished:
-			// Judged by recovery, or by the condition of the snapshot below.
+		case j.Last() == backup.StepPublished:
+			// Judged by the condition of the snapshot below, whatever it is
+			// (ADR 0006 §10, exception to §3).
+		case d.odd[name]:
+			d.intervene(CauseUnexpectedEntry, subject+"/"+name, "is not a plain directory")
+		case !j.Terminal():
+			// Judged by recovery.
 		case name == op:
 			d.intervene(CauseUnexpectedEntry, subject+"/"+name, "exists although its operation closed as "+string(j.Last()))
 		case j.Staging != (backup.FileID{}):
@@ -485,6 +521,11 @@ func (d *snapshotVault) explain(scope Scope, base, subject string) {
 		j, ok := d.journals[op]
 		if !ok || (j.Terminal() && j.Last() != backup.StepPublished) || (!j.Terminal() && j.Last() != backup.StepPublishIntent) {
 			d.intervene(CauseJournalAmbiguous, subject+"/"+receiptsDir+"/"+op+".json", "no operation of the snapshot domain can have committed this receipt")
+		}
+	}
+	for op, name := range d.oddReceipts {
+		if j, ok := d.journals[op]; !ok || j.Last() != backup.StepPublished {
+			d.intervene(CauseUnexpectedEntry, name, "is not a snapshot receipt")
 		}
 	}
 	for op, j := range d.journals {

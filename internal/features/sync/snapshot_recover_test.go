@@ -372,7 +372,8 @@ func TestSnapshotEnvelopeIsBounded(t *testing.T) {
 	if _, err := snapshotRecoverWith(f, newFakeVaults(f)); err == nil || !strings.Contains(err.Error(), "envelope") || snapshot(f, `F:\`) != before {
 		t.Fatalf("E1, receipt: %v", err)
 	}
-	f = interruptedAt(t, snapMove, true)
+	// published is prepared only beside the committed receipt.
+	f = interruptedAt(t, snapReceipt, true)
 	journal := f.get(gameDir + `\snapshots\journal\` + snapApplied)
 	for k := 1; k <= 9; k++ {
 		journal.children[fmt.Sprintf("006-published.rec.tmp-%d", k)] = f.file("")

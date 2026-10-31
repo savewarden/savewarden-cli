@@ -147,17 +147,24 @@ func (v *vault) readProbing(scope Scope, vaultPath string, segments []string, ga
 	if err := v.readGame(scope, vaultPath, root, gameID, hasEntry(entries, gamesDir)); err != nil {
 		return err
 	}
-	if probe && v.lock && len(v.pending) > 0 {
-		lock, err := scope.OpenRegular(join(root, gamesDir+"/"+gameID+"/"+lockFile))
-		var busy interface{ Busy() bool }
-		if errors.As(err, &busy) && busy.Busy() {
-			return errVault(vaultPath, "another sync is running on this game; run it again once it ends")
-		}
-		if err == nil {
-			_ = lock.Close()
-		}
+	if probe && v.lock && len(v.pending) > 0 && lockBusy(scope, join(root, gamesDir+"/"+gameID+"/"+lockFile)) {
+		return errVault(vaultPath, "another sync is running on this game; run it again once it ends")
 	}
 	return nil
+}
+
+// lockBusy reports whether another process holds the lock file name: an
+// operation it runs is pending, not interrupted.
+func lockBusy(scope Scope, name string) bool {
+	lock, err := scope.OpenRegular(name)
+	var busy interface{ Busy() bool }
+	if errors.As(err, &busy) && busy.Busy() {
+		return true
+	}
+	if err == nil {
+		_ = lock.Close()
+	}
+	return false
 }
 
 func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool) error {

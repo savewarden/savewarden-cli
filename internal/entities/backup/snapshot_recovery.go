@@ -117,7 +117,11 @@ func snapshotPreparedFor(step Step, j Journal, o SnapshotObservation) bool {
 		return is(Absent, New)
 	case StepFailed, StepAbandoned:
 		return is(Absent, Absent) || is(Absent, Unidentified) || is(Absent, New)
-	case StepPublished, StepUnpublishIntent:
+	case StepPublished:
+		// Written only once the snapshot receipt is committed (A6): without
+		// it, the state before is gone.
+		return false
+	case StepUnpublishIntent:
 		return is(New, Absent)
 	case StepRolledBack:
 		return is(Absent, New)

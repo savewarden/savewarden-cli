@@ -34,6 +34,9 @@ type SnapshotRecovery struct {
 	Last      backup.Step
 	Observed  *backup.SnapshotObservation
 	Action    RecoveryAction
+	// Snapshots are the approved snapshots, judged by their receipt and
+	// identity; their content is never read by a recovery.
+	Snapshots []PublishedSnapshot
 
 	vaultVolume   string
 	vaultSegments []string
@@ -45,6 +48,24 @@ type SnapshotRecovery struct {
 // game, observes its two names and its receipt, and decides its recovery
 // without writing anything. An ambiguity is an InterventionError.
 func (s *Service) SnapshotRecoverPlan(ctx context.Context, request SnapshotRequest) (SnapshotRecovery, error) {
+	return s.snapshotRecoverPlan(ctx, request, true)
+}
+
+// Degraded counts the approved snapshots that are not intact, as the
+// recovery read them (ADR 0008).
+func (r SnapshotRecovery) Degraded() int {
+	count := 0
+	for _, s := range r.Snapshots {
+		if s.Degraded() {
+			count++
+		}
+	}
+	return count
+}
+
+// snapshotRecoverPlan is SnapshotRecoverPlan; a run that holds the lock
+// does not probe it.
+func (s *Service) snapshotRecoverPlan(ctx context.Context, request SnapshotRequest, probe bool) (SnapshotRecovery, error) {
 	manifest, err := s.manifests.Read(request.ManifestPath)
 	if err != nil {
 		return SnapshotRecovery{}, err
@@ -118,6 +139,7 @@ func (s *Service) SnapshotRecoverPlan(ctx context.Context, request SnapshotReque
 	if rec.domain, err = readSnapshots(scope, request.VaultPath, gameName, prefix, manifest.Game.ID, nil); err != nil {
 		return rec, err
 	}
+	rec.Snapshots = rec.domain.snapshots
 	for _, intervention := range rec.domain.interventions {
 		if intervention.Cause != CausePendingOperation {
 			return rec, &InterventionError{Cause: string(intervention.Cause) + " " + intervention.Subject + ": " + intervention.Detail}
@@ -125,6 +147,11 @@ func (s *Service) SnapshotRecoverPlan(ctx context.Context, request SnapshotReque
 	}
 	if len(rec.domain.pending) == 0 {
 		return rec, nil
+	}
+	// An operation whose lock another process holds is running, not
+	// interrupted (ADR 0008).
+	if probe && lockBusy(scope, join(gameName, lockFile)) {
+		return rec, errVault(request.VaultPath, "%s; run it again once it ends", snapshotDomain.busy)
 	}
 	rec.Operation = rec.domain.pending[0].Operation
 	rec.journal = rec.domain.journals[rec.Operation]
@@ -232,7 +259,7 @@ func (o *operation) recoverSnapshot(rec *SnapshotRecovery, request SnapshotReque
 		}
 		return errVault(rec.Vault, "lock: %w", err)
 	}
-	again, err := o.s.SnapshotRecoverPlan(o.ctx, request)
+	again, err := o.s.snapshotRecoverPlan(o.ctx, request, false)
 	if err != nil {
 		return err
 	}
@@ -258,11 +285,6 @@ func (o *operation) recoverSnapshot(rec *SnapshotRecovery, request SnapshotReque
 	for _, r := range j.Records {
 		if r.Step == backup.StepPublishIntent {
 			o.intentAt = r.At
-		}
-	}
-	if rec.Action == RecoverSnapshotPublish {
-		if err := o.vault.Hold(o.game + "/" + snapshotsDir + "/" + receiptsDir); err != nil {
-			return errVault(rec.Vault, "%w", err)
 		}
 	}
 	o.critical = true

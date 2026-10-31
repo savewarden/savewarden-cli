@@ -68,6 +68,7 @@ presence of output.`,
 				report := ""
 				if result.Recovery != nil && result.Recovery.ManifestPath != "" {
 					report = RenderSnapshotRecovery(*result.Recovery, "recovery")
+					warnDegraded(cmd.ErrOrStderr(), result.Recovery.Degraded())
 				}
 				return finish(cmd, report, result.State(), err)
 			case recover:
@@ -75,6 +76,7 @@ presence of output.`,
 				report := ""
 				if recovery.ManifestPath != "" {
 					report = RenderSnapshotRecovery(recovery, "recovery plan only, nothing written")
+					warnDegraded(cmd.ErrOrStderr(), recovery.Degraded())
 				}
 				state := sync.SnapshotResult{}.State()
 				var intervention *sync.InterventionError

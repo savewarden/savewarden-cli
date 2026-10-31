@@ -500,7 +500,8 @@ func TestSnapshotPreparedTemporaries(t *testing.T) {
 		ok       bool
 	}{
 		{"publish prepared, not renamed", snapPre, backup.StepPublishIntent, sobs(a, n, false), true},
-		{"published prepared after the rename", publishing, backup.StepPublished, sobs(n, a, false), true},
+		// published is prepared only once the snapshot receipt is committed.
+		{"published prepared without a receipt", publishing, backup.StepPublished, sobs(n, a, false), false},
 		{"unpublish prepared after the rename", publishing, backup.StepUnpublishIntent, sobs(n, a, false), true},
 		{"rolled-back prepared, not renamed", publishing, backup.StepRolledBack, sobs(a, n, false), true},
 		{"rolled-back prepared, yet renamed", publishing, backup.StepRolledBack, sobs(n, a, false), false},
@@ -521,7 +522,7 @@ func TestSnapshotPreparedTemporaries(t *testing.T) {
 		})
 	}
 	j := withSnapshotTemporaries(t, publishing, repeat(backup.StepPublished, backup.MaxTemporaries)...)
-	if _, err := backup.ClassifySnapshot(j, sobs(n, a, false)); !errors.Is(err, backup.ErrEnvelopeExhausted) {
+	if _, err := backup.ClassifySnapshot(j, sobs(n, a, true)); !errors.Is(err, backup.ErrEnvelopeExhausted) {
 		t.Fatalf("E1: %v", err)
 	}
 }

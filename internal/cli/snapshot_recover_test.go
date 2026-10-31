@@ -66,3 +66,19 @@ func TestSnapshotRecoverReport(t *testing.T) {
 		t.Fatalf("intervention: %v, stderr %q", err, stderr)
 	}
 }
+
+// ADR 0008: every run warns of the degraded snapshots, recoveries
+// included, before the vault state line.
+func TestSnapshotRecoverWarnsOfDegradedSnapshots(t *testing.T) {
+	recovery := snapshotRecovery()
+	recovery.Snapshots = []sync.PublishedSnapshot{{ID: "20261105T101500-1a2b3c4d", Condition: backup.SnapshotMissing}, {ID: "20261105T111500-2b3c4d5e"}}
+	_, stderr, err := runSnapshot(t, &fakeSnapshotter{recovery: recovery}, append(append([]string{}, snapshotArgs...), "--recover")...)
+	if err != nil || stderr != "savewarden: warning: 1 degraded snapshot(s)\nsavewarden: vault: not modified\n" {
+		t.Fatalf("recover plan: %v, stderr %q", err, stderr)
+	}
+	result := sync.SnapshotResult{Operation: recovery.Operation, Effect: sync.EffectPublished, Recovery: &recovery}
+	_, stderr, err = runSnapshot(t, &fakeSnapshotter{result: result}, append(append([]string{}, snapshotArgs...), "--recover", "--apply")...)
+	if err != nil || stderr != "savewarden: warning: 1 degraded snapshot(s)\nsavewarden: vault: published snapshot 20261106T101500-5e6f7a8b\n" {
+		t.Fatalf("recover: %v, stderr %q", err, stderr)
+	}
+}

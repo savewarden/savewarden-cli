@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -152,12 +153,19 @@ func TestSnapshotTakesTheLockLikeSync(t *testing.T) {
 	}
 }
 
-// duringCopy runs change at the third opening of current/saves/1.save.
-func duringCopy(f *fakeFS, change func(*node)) func(string, *node) {
+// Openings of current/saves/1.save by a snapshot: the plan, the plan under
+// lock, the reading before staging-intent, then the copy.
+const (
+	beforeStagingIntent = 3
+	duringTheCopy       = 4
+)
+
+// atOpening runs change at the k-th opening of current/saves/1.save.
+func atOpening(f *fakeFS, k int, change func(*node)) func(string, *node) {
 	opened := 0
 	return func(name string, n *node) {
 		if strings.Contains(name, "/current/saves/1.save") {
-			if opened++; opened == 3 {
+			if opened++; opened == k {
 				change(n)
 				f.onOpen = nil
 			}
@@ -165,10 +173,38 @@ func duringCopy(f *fakeFS, change func(*node)) func(string, *node) {
 	}
 }
 
+// duringCopy runs change when the copy opens current/saves/1.save.
+func duringCopy(f *fakeFS, change func(*node)) func(string, *node) {
+	return atOpening(f, duringTheCopy, change)
+}
+
+// ADR 0006 §10, creation step 2: current is read again in full after
+// planned; a change of content closes the operation in failed, code 2,
+// before any copy; a swapped current is code 3, nothing recorded.
+func TestCurrentIsReadAgainBeforeStagingIntent(t *testing.T) {
+	f := generation(t)
+	f.onOpen = atOpening(f, beforeStagingIntent, func(n *node) { n.data = []byte("uno") })
+	result, err := snapshotApply(f, newFakeVaults(f))
+	var blocked *sync.BlockedError
+	if !errors.As(err, &blocked) || blocked.Code != sync.CodeCurrentModified || snapshotJournal(f, snapApplied) != "001-planned.rec,002-failed.rec" ||
+		f.get(gameDir+`\snapshots\`+snapApplied+".incomplete") != nil {
+		t.Fatalf("content changed: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
+	}
+	f = generation(t)
+	f.onOpen = atOpening(f, beforeStagingIntent, func(n *node) {
+		n.data = []byte("uno")
+		game := f.get(gameDir)
+		game.children["current"] = copyTree(f, game.children["current"])
+	})
+	result, err = snapshotApply(f, newFakeVaults(f))
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention || snapshotJournal(f, snapApplied) != "001-planned.rec" {
+		t.Fatalf("identity and content changed: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
+	}
+}
+
 func TestSnapshotOfCurrentChangedDuringCopy(t *testing.T) {
 	f := generation(t)
-	// The plan and the plan under lock read current first: the third
-	// opening of the file is the copy.
 	f.onOpen = duringCopy(f, func(n *node) { n.data = []byte("uno") })
 	result, err := snapshotApply(f, newFakeVaults(f))
 	var blocked *sync.BlockedError
@@ -187,6 +223,50 @@ func TestSnapshotOfCurrentChangedDuringCopy(t *testing.T) {
 	if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention ||
 		snapshotJournal(f, snapApplied) != "001-planned.rec,002-staging-intent.rec" {
 		t.Fatalf("identity changed: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
+	}
+	// Identity and content both changed: the identity is judged first.
+	f = generation(t)
+	f.onOpen = duringCopy(f, func(n *node) {
+		n.data = []byte("uno")
+		game := f.get(gameDir)
+		game.children["current"] = copyTree(f, game.children["current"])
+	})
+	result, err = snapshotApply(f, newFakeVaults(f))
+	if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention ||
+		snapshotJournal(f, snapApplied) != "001-planned.rec,002-staging-intent.rec" {
+		t.Fatalf("identity and content changed: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
+	}
+}
+
+// ADR 0006 §10, creation step 3: an incomplete copy swapped while it is
+// read back is code 3 with nothing recorded, even when its content differs
+// too; a content that differs alone is verification-mismatch, failed.
+func TestIncompleteCopySwappedDuringVerification(t *testing.T) {
+	verifying := func(f *fakeFS, swap bool) func(string, *node) {
+		return func(name string, n *node) {
+			if strings.Contains(name, "/snapshots/"+snapApplied+".incomplete/saves/1.save") {
+				f.onOpen = nil
+				n.data = []byte("uno")
+				if swap {
+					snapshots := f.get(gameDir + `\snapshots`)
+					snapshots.children[snapApplied+".incomplete"] = copyTree(f, snapshots.children[snapApplied+".incomplete"])
+				}
+			}
+		}
+	}
+	f := generation(t)
+	f.onOpen = verifying(f, false)
+	_, err := snapshotApply(f, newFakeVaults(f))
+	var blocked *sync.BlockedError
+	if !errors.As(err, &blocked) || blocked.Code != sync.CodeVerificationMismatch || !strings.HasSuffix(snapshotJournal(f, snapApplied), "003-staged.rec,004-failed.rec") {
+		t.Fatalf("content differs: %v, journal %s", err, snapshotJournal(f, snapApplied))
+	}
+	f = generation(t)
+	f.onOpen = verifying(f, true)
+	result, err := snapshotApply(f, newFakeVaults(f))
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || result.Effect != sync.EffectIntervention || !strings.HasSuffix(snapshotJournal(f, snapApplied), "003-staged.rec") {
+		t.Fatalf("swapped: %+v, %v, journal %s", result, err, snapshotJournal(f, snapApplied))
 	}
 }
 
@@ -277,6 +357,80 @@ func TestSnapshotRenameRefusedRollsBack(t *testing.T) {
 		!strings.HasSuffix(snapshotJournal(f, snapApplied), "005-publish-intent.rec,006-rolled-back.rec") {
 		t.Fatalf("refused rename: %+v, %v", result, err)
 	}
+}
+
+// pinsAtSwitch records, at every rename of a snapshot copy, the
+// directories its session holds, and runs after[call] once that rename is
+// done.
+type pinsAtSwitch struct {
+	*fakeVaults
+	held  map[string][]string
+	after map[string]func()
+}
+
+func newPinsAtSwitch(f *fakeFS) *pinsAtSwitch {
+	return &pinsAtSwitch{fakeVaults: newFakeVaults(f), held: map[string][]string{}, after: map[string]func(){}}
+}
+
+func (p *pinsAtSwitch) Open(path string) (sync.Vault, error) {
+	v, err := p.fakeVaults.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return &pinsVault{Vault: v, p: p}, nil
+}
+
+type pinsVault struct {
+	sync.Vault
+	p *pinsAtSwitch
+}
+
+func (v *pinsVault) Move(from, to string) error {
+	call := "Move " + from + " " + to
+	if !strings.Contains(from, "/journal/") && !strings.Contains(from, "/receipts/") {
+		v.p.held[call] = slices.Sorted(maps.Keys(v.Vault.(*fakeVault).held))
+	}
+	err := v.Vault.Move(from, to)
+	if hook := v.p.after[call]; hook != nil && err == nil {
+		delete(v.p.after, call)
+		hook()
+	}
+	return err
+}
+
+// ADR 0006 §10, creation step 5: across the switch, and across the move
+// back of a rollback, only the ancestors of the operation's journal and
+// that directory stay pinned; receipts is held only to be written.
+func TestOnlyJournalAncestorsStayPinnedAcrossTheSwitch(t *testing.T) {
+	journal := snapRel + "/journal/" + snapApplied
+	unmove := "Move " + snapRel + "/" + snapApplied + " " + snapRel + "/" + snapApplied + ".incomplete"
+	check := func(p *pinsAtSwitch, moves ...string) {
+		t.Helper()
+		for _, move := range moves {
+			held, ok := p.held[move]
+			if !ok {
+				t.Fatalf("no %s among %v", move, p.held)
+			}
+			for _, name := range held {
+				if name != "." && name != journal && !strings.HasPrefix(journal, name+"/") {
+					t.Errorf("%s: %s is held", move, name)
+				}
+			}
+		}
+	}
+	f := generation(t)
+	p := newPinsAtSwitch(f)
+	if result, err := snapshotApply(f, p); err != nil || result.Effect != sync.EffectPublished {
+		t.Fatalf("apply: %+v, %v", result, err)
+	}
+	check(p, snapMove)
+	f = generation(t)
+	p = newPinsAtSwitch(f)
+	p.after[snapMove] = func() { delete(f.get(gameDir+`\receipts`).children, op1+".json") }
+	if result, err := snapshotApply(f, p); err == nil || result.Effect != sync.EffectRolledBack {
+		t.Fatalf("contradictory provenance: %+v, %v", result, err)
+	}
+	check(p, snapMove, unmove)
 }
 
 // A crash just before and just after every vault call of a snapshot leaves

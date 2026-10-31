@@ -178,6 +178,11 @@ func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPl
 			return errVault(o.plan.Vault, "%w", err)
 		}
 	}
+	// Only the ancestors of the journal stay pinned across the switch
+	// (ADR 0006 §10, creation step 5); receipts is held again to be written.
+	if err := o.vault.Release(o.game + "/" + snapshotsDir + "/" + receiptsDir); err != nil {
+		return errVault(o.plan.Vault, "%w", err)
+	}
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
 		return errVault(o.plan.Vault, "operation directory: %w", err)
 	}
@@ -213,10 +218,14 @@ func sameSnapshotPlan(a, b SnapshotPlan) bool {
 	return true
 }
 
-// copyCurrent creates snapshots\<op>.incomplete after its intent, copies
-// current into it as its receipt describes it, and records staged. The
-// identity of current is read again after the copy.
+// copyCurrent reads current again, creates snapshots\<op>.incomplete after
+// its intent, copies current into it as its receipt describes it, and
+// records staged. The identity of current is read again after the copy,
+// and judged before its content (ADR 0006 §10, creation step 2).
 func (o *operation) copyCurrent() error {
+	if err := o.currentUnchanged(); err != nil {
+		return err
+	}
 	if err := o.record(backup.StepStagingIntent, backup.StepValues{}); err != nil {
 		return err
 	}
@@ -229,6 +238,29 @@ func (o *operation) copyCurrent() error {
 	}
 	defer func() { _ = scope.Close() }()
 	current := strings.Join(append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, currentDir), "/")
+	copyErr := o.copyContent(scope, current)
+	// A swapped current is code 3, never taken for a change of content.
+	if id, err := scope.Identity(current); err != nil || id != o.sourceIdentity {
+		return o.intervene(fmt.Sprintf("current was replaced during the copy, or cannot be checked: %v %v; nothing recorded", id, err))
+	}
+	if copyErr != nil {
+		return copyErr
+	}
+	id, err := o.vault.Identity(o.stagingDir())
+	if err != nil {
+		return fmt.Errorf("incomplete copy identity: %w", err)
+	}
+	digest, err := backup.ContentDigest(o.content)
+	if err != nil {
+		return err
+	}
+	o.staging = id
+	return o.record(backup.StepStaged, backup.StepValues{Staging: id, Digest: digest})
+}
+
+// copyContent copies every source of the plan from current, the directory
+// current names in scope, into the incomplete copy.
+func (o *operation) copyContent(scope Scope, current string) error {
 	for _, source := range o.content {
 		if source.State != backup.SourceCopied {
 			continue
@@ -251,19 +283,28 @@ func (o *operation) copyCurrent() error {
 			}
 		}
 	}
-	if id, err := scope.Identity(current); err != nil || id != o.sourceIdentity {
-		return o.intervene(fmt.Sprintf("current was replaced during the copy, or cannot be checked: %v %v; nothing recorded", id, err))
-	}
-	id, err := o.vault.Identity(o.stagingDir())
-	if err != nil {
-		return fmt.Errorf("incomplete copy identity: %w", err)
-	}
-	digest, err := backup.ContentDigest(o.content)
+	return nil
+}
+
+// currentUnchanged reads current again in full against the plan, before
+// staging-intent; its identity, read after the content, is judged first:
+// a swapped current is code 3 with nothing recorded, a change of content
+// current-modified, code 2 (ADR 0006 §10, creation step 2).
+func (o *operation) currentUnchanged() error {
+	segments := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, currentDir)
+	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
 	if err != nil {
 		return err
 	}
-	o.staging = id
-	return o.record(backup.StepStaged, backup.StepValues{Staging: id, Digest: digest})
+	if id, err := o.vault.Identity(o.game + "/" + currentDir); err != nil || id != o.sourceIdentity {
+		return o.intervene(fmt.Sprintf("current was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
+	}
+	if differences := compareWithReceipt(dir, backup.Receipt{Sources: o.content}); len(differences) > 0 {
+		first := differences[0]
+		return &BlockedError{Code: o.domain.changed, Detail: fmt.Sprintf("current changed since the plan: %s %s, %s; %d difference(s) in all",
+			orDash(first.source), orDash(first.path), first.detail, len(differences))}
+	}
+	return nil
 }
 
 // verifyIncomplete reads the copy back from disk through a no-follow walk
@@ -275,14 +316,15 @@ func (o *operation) verifyIncomplete() error {
 	if err != nil {
 		return err
 	}
+	// The identity, read after the content, is judged first.
+	if id, err := o.vault.Identity(o.stagingDir()); err != nil || id != o.staging {
+		return o.intervene(fmt.Sprintf("the incomplete copy was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
+	}
 	if differences := compareWithReceipt(dir, backup.Receipt{Sources: o.content}); len(differences) > 0 {
 		first := differences[0]
 		return &BlockedError{Code: CodeVerificationMismatch,
 			Detail: fmt.Sprintf("incomplete copy %s %s: %s; %d difference(s) in all", orDash(first.source), orDash(first.path),
 				strings.ReplaceAll(strings.ReplaceAll(first.detail, "its receipt", "the plan"), "current", "the copy"), len(differences))}
-	}
-	if id, err := o.vault.Identity(o.stagingDir()); err != nil || id != o.staging {
-		return o.intervene(fmt.Sprintf("the incomplete copy was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
 	}
 	digest, err := backup.ContentDigest(o.content)
 	if err != nil {
@@ -415,7 +457,11 @@ func (o *operation) writeSnapshotReceipt(publishedAt, recoveredAt *time.Time, re
 	if err != nil {
 		return [32]byte{}, err
 	}
-	if err := o.commitFile(o.game+"/"+snapshotsDir+"/"+receiptsDir+"/"+o.op+".json", data, o.receipt, nil); err != nil {
+	receipts := o.game + "/" + snapshotsDir + "/" + receiptsDir
+	if err := o.vault.Hold(receipts); err != nil {
+		return [32]byte{}, err
+	}
+	if err := o.commitFile(receipts+"/"+o.op+".json", data, o.receipt, nil); err != nil {
 		return [32]byte{}, err
 	}
 	return sha256.Sum256(data), nil

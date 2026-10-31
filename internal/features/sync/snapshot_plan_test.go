@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -53,6 +54,7 @@ func snapshotCauses(p sync.SnapshotPlan) []string {
 // chained and one second apart from start.
 func writeSnapshotRecords(t *testing.T, f *fakeFS, id string, start time.Time, steps []backup.Step, values func(backup.Step) backup.StepValues) {
 	t.Helper()
+	f.mkdir(gameDir + `\snapshots\receipts`)
 	dir := f.mkdir(gameDir + `\snapshots\journal\` + id)
 	prev := ""
 	for i, step := range steps {
@@ -246,12 +248,34 @@ func TestPendingSnapshotOperationBlocksSnapshot(t *testing.T) {
 	}
 }
 
-func TestMissingOrAlteredSnapshotIsReported(t *testing.T) {
+// degradedLines lists what the vault holds of snapshot op: its names, its
+// receipt and its journal.
+func degradedLines(f *fakeFS, op string) string {
+	var lines []string
+	for _, line := range strings.Split(snapshot(f, gameDir+`\snapshots`), "\n") {
+		if strings.Contains(line, op) {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ADR 0006 §10 and ADR 0008: whatever is observed of an approved snapshot,
+// even a file or a link under its name or its receipt's, degrades it; it
+// is named in every outcome, counted by a recovery, never blocking, and
+// nothing is written or renamed for it; a new snapshot of the same
+// generation is published beside it.
+func TestDegradedSnapshotsAreVisible(t *testing.T) {
 	tests := []struct {
 		name   string
 		change func(f *fakeFS)
 		want   string
 	}{
+		{"replaced by a file", func(f *fakeFS) { f.get(gameDir + `\snapshots`).children[snapOp] = f.file("x") }, "snapshot-modified"},
+		{"replaced by a link", func(f *fakeFS) { f.get(gameDir + `\snapshots`).children[snapOp] = f.link() }, "snapshot-modified"},
+		{"file named as its copy", func(f *fakeFS) { f.get(gameDir + `\snapshots`).children[snapOp+".incomplete"] = f.file("x") }, "snapshot-modified"},
+		{"receipt replaced by a directory", func(f *fakeFS) { f.get(gameDir + `\snapshots\receipts`).children[snapOp+".json"] = f.dir() }, "snapshot-modified"},
+		{"receipt replaced by a link", func(f *fakeFS) { f.get(gameDir + `\snapshots\receipts`).children[snapOp+".json"] = f.link() }, "snapshot-modified"},
 		{"missing", func(f *fakeFS) { delete(f.get(gameDir+`\snapshots`).children, snapOp) }, "snapshot-missing"},
 		{"rename lost", func(f *fakeFS) {
 			snapshots := f.get(gameDir + `\snapshots`)
@@ -279,7 +303,96 @@ func TestMissingOrAlteredSnapshotIsReported(t *testing.T) {
 			if p.Outcome() != "new snapshot" || p.Degraded() != 1 || !slices.Equal(snapshotCodes(p), []string{want}) || p.Blocking() != 0 {
 				t.Fatalf("plan %s, degraded %d, findings %q; want %q", p.Outcome(), p.Degraded(), snapshotCodes(p), want)
 			}
+			// Content is read only for the snapshot that would make the plan
+			// up to date; recovery judges receipts and identities alone.
+			byIdentity := tt.name != "content altered"
+			wantRecovery := 0
+			if byIdentity {
+				wantRecovery = 1
+			}
+			if rec, err := snapshotRecoverPlan(f); err != nil || rec.Action != sync.RecoverNothing || rec.Degraded() != wantRecovery {
+				t.Fatalf("recovery plan: %q, degraded %d, %v", rec.Action, rec.Degraded(), err)
+			}
+			degraded := degradedLines(f, snapOp)
+			result, err := snapshotApply(f, newFakeVaults(f))
+			if err != nil || result.Effect != sync.EffectPublished || result.Plan.Degraded() != 1 {
+				t.Fatalf("apply: %+v, %v", result, err)
+			}
+			if after := degradedLines(f, snapOp); after != degraded {
+				t.Fatalf("the degraded snapshot changed:\n%s\nwant\n%s", after, degraded)
+			}
+			if !byIdentity {
+				return
+			}
+			// Beside an intervention, the degradation is still named.
+			f.put(gameDir+`\snapshots\notes.txt`, f.file("x"))
+			if p := snapshotPlanOf(t, f); p.Outcome() != "intervention required" || p.Degraded() != 1 || !slices.Contains(snapshotCodes(p), want) {
+				t.Fatalf("beside an intervention: %s, degraded %d, findings %q", p.Outcome(), p.Degraded(), snapshotCodes(p))
+			}
 		})
+	}
+}
+
+// Only the name of an approved snapshot escapes the grammar: a file named
+// as the copy of an operation closed otherwise stays unexpected.
+func TestNameOfAnUnapprovedSnapshotMustBeADirectory(t *testing.T) {
+	f := generation(t)
+	head, data := headReceipt(t, f)
+	writeSnapshotRecords(t, f, snapOp, snapAt, []backup.Step{backup.StepPlanned, backup.StepAbandoned}, func(step backup.Step) backup.StepValues {
+		if step == backup.StepAbandoned {
+			return backup.StepValues{Text: "interrupted"}
+		}
+		return backup.StepValues{SnapshotSource: backup.SnapshotSource{Operation: head.Operation, ReceiptSHA256: sha256.Sum256(data)},
+			SourceIdentity: identityOf(f.get(gameDir + `\current`)),
+			SnapshotPlan:   &backup.SnapshotPlan{ToolVersion: "dev", GameID: head.GameID, GameName: head.GameName, StartedAt: snapAt, Sources: head.Sources}}
+	})
+	f.put(gameDir+`\snapshots\`+snapOp+".incomplete", f.file("x"))
+	p := snapshotPlanOf(t, f)
+	if want := "unexpected-entry " + gameRel + "/snapshots/" + snapOp + ".incomplete"; !slices.Equal(snapshotCauses(p), []string{want}) || p.Incomplete != 0 {
+		t.Fatalf("causes %q, incomplete %d", snapshotCauses(p), p.Incomplete)
+	}
+}
+
+// ADR 0006 §10, structure: receipts is created before journal; operations
+// without it are a partial state, code 3, for the plan as for recovery;
+// an empty structure is completed.
+func TestPartialSnapshotStructureIsAmbiguous(t *testing.T) {
+	f := generation(t)
+	publishSnapshot(t, f, snapOp, snapAt)
+	delete(f.get(gameDir+`\snapshots`).children, "receipts")
+	want := "journal-ambiguous " + gameRel + "/snapshots/receipts"
+	if p := snapshotPlanOf(t, f); !slices.Equal(snapshotCauses(p), []string{want}) {
+		t.Fatalf("plan causes %q", snapshotCauses(p))
+	}
+	f = interruptedAt(t, snapCommit(5, "publish-intent"), true)
+	delete(f.get(gameDir+`\snapshots`).children, "receipts")
+	if _, err := snapshotRecoverPlan(f); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("recovery plan: %v", err)
+	}
+	f = generation(t)
+	f.mkdir(gameDir + `\snapshots\journal`)
+	if result, err := snapshotApply(f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectPublished || f.get(gameDir+`\snapshots\receipts`) == nil {
+		t.Fatalf("empty structure: %+v, %v", result, err)
+	}
+}
+
+// ADR 0008: a pending operation whose lock another process holds is
+// running: code 1, never an intervention, for the plan as for recovery.
+func TestRunningSnapshotIsNotInterrupted(t *testing.T) {
+	f := interruptedAt(t, snapCommit(2, "staging-intent"), true)
+	f.get(gameDir + `\sync.lock`).busy = true
+	for name, run := range map[string]func() error{
+		"plan":          func() error { return snapshotPlanError(f, vaultPath) },
+		"recovery plan": func() error { _, err := snapshotRecoverPlan(f); return err },
+	} {
+		var intervention *sync.InterventionError
+		if err := run(); err == nil || errors.As(err, &intervention) || !strings.Contains(err.Error(), "another operation is running on this game") {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	f.get(gameDir + `\sync.lock`).busy = false
+	if p := snapshotPlanOf(t, f); !slices.Equal(snapshotCauses(p), []string{"pending-operation " + snapApplied}) {
+		t.Fatalf("interrupted: %q", snapshotCauses(p))
 	}
 }
 
