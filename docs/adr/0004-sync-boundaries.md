@@ -1,7 +1,7 @@
 # ADR 0004 — Frontières de `sync`
 
 Date : 29 octobre 2026. Statut : accepté pour B2, plan B2 v0.2 §3, validé par
-le propriétaire le 29 octobre 2026. Amendement B3 : projet, non accepté.
+le propriétaire le 29 octobre 2026. Amendement B3 accepté le 31 octobre 2026.
 
 ## Contexte
 
@@ -106,9 +106,10 @@ plan B2 §3.2, sans changer les frontières :
   sa récupération n'emploient que `Vault`, `Files`, `Inventories`, `Volumes`
   et `Clock`.
 
-## Amendement B3 — projet, non accepté
+## Amendement B3
 
-30 octobre 2026, plan B3 v0.2. Les snapshots ne forment pas une feature
+30 octobre 2026, plan B3 v0.2 ; accepté par le propriétaire le
+31 octobre 2026, à livrer par la PR B3. Les snapshots ne forment pas une feature
 séparée : `features/sync` possède **toutes les publications dans le coffre
 d'un jeu**, `current` et snapshots, et leurs récupérations. La phrase des
 Conséquences qui annonçait une feature `snapshot` réutilisant

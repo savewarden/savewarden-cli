@@ -1,15 +1,15 @@
 # ADR 0008 — Contrat de `snapshot` et receipt de snapshot v1
 
-Date : 30 octobre 2026. Statut : **projet**, rédigé avec le plan B3 v0.2 et
-soumis au propriétaire ; **non accepté**. Aucun code ne s'en réclame avant
-son acceptation.
+Date : 30 octobre 2026. Statut : **accepté** par le propriétaire le
+31 octobre 2026, avec le plan B3 v0.2. Aucun code ne l'implémente encore :
+B3 le livrera sur un GO de développement distinct.
 
 ## Contexte
 
 B3 ajoute les snapshots : des copies vérifiées de la génération `current`
 d'un jeu, approuvées à leur publication et jamais rouvertes en écriture,
 déplacées, remplacées ni supprimées ensuite. Le protocole de publication et
-de récupération est le §10 d'ADR 0006, projet lui aussi. Cet ADR fixe ce
+de récupération est le §10 d'ADR 0006. Cet ADR fixe ce
 qu'un utilisateur ou un script observe : la commande, ses préconditions, sa
 sortie, ses codes, et le receipt de snapshot, artefact durable du coffre que
 B4 et `doctor` (B5) reliront. Le contrat de `sync` reste celui d'ADR 0007.

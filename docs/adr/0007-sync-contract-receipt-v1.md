@@ -3,7 +3,7 @@
 Date : 29 octobre 2026. Statut : accepté pour B2, plan B2 v0.2 §4, validé par
 le propriétaire le 29 octobre 2026. B2a livre le mode plan ; B2b et B2c
 ajoutent leurs modes sans changer ce qui est fixé ici, sauf amendement ;
-amendé pour B2c ; amendement B3 en projet, non accepté (voir Amendements).
+amendé pour B2c, puis pour B3 (voir Amendements).
 
 ## Contexte
 
@@ -249,8 +249,9 @@ exige un nouveau `schema_version` et un amendement de cet ADR.
   acceptées ; états d'une rotation ; `unexpected-entry` pour un `current`
   d'une autre identité. `TestStableCodesAreDocumented` vérifie que chaque code
   déclaré par la feature figure ici.
-- **30 octobre 2026, cadrage de B3 — projet, non accepté** (plan B3 v0.2,
-  ADR 0006 §10, ADR 0008) : `sync` accepte l'entrée `snapshots` de
+- **30 octobre 2026, cadrage de B3**, accepté par le propriétaire le
+  31 octobre 2026, à livrer par la PR B3 (plan B3 v0.2, ADR 0006 §10,
+  ADR 0008) : `sync` accepte l'entrée `snapshots` de
   `games\<game-id>` si c'est un dossier ordinaire sans point d'analyse ; un
   fichier ou un lien sous ce nom reste `unexpected-entry`, code 3. Il ne lit
   rien sous `snapshots\`, et aucune anomalie de ce domaine ne change son

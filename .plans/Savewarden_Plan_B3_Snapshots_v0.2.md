@@ -1,13 +1,13 @@
 # Savewarden — Plan B3 : snapshots immuables
 
-> **Statut : v0.2 — CADRAGE DOCUMENTAIRE, arbitrages S1 à S14 retenus dans leur principe, précisions Q1 à Q4 intégrées ; projets d'ADR rédigés, non acceptés ; aucun GO de développement**
+> **Statut : v0.2 — VALIDÉ PAR LE PROPRIÉTAIRE le 31 octobre 2026 : arbitrages S1 à S14, précisions Q1 à Q4 et revue indépendante intégrés ; ADR 0004, 0006 §10, 0007 et 0008 acceptés ; GO de développement B3 non donné**
 > Version du plan : `0.2` — 30 octobre 2026 ; remplace le brouillon v0.1 (`5089378`)
 > Lot : **B3**, cible `release/v0.1.0-a1`
 > Cadre : [plan directeur v0.1](Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md) §7 B3,
 > [plan B2 v0.2](Savewarden_Plan_B2_Synchronisation_v0.2.md), [AGENTS.md](../AGENTS.md),
 > [modèle de sécurité](../docs/safety-model.md), ADR [0001](../docs/adr/0001-fsd-inspired-go.md),
 > [0004](../docs/adr/0004-sync-boundaries.md) à [0007](../docs/adr/0007-sync-contract-receipt-v1.md),
-> projet d'[ADR 0008](../docs/adr/0008-snapshot-contract-receipt-v1.md).
+> [ADR 0008](../docs/adr/0008-snapshot-contract-receipt-v1.md).
 
 B2 protège l'état courant d'un jeu : `current` est remplacé à chaque `sync`,
 et l'ancienne génération rejoint `retained\`. Ces générations suivent la
@@ -23,7 +23,7 @@ et d'impossibilité de réécrire un snapshot approuvé ; test sur Odyssey aprè
 accord explicite.
 
 ADR 0006 reste la **référence de sécurité** : son §1 inclut déjà les
-snapshots de B3. Son projet d'amendement, §10, porte le protocole des
+snapshots de B3. Son amendement, le §10, porte le protocole des
 snapshots ; il nomme comme tels les deux assouplissements retenus, I8 par
 domaine (S9) et le traitement des anomalies d'un snapshot déjà approuvé
 (S13).
@@ -39,8 +39,10 @@ release, ni accès aux sauvegardes réelles.
 
 Revue CTO du brouillon v0.1, transmise par le propriétaire le 30 octobre 2026 :
 architecture favorable, **S1 à S14 retenues dans leur principe**, sans défaut
-bloquant ; quatre précisions demandées avant de figer les ADR (§0.2). Cette
-v0.2 et les projets d'ADR attendent la validation du propriétaire.
+bloquant ; quatre précisions demandées avant de figer les ADR (§0.2). Après
+une revue indépendante de la v0.2, le propriétaire valide cette v0.2 et
+accepte les ADR le 31 octobre 2026. Cette validation ne vaut pas GO de
+développement.
 
 | # | Décision retenue | Précision de la revue | Où |
 | --- | --- | --- | --- |
@@ -235,8 +237,8 @@ Elles diffèrent par la frontière de package et par ce qu'il faut déplacer.
 | (c) Extraction du moteur | Nouveau package de protocole sous `internal/`, consommé par `sync` et `snapshot` | Prépare B4, qui publiera aussi selon ADR 0006 | Même refactor que (a), plus un déplacement de code, une frontière durable nouvelle, son ADR et ses tests d'imports, et des faux de test à déplacer ou dupliquer |
 
 **Retenue : (a) en B3**, et réexamen de (c) au cadrage de B4, premier
-consommateur réellement différent puisqu'il écrira hors du coffre. Projet
-d'amendement d'ADR 0004 : `features/sync` possède toutes les publications dans
+consommateur réellement différent puisqu'il écrira hors du coffre.
+Amendement d'ADR 0004 : `features/sync` possède toutes les publications dans
 le coffre d'un jeu, `current` et snapshots ; aucune règle d'import ne change.
 
 Fichiers prévus dans `features/sync`, sans `manager.go` ni fourre-tout :
@@ -253,14 +255,13 @@ Aucun port nouveau. Le plan de snapshot reçoit `ManifestReader`, `Files`,
 plus `Vaults`, `Clock` et l'aléa, comme `sync`. `platform/vault` est
 inchangé ; `internal/app/readonly_test.go` et ADR 0005 aussi.
 
-### 3.3 Projets d'ADR
+### 3.3 ADR
 
-Rédigés sur `docs/b3-framing` avec cette v0.2. Leur statut reste « projet »
-jusqu'à leur acceptation par le propriétaire ; aucun code ne s'en réclame
-avant. Ils sont versés comme premiers commits de la PR, avant tout code
-d'écriture (§8).
+Rédigés sur `docs/b3-framing` avec cette v0.2 et **acceptés par le
+propriétaire le 31 octobre 2026**. Aucun code ne les implémente encore. Ils
+sont versés comme premiers commits de la PR, avant tout code d'écriture (§8).
 
-| ADR | Objet du projet |
+| ADR | Objet |
 | --- | --- |
 | **0006, §10 nouveau** | Protocole des snapshots : disposition, domaines et I8 par domaine, structure, automate et contrat des champs, création, bascule, points d'arrêt, porte de provenance, récupération indépendante et son tableau, anomalies d'un snapshot approuvé, enveloppe ; renvois depuis I8 et le §3 |
 | **0008, nouveau** | Contrat de `snapshot` : modes, préconditions de création et de récupération, sortie du plan, état des snapshots, codes 0 à 3, ligne d'état, codes stables et causes, receipt de snapshot v1 et sa relecture stricte |
@@ -438,7 +439,7 @@ journal et du receipt source, hors modèle, comme en B2c pour le receipt de
 Fichier `snapshots\receipts\<snap-id>.json`, validé par temporaire et
 renommage, enveloppe E1 propre. JSON canonique, relecture stricte comme le
 receipt v1 : champ inconnu, manquant ou en double refusé. Schéma complet dans
-le projet d'ADR 0008.
+ADR 0008.
 
 | Champ | Contenu |
 | --- | --- |
@@ -583,9 +584,9 @@ code 1 : `vault-changed` ; « another operation is running on this game ».
 
 ---
 
-## 5. Protocole : projet d'ADR 0006 §10
+## 5. Protocole : ADR 0006 §10
 
-Résumé ; le texte normatif proposé est celui du projet d'ADR 0006 §10.
+Résumé ; le texte normatif est celui d'ADR 0006 §10.
 
 ### 5.1 Notation
 
@@ -727,7 +728,7 @@ inchangés.
 
 | Zone | À créer | À modifier |
 | --- | --- | --- |
-| Plan et ADR | `docs/adr/0008-snapshot-contract-receipt-v1.md`, projet rédigé avec ce plan | Ce plan, version validée ; ADR 0004, 0006, 0007, projets rédigés avec ce plan |
+| Plan et ADR | `docs/adr/0008-snapshot-contract-receipt-v1.md`, accepté avec ce plan | Ce plan, version validée ; ADR 0004, 0006, 0007, amendements acceptés avec ce plan |
 | `internal/entities/backup` | Receipt de snapshot v1, sa relecture stricte et ses tests | Contrat des champs et automate du mode snapshot ; classement des observations du §5.4 |
 | `internal/features/sync` | `snapshot.go`, `snapshot_apply.go`, `snapshot_recover.go` et leurs tests | Moteur paramétré par la disposition et les codes ; lecture de l'entrée `snapshots` ; I8 par domaine ; lecture du coffre limitée au domaine des snapshots pour la récupération ; documentation du package ; faux coffre |
 | `internal/cli` | `snapshot.go` et tests | `root.go`, texte de la commande racine et câblage |
@@ -761,13 +762,14 @@ Changements interdits :
 
 ## 8. Plan d'exécution (S11)
 
-Avant tout code : cette v0.2 et ses projets d'ADR validés par le propriétaire
-sur `docs/b3-framing`, puis un GO de développement distinct. La PR
+Avant tout code : cette v0.2 et ses ADR validés par le propriétaire sur
+`docs/b3-framing`, fait le 31 octobre 2026, puis un GO de développement
+distinct, non donné. La PR
 `feat/b3-snapshot` part de ces commits de cadrage, comme celle de B2c.
 
 | # | Commit | Point de contrôle |
 | --- | --- | --- |
-| 0 | Plan validé ; ADR 0006, 0004 et 0007 amendés ; ADR 0008, statuts passés à « accepté » | **Revue du cadrage** par le propriétaire |
+| 0 | Plan validé ; ADR 0006, 0004 et 0007 amendés ; ADR 0008, statuts passés à « accepté » : commits de cadrage de `docs/b3-framing`, jusqu'à l'acceptation du 31 octobre 2026 | **Revue du cadrage** par le propriétaire, faite |
 | 1 | `entities/backup` : receipt de snapshot, automate et champs, classement, tests purs | — |
 | 2 | Moteur de `features/sync` paramétré, sans changement de comportement : suite B2 et sortie de `sync` inchangées | **Revue indépendante de non-régression, obligatoire** avant le commit 3 |
 | 3 | `sync` accepte l'entrée `snapshots` ; I8 par domaine | — |
@@ -1020,3 +1022,4 @@ auto-approbation**.
 | 0.1 | 30 octobre 2026 | `5089378`, local, branche `docs/b3-framing` | Brouillon de cadrage : décisions S1 à S14 proposées, protocole de snapshot proposé comme amendement d'ADR 0006, matrice de tests, critères ; revue indépendante en lecture seule intégrée avant remise |
 | 0.2 | 30 octobre 2026 | local, branche `docs/b3-framing` | Revue CTO : S1 à S14 retenues dans leur principe ; Q1 récupération indépendante de `current` et du domaine B2, préconditions séparées, test croisé ; Q2 porte de provenance et `source-unverified` ; Q3 dégradation visible, portée du contrôle écrite ; Q4 immutabilité en écriture, garantie non WORM ; message du verrou de `sync` inchangé ; projets d'ADR 0004, 0006, 0007 et 0008. Revue croisée indépendante du contrat de récupération intégrée : rollback sur preuve contradictoire, porte non rejouée après un receipt de snapshot validé, verrou pris comme `sync`, comparaison du receipt en observation, `snapshot-rename-lost`, grammaire des sous-dossiers, règle unique du receipt orphelin, limite de la porte. Aucun GO de développement |
 | 0.2, revue indépendante | 31 octobre 2026 | local, branche `docs/b3-framing` | Revue indépendante de la v0.2 et des projets d'ADR : aucun P0, S1 à S14 conservées. P1-1 : nombre des `.incomplete` compté sans les parcourir, taille déclarée non mesurée ; P1-2 : dégradation d'un receipt de snapshot limitée à une opération au journal valide et terminal en `published`, receipt orphelin ou incompatible en code 3 (ADR 0008) ; indépendance de la récupération qualifiée par rapport à l'état vivant de `current`, porte de provenance exceptée ; ligne vide finale d'ADR 0004 retirée. Aucun GO de développement |
+| 0.2, validation | 31 octobre 2026 | local, branche `docs/b3-framing` | Validée par le propriétaire ; ADR 0004, 0006 §10, 0007 et 0008 passés au statut accepté ; contenu normatif inchangé. GO de développement B3 non donné |

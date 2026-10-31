@@ -5,7 +5,8 @@ v0.2 §5, validé par le propriétaire le 29 octobre 2026 après revue intégral
 amendé le même jour avant les premières écritures de B2b, puis pour le
 cadrage et les revues de B2c ; amendements de B2c postérieurs au cadrage
 ratifiés par le propriétaire le 30 octobre 2026 (voir Amendements). Le §10,
-snapshots de B3, est un **projet non accepté** (plan B3 v0.2).
+snapshots de B3, est accepté par le propriétaire le 31 octobre 2026, avec le
+plan B3 v0.2 ; aucun code ne l'implémente encore.
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -48,7 +49,7 @@ peut pas s'y conformer exige un amendement de l'ADR, revu, avant son code.
 | I5 | Fail-closed : toute ambiguïté arrête tout, sans déplacement ni écriture, code 3, diagnostic |
 | I6 | Rollback par défaut avant publication achevée ; finalisation seulement après revérification intégrale du nouvel état contre le plan |
 | I7 | Une génération publiée ou conservée, un receipt, un enregistrement ne sont jamais rouverts en écriture |
-| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` ; précisé par domaine pour les snapshots au §10, projet B3 non accepté |
+| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` ; précisé par domaine pour les snapshots au §10 (B3) |
 | I9 | La publication est **transactionnelle par protocole, pas atomique** : la fenêtre où `current` est absent est reconnue et récupérable |
 | I10 | Seules les garanties documentées de Windows sont revendiquées ; le reste est une hypothèse couverte par une récupération fondée sur l'observation |
 | I11 | L'initialisation du coffre, qui précède tout journal, n'est faite que de créations exclusives et d'un marqueur validé par renommage ; chaque état partiel est reconnu par le tableau du §4 ou refusé sans mutation, jamais adopté implicitement |
@@ -200,7 +201,7 @@ l'observation et les temporaires du numéro suivant.
 | Neuf temporaires du numéro suivant quand la reprise doit l'écrire | Enveloppe E1 épuisée |
 | Second `rollback-failed` pour la même intention | Enveloppe E3 dépassée |
 | Enregistrement d'une autre opération dans le dossier | Mélange d'opérations |
-| Deux opérations non terminales pour un jeu ; par domaine selon le §10, projet B3 | Exclusivité violée |
+| Deux opérations non terminales pour un jeu ; par domaine selon le §10 (B3) | Exclusivité violée |
 | Enregistrement après un état terminal | Opération close modifiée |
 | Observation contraire au dernier enregistrement, dans un sens ou dans l'autre : `published` sans `current` de l'identité attendue, ou `current` publié alors que `publish-intent` manque | Durabilité ou intervention extérieure non prouvées |
 | Identité de fichier indisponible, dossier du journal illisible | Observation impossible |
@@ -614,11 +615,12 @@ l'examiner, sans commande de suppression. Savewarden ne supprime jamais un
 temporaire pour rouvrir l'enveloppe : toute intervention sur le coffre
 relève de son propriétaire.
 
-### 10. Snapshots (B3) — projet
+### 10. Snapshots (B3)
 
-**Statut : projet**, rédigé avec le plan B3 v0.2 le 30 octobre 2026 et soumis
-au propriétaire ; **non accepté**. Tant qu'il ne l'est pas, aucun code ne
-s'en réclame et les §1 à §9 s'appliquent seuls.
+**Statut : accepté** par le propriétaire le 31 octobre 2026, avec le plan B3
+v0.2, rédigé le 30 octobre 2026. Normatif pour tout code de snapshot ; aucun
+code ne l'implémente encore. Il ne change aucune règle des §1 à §9 pour le
+domaine de `current`.
 
 Un snapshot est la copie vérifiée d'une génération `current` publiée, rangée
 sous `games\<game-id>\snapshots\`, approuvée à sa publication, puis jamais
@@ -1021,7 +1023,8 @@ limites d'ADR 0008.
   restauration vérifiée ; si `retained\<prev-op>` est altéré, rien n'est
   restauré et `current` reste absent jusqu'à une intervention, plutôt qu'une
   restauration non vérifiée.
-- **30 octobre 2026, cadrage de B3 — projet, non accepté** (plan B3 v0.2) :
+- **30 octobre 2026, cadrage de B3**, accepté par le propriétaire le
+  31 octobre 2026 (plan B3 v0.2) :
   §10, snapshots ; I8 précisé par domaine ; porte de provenance avant toute
   approbation d'un snapshot, rollback sur preuve contradictoire, aucune porte
   rejouée après un receipt de snapshot validé ; récupération d'un snapshot
