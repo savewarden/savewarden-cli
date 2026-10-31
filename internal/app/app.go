@@ -83,6 +83,10 @@ func (s syncCommands) SnapshotPlan(ctx context.Context, request sync.SnapshotReq
 	return s.service.SnapshotPlan(ctx, request)
 }
 
+func (s syncCommands) SnapshotApply(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error) {
+	return s.service.SnapshotApply(ctx, request, s.writer)
+}
+
 // vaults bridges the create-only vault adapter to the sync port. It
 // returns a nil interface on error, never a typed nil pointer.
 type vaults struct{}

@@ -161,6 +161,11 @@ type operation struct {
 	previous string
 	head     backup.Receipt
 	old      backup.FileID
+	// A snapshot copies the generation of source, whose current had the
+	// identity sourceIdentity under lock, after its plan (ADR 0006 §10).
+	snapshotPlan   *backup.SnapshotPlan
+	source         backup.SnapshotSource
+	sourceIdentity backup.FileID
 }
 
 // rotation reports whether the operation replaces an existing current.

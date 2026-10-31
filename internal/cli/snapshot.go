@@ -11,16 +11,19 @@ import (
 	"github.com/savewarden/savewarden-cli/internal/features/sync"
 )
 
-// Snapshotter plans snapshots of the current generation of a vault; the
-// sync feature implements it (ADR 0004, B3 amendment).
+// Snapshotter plans and applies snapshots of the current generation of a
+// vault; the sync feature implements it (ADR 0004, B3 amendment), and app
+// gives it the vault writer for SnapshotApply only.
 type Snapshotter interface {
 	SnapshotPlan(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotPlan, error)
+	SnapshotApply(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error)
 }
 
 func newSnapshotCommand(snapshotter Snapshotter) *cobra.Command {
 	var manifest, vault string
+	var apply bool
 	command := &cobra.Command{
-		Use:   "snapshot --manifest <path> --vault <directory>",
+		Use:   "snapshot --manifest <path> --vault <directory> [--apply]",
 		Short: "Plan an immutable snapshot of the current generation of a vault",
 		Long: `Plan an immutable snapshot of the current generation of a vault.
 
@@ -31,16 +34,36 @@ the sources nor the installation, whose identities only keep the vault
 distinct from them. The plan lists the approved snapshots, those that are
 degraded, and the copies kept incomplete, without walking them.
 
-This build plans only: nothing is copied, created, moved, written or executed.
+Without flags, snapshot plans only: nothing is copied, created, moved,
+written or executed.
 
-Exit codes: 0 plan without blocking findings, or up to date; 1 invalid
-invocation, manifest or vault, or failure; 2 blocked; 3 the vault needs an
-intervention first. A degraded snapshot never blocks: it is reported on
-stdout, and stderr warns of it. Trust the exit code, never the presence of
-output.`,
+--apply copies current into snapshots\<operation>.incomplete, reads the copy
+back, checks its provenance against the receipt of the generation, and
+publishes it as snapshots\<operation> with its receipt. Once published, a
+snapshot is never opened for writing, moved, replaced or deleted. Nothing
+is written outside snapshots\, but the empty lock file, created as sync
+creates it.
+
+Exit codes: 0 plan without blocking findings, up to date or published; 1
+invalid invocation, manifest or vault, or failure, the last stderr line
+telling what the vault holds; 2 blocked, nothing published by this run; 3
+the vault needs an intervention first. With --apply, the last stderr line
+is "savewarden: vault: <state>". A degraded snapshot never blocks: it is
+reported on stdout, and stderr warns of it. Trust the exit code, never the
+presence of output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			plan, err := snapshotter.SnapshotPlan(cmd.Context(), sync.SnapshotRequest{ManifestPath: manifest, VaultPath: vault})
+			request := sync.SnapshotRequest{ManifestPath: manifest, VaultPath: vault}
+			if apply {
+				result, err := snapshotter.SnapshotApply(cmd.Context(), request)
+				report := ""
+				if result.Plan.ManifestPath != "" {
+					report = RenderSnapshotApply(result)
+					warnDegraded(cmd.ErrOrStderr(), result.Plan.Degraded())
+				}
+				return finish(cmd, report, result.State(), err)
+			}
+			plan, err := snapshotter.SnapshotPlan(cmd.Context(), request)
 			if err != nil {
 				return err
 			}
@@ -60,6 +83,7 @@ output.`,
 	}
 	command.Flags().StringVar(&manifest, "manifest", "", "path to the game's manifest.yaml (required)")
 	command.Flags().StringVar(&vault, "vault", "", "vault directory, absolute Windows path (required)")
+	command.Flags().BoolVar(&apply, "apply", false, "copy, verify and publish the snapshot")
 	_ = command.MarkFlagRequired("manifest")
 	_ = command.MarkFlagRequired("vault")
 	return command
@@ -73,9 +97,32 @@ func warnDegraded(stderr io.Writer, degraded int) {
 	}
 }
 
+// RenderSnapshotApply formats the plan of a snapshot --apply run, then
+// what it did.
+func RenderSnapshotApply(result sync.SnapshotResult) string {
+	var b strings.Builder
+	b.WriteString(renderSnapshotPlan(result.Plan, "apply: copy, verify and publish"))
+	b.WriteString("\n")
+	operation := result.Operation
+	if operation == "" {
+		operation = "none"
+	}
+	fmt.Fprintf(&b, "operation: %s\n", operation)
+	if result.Effect == sync.EffectPublished {
+		fmt.Fprintf(&b, "verification: %d files, %d bytes, SHA-256 verified\n", result.Files, result.Bytes)
+		fmt.Fprintf(&b, "published: %s\n", printable(result.Snapshot))
+		fmt.Fprintf(&b, "receipt: %s\n", printable(result.Receipt))
+	}
+	return b.String()
+}
+
 // RenderSnapshotPlan formats a snapshot plan as stable, line-oriented
 // English text, with no execution date (ADR 0008).
 func RenderSnapshotPlan(plan sync.SnapshotPlan) string {
+	return renderSnapshotPlan(plan, "plan only, nothing written")
+}
+
+func renderSnapshotPlan(plan sync.SnapshotPlan, mode string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "manifest: %s\n", printable(plan.ManifestPath))
 	fmt.Fprintf(&b, "game: %s (%s)\n", plan.Game.ID, printable(plan.Game.Name))
@@ -108,7 +155,7 @@ func RenderSnapshotPlan(plan sync.SnapshotPlan) string {
 		}
 		fmt.Fprintf(&b, "pending: %s (%s)\n", pending.Operation, last)
 	}
-	b.WriteString("mode: plan only, nothing written\n")
+	fmt.Fprintf(&b, "mode: %s\n", mode)
 	fmt.Fprintf(&b, "plan: %s\n", plan.Outcome())
 	fmt.Fprintf(&b, "\nsnapshots: %d published, %d degraded, %d incomplete", len(plan.Snapshots), plan.Degraded(), plan.Incomplete)
 	if plan.Incomplete > 0 {

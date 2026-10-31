@@ -15,12 +15,19 @@ import (
 
 type fakeSnapshotter struct {
 	plan    sync.SnapshotPlan
+	result  sync.SnapshotResult
 	err     error
 	request sync.SnapshotRequest
+	called  string
+}
+
+func (f *fakeSnapshotter) SnapshotApply(_ context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error) {
+	f.request, f.called = request, "apply"
+	return f.result, f.err
 }
 
 func (f *fakeSnapshotter) SnapshotPlan(_ context.Context, request sync.SnapshotRequest) (sync.SnapshotPlan, error) {
-	f.request = request
+	f.request, f.called = request, "plan"
 	return f.plan, f.err
 }
 
@@ -144,8 +151,49 @@ func TestSnapshotExitCodes(t *testing.T) {
 	}
 }
 
+func TestSnapshotApplyReport(t *testing.T) {
+	result := sync.SnapshotResult{Plan: newSnapshotPlan(), Operation: "20261106T101500-5e6f7a8b", Effect: sync.EffectPublished,
+		Snapshot: `F:\Vault\games\synthetic-game\snapshots\20261106T101500-5e6f7a8b`,
+		Receipt:  `F:\Vault\games\synthetic-game\snapshots\receipts\20261106T101500-5e6f7a8b.json`,
+		Files:    2, Bytes: 6}
+	snapshotter := &fakeSnapshotter{result: result}
+	stdout, stderr, err := runSnapshot(t, snapshotter, append(append([]string{}, snapshotArgs...), "--apply")...)
+	if err != nil || snapshotter.called != "apply" {
+		t.Fatalf("exit %v, called %q", err, snapshotter.called)
+	}
+	for _, line := range []string{"mode: apply: copy, verify and publish\n", "operation: 20261106T101500-5e6f7a8b\n",
+		"verification: 2 files, 6 bytes, SHA-256 verified\n", "published: " + result.Snapshot + "\n", "receipt: " + result.Receipt + "\n"} {
+		if !strings.Contains(stdout, line) {
+			t.Fatalf("missing %q in\n%s", line, stdout)
+		}
+	}
+	if stderr != "savewarden: warning: 1 degraded snapshot(s)\nsavewarden: vault: published snapshot 20261106T101500-5e6f7a8b\n" {
+		t.Fatalf("stderr %q", stderr)
+	}
+	for _, tt := range []struct {
+		result sync.SnapshotResult
+		err    error
+		code   int
+		state  string
+	}{
+		{sync.SnapshotResult{Plan: newSnapshotPlan(), Operation: "20261106T101500-5e6f7a8b", Effect: sync.EffectStaged},
+			&sync.BlockedError{Code: sync.CodeCurrentModified, Detail: "changed"}, cli.ExitIncomplete, "snapshot 20261106T101500-5e6f7a8b kept incomplete"},
+		{sync.SnapshotResult{Plan: newSnapshotPlan(), Operation: "20261106T101500-5e6f7a8b", Effect: sync.EffectRolledBack},
+			&sync.InterventionError{Operation: "20261106T101500-5e6f7a8b", Cause: "source-unverified: gone"}, cli.ExitIntervention,
+			"rolled back snapshot 20261106T101500-5e6f7a8b"},
+		{sync.SnapshotResult{Plan: newSnapshotPlan()}, nil, 0, "not modified"},
+	} {
+		_, stderr, err := runSnapshot(t, &fakeSnapshotter{result: tt.result, err: tt.err}, append(append([]string{}, snapshotArgs...), "--apply")...)
+		var exit *cli.ExitError
+		if (tt.code == 0) != (err == nil) || (tt.code != 0 && (!errors.As(err, &exit) || exit.Code != tt.code)) ||
+			!strings.HasSuffix(stderr, "savewarden: vault: "+tt.state+"\n") {
+			t.Errorf("%s: exit %v, stderr %q", tt.state, err, stderr)
+		}
+	}
+}
+
 func TestSnapshotFlags(t *testing.T) {
-	for _, args := range [][]string{nil, {"--manifest", "m.yaml"}, append(append([]string{}, snapshotArgs...), "--apply")} {
+	for _, args := range [][]string{nil, {"--manifest", "m.yaml"}, {"--vault", `F:\Vault`, "--apply"}} {
 		snapshotter := &fakeSnapshotter{plan: newSnapshotPlan()}
 		if _, _, err := runSnapshot(t, snapshotter, args...); err == nil || snapshotter.request != (sync.SnapshotRequest{}) {
 			t.Errorf("%v: err %v, request %+v", args, err, snapshotter.request)

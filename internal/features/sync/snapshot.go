@@ -115,6 +115,11 @@ func (p SnapshotPlan) Outcome() string {
 // anything (ADR 0006 §10, ADR 0008). It reads the vault and the identities
 // of the installation and the sources, never their content.
 func (s *Service) SnapshotPlan(ctx context.Context, request SnapshotRequest) (SnapshotPlan, error) {
+	return s.snapshotPlan(ctx, request, true)
+}
+
+// snapshotPlan is SnapshotPlan; a run that holds the lock does not probe it.
+func (s *Service) snapshotPlan(ctx context.Context, request SnapshotRequest, probe bool) (SnapshotPlan, error) {
 	manifest, err := s.manifests.Read(request.ManifestPath)
 	if err != nil {
 		return SnapshotPlan{}, err
@@ -159,7 +164,7 @@ func (s *Service) SnapshotPlan(ctx context.Context, request SnapshotRequest) (Sn
 	if err := s.checkSources(manifest, installVolume, vaultVolume, scope); err != nil {
 		return SnapshotPlan{}, err
 	}
-	if err := v.read(scope, request.VaultPath, vaultSegments, manifest.Game.ID); err != nil {
+	if err := v.readProbing(scope, request.VaultPath, vaultSegments, manifest.Game.ID, probe); err != nil {
 		return SnapshotPlan{}, err
 	}
 	if v.state == VaultEmpty {
