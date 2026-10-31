@@ -10,11 +10,16 @@ import (
 
 // R5: every stable code and intervention cause that the sync feature
 // declares is in the tables of ADR 0007, current-exists included, kept with
-// its B2b meaning although this build no longer emits it.
+// its B2b meaning although this build no longer emits it, or, for the
+// snapshots the feature also owns, of ADR 0008.
 func TestStableCodesAreDocumented(t *testing.T) {
-	adr, err := os.ReadFile(filepath.Join("..", "..", "docs", "adr", "0007-sync-contract-receipt-v1.md"))
-	if err != nil {
-		t.Fatal(err)
+	var adr []byte
+	for _, name := range []string{"0007-sync-contract-receipt-v1.md", "0008-snapshot-contract-receipt-v1.md"} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "docs", "adr", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		adr = append(adr, data...)
 	}
 	sources, err := filepath.Glob(filepath.Join("..", "features", "sync", "*.go"))
 	if err != nil {
@@ -34,14 +39,14 @@ func TestStableCodesAreDocumented(t *testing.T) {
 			seen[m[1]] = true
 		}
 	}
-	for _, code := range []string{"current-exists", "current-modified", "insufficient-space", "pending-operation"} {
+	for _, code := range []string{"current-exists", "current-modified", "insufficient-space", "pending-operation", "no-current", "snapshot-missing"} {
 		if !seen[code] {
 			t.Fatalf("premise: %s is not found among the declared codes %v", code, seen)
 		}
 	}
 	for code := range seen {
 		if !strings.Contains(string(adr), "`"+code+"`") {
-			t.Errorf("code %s is declared by the sync feature but not documented in ADR 0007", code)
+			t.Errorf("code %s is declared by the sync feature but documented in neither ADR 0007 nor ADR 0008", code)
 		}
 	}
 }

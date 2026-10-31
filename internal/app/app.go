@@ -32,7 +32,8 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 		service: sync.New(manifests.Reader{}, inspector, syncScopes{}, volumes{}),
 		writer:  sync.Writer{Vaults: vaults{}, Clock: systemClock{}, Random: rand.Reader, ToolVersion: version},
 	}
-	command := cli.NewRootCommand(version, output, stderr, inspector, syncer)
+	// The sync feature owns snapshots too (ADR 0004, B3 amendment).
+	command := cli.NewRootCommand(version, output, stderr, inspector, syncer, syncer)
 	command.SetArgs(args)
 	err := command.ExecuteContext(ctx)
 	var exit *cli.ExitError
@@ -76,6 +77,10 @@ func (s syncCommands) RecoverPlan(ctx context.Context, request sync.Request) (sy
 
 func (s syncCommands) Recover(ctx context.Context, request sync.Request) (sync.Result, error) {
 	return s.service.Recover(ctx, request, s.writer)
+}
+
+func (s syncCommands) SnapshotPlan(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotPlan, error) {
+	return s.service.SnapshotPlan(ctx, request)
 }
 
 // vaults bridges the create-only vault adapter to the sync port. It

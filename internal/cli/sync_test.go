@@ -56,7 +56,7 @@ func runSync(t *testing.T, planner cli.Syncer, args ...string) (string, error) {
 func runSyncAll(t *testing.T, planner cli.Syncer, stdout io.Writer, args ...string) (string, string, error) {
 	t.Helper()
 	var stderr bytes.Buffer
-	root := cli.NewRootCommand("dev", stdout, &stderr, nil, planner)
+	root := cli.NewRootCommand("dev", stdout, &stderr, nil, planner, nil)
 	root.SetArgs(append([]string{"sync"}, args...))
 	err := root.ExecuteContext(context.Background())
 	out := ""
@@ -211,7 +211,7 @@ func TestSyncFailedWriteAndEscaping(t *testing.T) {
 		t.Fatalf("a file name forged a line:\n%s", full)
 	}
 	stdout := &partialWriter{limit: 40}
-	root := cli.NewRootCommand("dev", stdout, &bytes.Buffer{}, nil, &fakePlanner{plan: plan})
+	root := cli.NewRootCommand("dev", stdout, &bytes.Buffer{}, nil, &fakePlanner{plan: plan}, nil)
 	root.SetArgs([]string{"sync", "--manifest", "m.yaml", "--vault", `D:\Vault`})
 	err := root.ExecuteContext(context.Background())
 	var exit *cli.ExitError

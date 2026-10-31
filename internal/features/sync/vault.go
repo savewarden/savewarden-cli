@@ -352,6 +352,14 @@ func (v *vault) readJournals(scope Scope, name, subject string, found map[string
 // readJournal parses one operation journal and returns the SHA-256 of its
 // last record file, empty if none.
 func readJournal(scope Scope, name, op string) (backup.Journal, string, error) {
+	return readJournalWith(scope, name, op, func(names []string, contents map[string][]byte) (backup.Journal, error) {
+		return backup.ParseJournal(op, names, contents)
+	})
+}
+
+// readJournalWith reads the listing and records of one operation journal
+// and parses them with parse, the reader of the operation's domain.
+func readJournalWith(scope Scope, name, op string, parse func(names []string, contents map[string][]byte) (backup.Journal, error)) (backup.Journal, string, error) {
 	entries, err := list(scope, name)
 	if err != nil {
 		return backup.Journal{}, "", err
@@ -371,7 +379,7 @@ func readJournal(scope Scope, name, op string) (backup.Journal, string, error) {
 			contents[entry.Name] = data
 		}
 	}
-	journal, err := backup.ParseJournal(op, names, contents)
+	journal, err := parse(names, contents)
 	if err != nil || len(journal.Records) == 0 {
 		return journal, "", err
 	}
