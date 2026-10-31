@@ -234,6 +234,15 @@ type Journal struct {
 	// Taken holds the attempt numbers k already used by temporaries of the
 	// next record: the writer takes the smallest k not in it.
 	Taken map[int]bool
+	// Snapshot marks the journal of a snapshot operation, read by
+	// ParseSnapshotJournal (ADR 0006 §10). Its planned record fixes
+	// SnapshotPlan and PlanSHA256, the generation it copies and the SHA-256
+	// of that generation's receipt, and the identity of current under lock;
+	// Plan, Previous and Old stay zero.
+	Snapshot       bool
+	SnapshotPlan   *SnapshotPlan
+	SnapshotSource SnapshotSource
+	SourceIdentity FileID
 }
 
 // Last returns the step of the last committed record, empty if none.
@@ -259,6 +268,12 @@ var (
 // ParseJournal validates the listing of journal\<op> and the content of its
 // committed records. Every deviation from ADR 0006 §3 is an AmbiguityError.
 func ParseJournal(op string, names []string, contents map[string][]byte) (Journal, error) {
+	return parseJournal(op, names, contents, false, "")
+}
+
+// parseJournal reads the journal of one operation of the current domain, or
+// of the snapshot domain of game gameID.
+func parseJournal(op string, names []string, contents map[string][]byte, snapshot bool, gameID string) (Journal, error) {
 	ambiguous := func(format string, args ...any) error {
 		return &AmbiguityError{Op: op, Reason: fmt.Sprintf(format, args...)}
 	}
@@ -292,7 +307,7 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		}
 		numbers[name[:3]] = true
 	}
-	j := Journal{Op: op, Prepared: map[Step]int{}, Taken: map[int]bool{}}
+	j := Journal{Op: op, Prepared: map[Step]int{}, Taken: map[int]bool{}, Snapshot: snapshot}
 	var previous []byte
 	for i, name := range finals {
 		m := finalName.FindStringSubmatch(name)
@@ -320,11 +335,21 @@ func ParseJournal(op string, names []string, contents map[string][]byte) (Journa
 		if !allowed(j.steps(), r.Step, j.Rotation()) {
 			return Journal{}, ambiguous("record %s: transition from %q to %q is not allowed", name, j.Last(), r.Step)
 		}
-		values, err := r.Values()
+		var values StepValues
+		if snapshot {
+			values, err = r.SnapshotValues()
+		} else {
+			values, err = r.Values()
+		}
 		if err != nil {
 			return Journal{}, ambiguous("record %s: %v", name, err)
 		}
-		if err := j.coherent(r, values); err != nil {
+		if snapshot {
+			err = j.coherentSnapshot(gameID, r, values)
+		} else {
+			err = j.coherent(r, values)
+		}
+		if err != nil {
 			return Journal{}, ambiguous("record %s: %v", name, err)
 		}
 		j.Records = append(j.Records, r)
