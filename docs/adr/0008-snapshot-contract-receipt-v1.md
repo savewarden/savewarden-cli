@@ -55,7 +55,10 @@ point d'analyse ; distinction ; domaine des snapshots lisible. La présence,
 la reconnaissance et l'intégrité de `current`, toute opération ou anomalie du
 domaine de `current`, et les autres entrées du coffre sont ignorées : une
 opération B2 en attente ne bloque pas la récupération d'un snapshot, ni
-l'inverse. Sans `snapshots\journal`, il n'y a rien à récupérer : code 0.
+l'inverse. Cette indépendance porte sur l'**état vivant** de `current` et de
+ses opérations : la seule lecture du domaine de `current` est celle du
+receipt source historique, à la porte de provenance. Sans
+`snapshots\journal`, il n'y a rien à récupérer : code 0.
 
 **Verrou.** Avec `--apply`, `snapshot` prend `sync.lock` par la même
 primitive que `sync`, qui le crée vide s'il manque ; il ne l'écrit ni ne le
@@ -73,8 +76,10 @@ identiques octet pour octet. Ordre des éléments, détaillé dans
 2. **état des snapshots** : `snapshots: N published, K degraded,
    M incomplete`, puis une ligne par snapshot publié, du plus ancien au plus
    récent : identifiant, opération source, fichiers et octets, ou son
-   diagnostic de dégradation ; puis le nombre et la taille des
-   `.incomplete` conservés ;
+   diagnostic de dégradation. Le nombre des `.incomplete` conservés est
+   compté sur les seuls noms des entrées de `snapshots\`, sans ouvrir ni
+   parcourir ces dossiers ; leur taille n'est pas mesurée, et la ligne
+   l'écrit, `size not measured`, dès qu'il en existe ;
 3. décision : `snapshot: new, from <op>` ou `snapshot: up to date
    (<snap-id>)`, avec fichiers, octets et espace requis ;
 4. les interventions requises, s'il y en a ;
@@ -201,7 +206,21 @@ exact sera fixé par les tests d'`internal/entities/backup` :
 | `plan_sha256` | Empreinte du plan journalisé |
 | `sources` | Celles du plan, au format du receipt v1 |
 
-**Relecture stricte**, toute violation rendant le snapshot dégradé :
+**Relecture stricte.** Sa portée dépend du journal de l'opération (ADR 0006
+§10) :
+
+- journal valide et terminal en `published` : un receipt absent, ou une
+  violation des règles ci-dessous, rend le snapshot **dégradé**,
+  `snapshot-modified`, sans blocage ;
+- receipt de snapshot sans journal qui l'explique, ou incompatible avec
+  l'état de son opération, c'est-à-dire présent alors que l'opération n'a pas
+  validé `publish-intent` ou qu'elle est close autrement qu'en `published` :
+  **ambiguïté**, code 3, pour `snapshot` seulement ;
+- opération en `publish-intent` avec receipt validé, A5 ou A6 : la
+  récupération le relit selon ces règles, et toute violation donne le
+  code 3, rien écrit ni déplacé.
+
+Règles :
 
 - règles du receipt v1 pour les champs inconnus, manquants ou dupliqués, les
   dates, la reconstruction et les `sources` ;

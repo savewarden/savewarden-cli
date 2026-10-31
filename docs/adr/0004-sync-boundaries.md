@@ -129,4 +129,3 @@ feature à cadrer.
 Alternatives écartées pour B3 : une feature `snapshot` dupliquant le moteur
 d'écriture et ses faux de test ; l'extraction du moteur dans un package de
 protocole, frontière durable nouvelle, réexaminée au cadrage de B4.
-

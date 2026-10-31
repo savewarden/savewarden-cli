@@ -48,7 +48,7 @@ v0.2 et les projets d'ADR attendent la validation du propriétaire.
 | S2 | Le code vit **dans `features/sync`**, seconde opération du même moteur ; commande CLI `snapshot` distincte ; extraction réexaminée en B4 | — | §3.1 |
 | S3 | **Tout sous `games\<game-id>\snapshots\`** ; `sync` accepte cette entrée et ne lit rien dedans | Isolation indispensable des receipts et journaux | §4.2, §4.9 |
 | S4 | Identifiant = **celui de l'opération de snapshot**, distinct de tout identifiant des deux domaines | — | §4.2 |
-| S5 | Staging **`snapshots\<snap-id>.incomplete\`**, jamais supprimé ; nombre et taille affichés par le plan | — | §4.2, §4.7 |
+| S5 | Staging **`snapshots\<snap-id>.incomplete\`**, jamais supprimé ; nombre affiché par le plan, sans parcourir ces dossiers ; taille non mesurée | — | §4.2, §4.7 |
 | S6 | Un snapshot est **approuvé à sa publication** | `snapshot --apply` est l'acte explicite de création et d'approbation | §4.7 |
 | S7 | **Un snapshot conforme par génération source** | Plusieurs générations, donc plusieurs snapshots, restent possibles | §4.7 |
 | S8 | **Nouveau receipt strict `savewarden.snapshot` v1** | — | §4.6 |
@@ -461,8 +461,12 @@ Pas de `previous` ni de `changes` : un snapshot ne remplace rien.
   se termine par `published`. Avant, il peut encore être renommé en arrière
   par un rollback ; après, plus jamais.
 - Les snapshots s'accumulent, du plus ancien au plus récent par identifiant ;
-  aucun n'est supprimé. Le plan affiche aussi le nombre et la taille des
-  `.incomplete` conservés.
+  aucun n'est supprimé. Le plan affiche aussi le **nombre** des `.incomplete`
+  conservés, compté sur les seuls noms des entrées de `snapshots\`, sans
+  ouvrir ni parcourir ces dossiers. Leur **taille n'est pas mesurée** : dès
+  qu'il en existe, la ligne d'état des snapshots l'écrit, `size not
+  measured`, plutôt que d'annoncer une mesure. Aucune exception au
+  non-parcours de `I` n'est faite pour cet indicateur.
 - `--apply` est **idempotent par génération** : si un snapshot approuvé a pour
   `source.operation` l'opération de `current`, pour `source.receipt_sha256`
   l'empreinte de son receipt, et s'il est présent et conforme, rien n'est
@@ -496,7 +500,8 @@ ne rend pas le journal ambigu.
   l'adopte.
 - La dégradation ne bloque ni `snapshot` ni `sync`, mais elle n'est **jamais
   silencieuse** : le plan affiche `snapshots: N published, K degraded,
-  M incomplete` et nomme chaque snapshot dégradé ; tant que `K` > 0, toute
+  M incomplete`, suivie de `size not measured` quand `M` > 0 (§4.7), et
+  nomme chaque snapshot dégradé ; tant que `K` > 0, toute
   exécution de `snapshot` écrit sur stderr `savewarden: warning: K degraded
   snapshot(s)`, avant la ligne d'état. Aucune sortie ne qualifie l'ensemble
   des snapshots de sain ou de vérifié.
@@ -504,7 +509,8 @@ ne rend pas le journal ambigu.
   documentation renvoie au plan de `snapshot`.
 - Hors de S13, toute ambiguïté du domaine des snapshots reste fail-closed :
   opération non terminale, journal illisible ou incohérent, entrée
-  inexpliquée, receipt de snapshot sans journal. Code 3 pour `snapshot`, sans
+  inexpliquée, receipt de snapshot sans journal qui l'explique ou
+  incompatible avec l'état de son opération. Code 3 pour `snapshot`, sans
   effet sur `sync` ; elle bloque la création de snapshots jusqu'à
   l'intervention du propriétaire du coffre, et un nouveau coffre reste
   possible, comme en B2.
@@ -663,8 +669,11 @@ d'un snapshot en compte 8 (`planned` à `publish-intent`, puis
   snapshot non terminale ne bloque que `snapshot --apply`. Une opération non
   terminale dans chaque domaine est un état admis.
 - **Récupération :** chaque `--recover` ne récupère que son domaine et nomme
-  l'autre commande pour l'autre ; aucune ne dépend de l'état de l'autre
-  domaine (§4.4).
+  l'autre commande pour l'autre. La récupération d'un snapshot est
+  indépendante de l'**état vivant** de `current` et des opérations de son
+  domaine ; sa seule lecture de ce domaine est le receipt source historique,
+  à la porte de provenance (§4.4, §4.5). Celle de `current` ne lit rien sous
+  `snapshots\`.
 - **Exception au §3 d'ADR 0006 pour S13 :** une opération de snapshot dont
   le journal, valide, se termine par `published` n'est jamais une ambiguïté,
   quoi qu'on observe de `P`, de `I` ou de son receipt de snapshot ; elle est
@@ -955,7 +964,7 @@ qui reste intact :
 
 | Sujet | Comportement en B3 |
 | --- | --- |
-| Rétention, suppression ou nettoyage de snapshots et de `.incomplete` | Aucune suppression ; accumulation documentée ; le plan en affiche le nombre et la taille |
+| Rétention, suppression ou nettoyage de snapshots et de `.incomplete` | Aucune suppression ; accumulation documentée ; le plan affiche le nombre des `.incomplete`, pas leur taille, qu'il ne mesure pas |
 | Snapshot d'une génération `retained\` | Non proposé |
 | Libellés, notes | Absents ; l'identifiant et la provenance seuls nomment un snapshot |
 | Vérification du contenu de tous les snapshots publiés | `doctor`, B5 (§4.8) |
@@ -986,7 +995,7 @@ qui reste intact :
 | Crash entre bascule et receipt | Snapshot présent, non approuvé | Points d'arrêt, revérification intégrale, rollback ; aucun retour en arrière après receipt validé |
 | Snapshot approuvé supprimé ou modifié à la main | Blocage définitif si fail-closed ; ou dégradation ignorée | Signalé sans blocage mais toujours visible (S13, Q3) ; jamais réparé |
 | Utilisateur qui croit à une immutabilité matérielle | Fausse sécurité | Limite non WORM écrite dans le plan, ADR et documentation |
-| Accumulation de snapshots et de `.incomplete` | Disque plein | Préflight d'espace avant toute écriture, idempotence par génération, nombre et taille affichés, documentation |
+| Accumulation de snapshots et de `.incomplete` | Disque plein | Préflight d'espace avant toute écriture, idempotence par génération, nombre des `.incomplete` affiché, taille déclarée non mesurée, documentation |
 | Antivirus ou indexeur tenant `I` | Bascule refusée | Retries 32 et 33, erreur 5 immédiate, rollback |
 | Chemins plus longs que sous `current` | Outils tiers en échec | `long-path` mesuré sur `I` ; `\\?\` dans Savewarden |
 | Confusion entre `retained\` et snapshots | Mauvaise attente de l'utilisateur | Documentation : seuls les snapshots sont approuvés et nommés |
@@ -1010,3 +1019,4 @@ auto-approbation**.
 | --- | --- | --- | --- |
 | 0.1 | 30 octobre 2026 | `5089378`, local, branche `docs/b3-framing` | Brouillon de cadrage : décisions S1 à S14 proposées, protocole de snapshot proposé comme amendement d'ADR 0006, matrice de tests, critères ; revue indépendante en lecture seule intégrée avant remise |
 | 0.2 | 30 octobre 2026 | local, branche `docs/b3-framing` | Revue CTO : S1 à S14 retenues dans leur principe ; Q1 récupération indépendante de `current` et du domaine B2, préconditions séparées, test croisé ; Q2 porte de provenance et `source-unverified` ; Q3 dégradation visible, portée du contrôle écrite ; Q4 immutabilité en écriture, garantie non WORM ; message du verrou de `sync` inchangé ; projets d'ADR 0004, 0006, 0007 et 0008. Revue croisée indépendante du contrat de récupération intégrée : rollback sur preuve contradictoire, porte non rejouée après un receipt de snapshot validé, verrou pris comme `sync`, comparaison du receipt en observation, `snapshot-rename-lost`, grammaire des sous-dossiers, règle unique du receipt orphelin, limite de la porte. Aucun GO de développement |
+| 0.2, revue indépendante | 31 octobre 2026 | local, branche `docs/b3-framing` | Revue indépendante de la v0.2 et des projets d'ADR : aucun P0, S1 à S14 conservées. P1-1 : nombre des `.incomplete` compté sans les parcourir, taille déclarée non mesurée ; P1-2 : dégradation d'un receipt de snapshot limitée à une opération au journal valide et terminal en `published`, receipt orphelin ou incompatible en code 3 (ADR 0008) ; indépendance de la récupération qualifiée par rapport à l'état vivant de `current`, porte de provenance exceptée ; ligne vide finale d'ADR 0004 retirée. Aucun GO de développement |
