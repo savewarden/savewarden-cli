@@ -25,6 +25,8 @@ const (
 	stagingDir  = "staging"
 	receiptsDir = "receipts"
 	journalDir  = "journal"
+	// snapshotsDir holds the snapshot domain (ADR 0006 §10).
+	snapshotsDir = "snapshots"
 )
 
 // vault is what the plan read from the vault, without writing anything.
@@ -202,6 +204,9 @@ func (v *vault) readGame(scope Scope, vaultPath, root, gameID string, games bool
 			v.currentLink = true
 		case (entry.Name == retainedDir || entry.Name == stagingDir || entry.Name == receiptsDir || entry.Name == journalDir) &&
 			entry.Kind == backup.KindDirectory:
+		case entry.Name == snapshotsDir && entry.Kind == backup.KindDirectory:
+			// The snapshot domain, accepted as a plain directory and never
+			// read: nothing under it decides for current (ADR 0007, B3).
 		default:
 			v.intervene(CauseUnexpectedEntry, gamesDir+"/"+gameID+"/"+entry.Name, "has no place in the game directory")
 		}
