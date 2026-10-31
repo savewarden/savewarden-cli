@@ -297,7 +297,7 @@ func (s *Service) Recover(ctx context.Context, request Request, w Writer) (Resul
 		return result, errVault(request.VaultPath, "%w", err)
 	}
 	o := &operation{
-		s: s, w: w, ctx: ctx, vault: session, domain: &currentDomain, op: rec.Operation, game: gamesDir + "/" + rec.Game.ID, recovering: true,
+		s: s, w: w, ctx: ctx, vault: session, domain: currentDomain, op: rec.Operation, game: gamesDir + "/" + rec.Game.ID, recovering: true,
 		plan:     Plan{Vault: rec.Vault, Game: rec.Game, vaultVolume: rec.vaultVolume, vaultSegments: rec.vaultSegments},
 		attempts: map[int]map[int]bool{}, receipt: map[int]bool{}, marker: map[int]bool{},
 	}

@@ -273,6 +273,18 @@ func TestSnapshotStepFieldsAreStrict(t *testing.T) {
 			}
 		})
 	}
+	// Values never carry two plans, and plan_sha256 is that of the plan the
+	// contract names.
+	both := snapshotValues(t, backup.StepPlanned, source)
+	both.Plan = testPlan(false)
+	if _, err := backup.NewSnapshotRecord(1, backup.StepPlanned, snapOp, snapAt, "", both); err == nil || !strings.Contains(err.Error(), "two plans") {
+		t.Errorf("snapshot record with two plans: %v", err)
+	}
+	both = valuesFor(t, backup.StepPlanned, false)
+	both.SnapshotPlan = snapshotPlan()
+	if _, err := backup.NewRecord(1, backup.StepPlanned, op, at, "", both); err == nil || !strings.Contains(err.Error(), "two plans") {
+		t.Errorf("record of current with two plans: %v", err)
+	}
 	// The two domains never read each other's records.
 	if _, err := build(backup.StepPlanned).Values(); err == nil {
 		t.Error("a snapshot planned record read as a record of current")
@@ -494,6 +506,10 @@ func TestSnapshotPreparedTemporaries(t *testing.T) {
 		{"rolled-back prepared, yet renamed", publishing, backup.StepRolledBack, sobs(n, a, false), false},
 		{"published prepared, yet not renamed", publishing, backup.StepPublished, sobs(a, n, false), false},
 		{"staged prepared, staging already identified", snapPre[:2], backup.StepStaged, sobs(a, a, false), false},
+		// A5, A6: beside a committed receipt only published may be prepared.
+		{"published prepared beside a receipt", publishing, backup.StepPublished, sobs(n, a, true), true},
+		{"unpublish prepared beside a receipt", publishing, backup.StepUnpublishIntent, sobs(n, a, true), false},
+		{"rolled-back prepared beside a receipt", publishing, backup.StepRolledBack, sobs(n, a, true), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

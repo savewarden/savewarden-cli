@@ -108,6 +108,9 @@ func newRecord(contracts map[Step]map[string]fieldKind, staging string, seq int,
 	if !ok {
 		return Record{}, fmt.Errorf("unknown step %q", step)
 	}
+	if v.Plan != nil && v.SnapshotPlan != nil {
+		return Record{}, errors.New("planned record: the values carry two plans")
+	}
 	fields := map[string]json.RawMessage{}
 	for name, kind := range contract {
 		if step == StepPlanned && name == plannedCurrent && v.Previous == "" {
@@ -130,13 +133,14 @@ func newRecord(contracts map[Step]map[string]fieldKind, staging string, seq int,
 			fields[name] = plan
 			continue
 		case fieldPlanSHA256:
+			// The digest of the plan the contract names, never of another.
 			var sum [32]byte
 			var err error
 			switch {
-			case v.Plan != nil:
-				_, sum, err = v.Plan.Encode()
-			case v.SnapshotPlan != nil:
+			case contract["plan"] == fieldSnapshotPlan && v.SnapshotPlan != nil:
 				_, sum, err = v.SnapshotPlan.Encode()
+			case contract["plan"] == fieldPlan && v.Plan != nil:
+				_, sum, err = v.Plan.Encode()
 			default:
 				err = errors.New("planned record: plan required")
 			}

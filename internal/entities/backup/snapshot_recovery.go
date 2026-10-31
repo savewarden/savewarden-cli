@@ -62,7 +62,7 @@ func classifySnapshot(j Journal, o SnapshotObservation) (Action, bool) {
 	p, i := o.Published, o.Incomplete
 	is := func(published, incomplete Presence) bool { return p == published && i == incomplete }
 	last := j.Last()
-	if last == StepRollbackFailed {
+	if last == StepRollbackFailed && len(j.Records) >= 2 {
 		// The failed intent's rows apply again.
 		last = j.Records[len(j.Records)-2].Step
 	}
@@ -102,6 +102,11 @@ func classifySnapshot(j Journal, o SnapshotObservation) (Action, bool) {
 func snapshotPreparedFor(step Step, j Journal, o SnapshotObservation) bool {
 	is := func(published, incomplete Presence) bool {
 		return o.Published == published && o.Incomplete == incomplete
+	}
+	if o.Receipt {
+		// A5, A6: the receipt was written after the gate; only published
+		// may follow it, never a rollback.
+		return step == StepPublished && is(New, Absent)
 	}
 	switch step {
 	case StepPlanned, StepStagingIntent:

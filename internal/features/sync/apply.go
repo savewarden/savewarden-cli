@@ -125,7 +125,7 @@ type operation struct {
 	ctx     context.Context
 	plan    Plan
 	vault   Vault
-	domain  *domain
+	domain  domain
 	game    string // games/<id>
 	op      string
 	started time.Time
@@ -217,7 +217,7 @@ func (s *Service) begin(ctx context.Context, plan Plan, w Writer) (*operation, e
 		return nil, errVault(plan.Vault, "%v", err)
 	}
 	return &operation{
-		s: s, w: w, ctx: ctx, plan: plan, vault: session, domain: &currentDomain,
+		s: s, w: w, ctx: ctx, plan: plan, vault: session, domain: currentDomain,
 		game:     gamesDir + "/" + plan.Game.ID,
 		op:       now.Format("20060102T150405") + "-" + hex.EncodeToString(random),
 		started:  now,
