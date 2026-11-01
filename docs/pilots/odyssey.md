@@ -122,13 +122,22 @@ profil ni aucun chemin personnel n'est versionné.
 ### Protocole B3
 
 Exécuté par le propriétaire après la fusion de B3, avec un binaire du commit
-de fusion, dans un **coffre neuf**, distinct de celui des pilotes B2, qui
-reste intact : un binaire antérieur refuserait un coffre muni de
-`snapshots\`. L'agent n'y accède pas.
+de fusion, dans un **coffre neuf** dédié au pilote, distinct de ceux des
+pilotes B2, qui restent intacts : un binaire antérieur refuserait un coffre
+muni de `snapshots\`. L'agent n'y accède pas.
 
-1. `sync --apply` vers le coffre neuf : code `0`, `published <op>` ;
-   facultatif : sauvegarder en jeu, fermer, puis second `sync --apply`, pour
-   un coffre qui a connu une rotation.
+Deux scripts du propriétaire, hors dépôt, conduisent les étapes. Le premier
+fait l'étape 1 et écrit une attestation locale ; le second fait les étapes 2
+à 6 et exige cette attestation : même binaire, même manifeste inchangé, même
+coffre, qui ne contient que la première publication attestée. Ils
+n'acceptent que le coffre dédié, jamais un coffre placé dans un autre. Avant
+eux, le propriétaire vérifie les empreintes des scripts et du binaire,
+désactive le mode d'essai des scripts et confirme que le coffre dédié
+n'existe pas.
+
+1. `sync --apply` vers le coffre neuf : code `0`, `published <op>`. Aucune
+   rotation ensuite : l'attestation fixe la génération que copie le snapshot ;
+   la rotation reste qualifiée par le pilote B2c.
 2. `snapshot`, plan seul : code `0`, `current` reconnu, `plan: new snapshot`,
    14 fichiers attendus, aucune anomalie ; coffre inchangé.
 3. `snapshot --apply` : code `0`, `published snapshot <snap-id>`.
@@ -146,11 +155,41 @@ personnel. Le pilote qualifie le chemin nominal ; crashs, porte de
 provenance, récupération et dégradations restent prouvés par les tests
 synthétiques, les tests Windows réels et la CI.
 
+### Résultat B3 — 1er novembre 2026
+
+Exécuté par le propriétaire sous Windows 11, après la fusion de B3, avec un
+binaire compilé depuis un worktree détaché au commit de fusion `08ec0c2`,
+dans un coffre neuf dédié ; préflight conforme, mode d'essai désactivé :
+
+- première publication : 35 contrôles sur 35 ; `sync --apply`, code `0` ;
+  **14 fichiers**, 9 566 606 octets vérifiés par SHA-256, la génération
+  publiée par le pilote B2c ; plan suivant `up to date` ;
+- snapshot : 72 contrôles sur 72 ; plan de snapshot `new snapshot`, 14
+  fichiers, aucune anomalie, coffre inchangé ; `snapshot --apply`, code `0`,
+  `published snapshot`, 14 fichiers et 9 566 606 octets vérifiés par
+  SHA-256 ;
+- relecture : provenance recoupée avec le receipt de `current` ; `inspect`
+  du snapshot : fichiers, tailles, dates et SHA-256 égaux à son receipt ;
+- idempotence : plan suivant `up to date`, second `snapshot --apply`,
+  code `0`, `not modified`, coffre inchangé ; aucun snapshot dégradé ;
+- domaine de `current` : `sync` `up to date`, coffre hors `snapshots\`
+  inchangé.
+
+Qualification fonctionnelle du parcours nominal validée le 1er novembre 2026,
+sur avis favorable de la revue. Coupures, récupération, porte de provenance
+fermée, dégradations et rollback restent prouvés par les tests synthétiques,
+les tests Windows réels et la CI. Détail dans
+[le rapport B3](../validation/b3.md#pilote-b3). Aucune attestation, aucune
+sortie brute, aucune empreinte individuelle, aucun receipt réel, aucun
+identifiant d'opération, aucun nom de profil ni aucun chemin personnel n'est
+versionné.
+
 B2 copie seulement après plan, choix explicite de destination et
 autorisation ; pas de suppression de la source. L'ancien coffre du pilote,
 non vide et sans marqueur, est refusé par la règle générique du coffre,
 jamais adopté, et son snapshot `20261009T183208-cacd3cae` n'est ni lu ni
-importé. B3 ajoute des snapshots neufs et immuables. B4 restaurera un
+importé. B3 ajoute des snapshots neufs et immuables, qualifiés sur ce pilote
+le 1er novembre 2026. B4 restaurera un
 snapshot dans un dossier **isolé**. B5 contrôlera manifestes/receipts/hash et
 validera le pilote complet avant une RC.
 
