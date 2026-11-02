@@ -78,7 +78,9 @@ cmd/savewarden ──► app ─┬─► cli ─┬─► features/inspect ─�
 est visible et vérifiée. Les types d'inventaire migrent vers
 `entities/backup`, prouvé par une sortie `inspect` identique octet pour
 octet. Une future feature, `snapshot` ou `restore`, réutilisera
-`entities/backup` et le même principe de port.
+`entities/backup` et le même principe de port. *Phrase historique, conservée
+pour la traçabilité : remplacée pour `snapshot` par l'amendement B3, et pour
+`restore` par l'amendement B4, en projet, dès son acceptation.*
 
 ## Amendement B2b
 
@@ -115,7 +117,8 @@ séparée : `features/sync` possède **toutes les publications dans le coffre
 d'un jeu**, `current` et snapshots, et leurs récupérations. La phrase des
 Conséquences qui annonçait une feature `snapshot` réutilisant
 `entities/backup` est remplacée par celle-ci ; `restore` (B4) reste une
-feature à cadrer.
+feature à cadrer. *Cette dernière phrase est historique : remplacée par
+l'amendement B4, en projet, dès son acceptation.*
 
 - Le moteur de publication, non exporté, est paramétré par la disposition et
   les codes de l'opération, dans le même package, sans changement de
@@ -140,7 +143,10 @@ publications selon ADR 0006**, dans le coffre d'un jeu et dans une zone de
 restauration (ADR 0006 §11), et leurs récupérations. Elle remplace la phrase
 des Conséquences qui annonçait une future feature `restore` réutilisant
 `entities/backup`, et celle de l'amendement B3 qui laissait `restore`
-« feature à cadrer ».
+« feature à cadrer ». **Priorité** : un amendement prévaut sur le texte qui le
+précède ; les phrases qu'il remplace restent en place, marquées comme
+historiques, pour la traçabilité, et ne décrivent plus les frontières
+actuelles.
 
 - **Couture interne.** Le moteur de publication distingue, par des types non
   exportés du même package, la **source de lecture** et la **cible

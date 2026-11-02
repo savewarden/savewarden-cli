@@ -1001,7 +1001,13 @@ marqueur de zone sont fixés par ADR 0009.
   aujourd'hui ; des données déplacées sans que ces chemins le reflètent ne
   sont protégées que si un cas décisif les atteint. Une restauration dont un
   chemin de référence est sur une lettre sans volume est refusée tant que
-  cette lettre ne désigne pas de nouveau un volume.
+  cette lettre ne désigne pas de nouveau un volume. Rattacher un volume à
+  cette lettre rend les identités observables, sans prouver qu'il s'agit du
+  volume d'origine : la décision porte alors sur le chemin tel qu'il se
+  résout, pas sur la provenance historique. **B4 ne garantit donc pas la
+  restauration lorsque le disque d'origine est indisponible** ; ce n'est pas
+  une capacité complète de reprise après sinistre, et un lot dédié réexaminera
+  la restauration avec des références hors ligne.
 
 #### Initialisation de la zone
 
@@ -1027,6 +1033,29 @@ fermer la fenêtre où un autre programme remplirait `<dest>` juste avant le
 marqueur ; un ajout dans cette fenêtre est vu par Z6, code 1, rien écrit de
 plus, puis, aux exécutions suivantes, comme une entrée imprévue de la zone,
 code 3.
+
+**Concurrence de la validation du marqueur.** La reprise de Z3 ne prend pas de
+verrou : deux `--recover --apply`, ou une reprise et une création qui écrit
+son propre temporaire, peuvent viser la même `<dest>`. L'exclusivité vient
+des primitives :
+
+- chaque processus prend le plus petit `k` libre par `CREATE_NEW`, qui échoue
+  si l'autre l'a déjà pris ; il prend alors le suivant, dans l'enveloppe E1 ;
+- `MoveFileEx(temporaire, savewarden-restore.json, 0)` ne remplace jamais :
+  **un seul renommage réussit**, et aucun second marqueur ne peut être
+  validé ;
+- le **perdant**, dont le renommage échoue parce que le marqueur existe, ne
+  réessaie pas et n'écrit plus rien : il relit `<dest>` et sort en code 1,
+  `destination-changed`, avec la ligne d'état `metadata only; nothing staged
+  or published`, puisqu'il a écrit son temporaire ; ce temporaire reste en
+  place, essai abandonné accepté à côté du marqueur validé (§3) ;
+- un processus qui ne relit `<dest>` qu'après la validation par l'autre y
+  trouve une zone marquée sans objet d'opération : rien à récupérer, code 0,
+  ou destination acceptée pour une création ;
+- neuf temporaires du marqueur épuisent E1 : code 3, sans écriture.
+
+L'état laissé est toujours l'un de ceux que reconnaît le tableau : temporaires
+seuls, ou zone marquée avec des temporaires abandonnés.
 
 #### Verrous, I8 et invariant des snapshots publiés
 

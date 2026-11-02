@@ -1,6 +1,6 @@
 # Savewarden — Plan B4 : restauration vers un dossier isolé
 
-> **Statut : v0.2 — CADRAGE SOUMIS AU PROPRIÉTAIRE : R1 à R15 et X1 à X4 recommandés par la revue CTO de la v0.1, ratification formelle par le propriétaire attendue ; corrections C1 à C4 de cette revue et revue croisée indépendante intégrées ; questions 7 à 9 ouvertes ; projets d'ADR 0004, 0006 §11 et 0009 rédigés, non acceptés ; aucun GO de développement**
+> **Statut : v0.2 — CADRAGE SOUMIS AU PROPRIÉTAIRE : R1 à R15 et X1 à X4 recommandés par la revue CTO de la v0.1, ratification formelle par le propriétaire attendue ; corrections C1 à C4 de cette revue et revue croisée indépendante intégrées ; revue CTO de la v0.2 favorable, questions 7 à 9 arbitrées, ajustements V1 à V3 intégrés ; projets d'ADR 0004, 0006 §11 et 0009 rédigés, non acceptés ; acceptation formelle par le propriétaire attendue ; aucun GO de développement**
 > Version du plan : `0.2` — 1er novembre 2026 ; remplace le brouillon v0.1 (`1bb33d7`)
 > Lot : **B4**, cible `release/v0.1.0-a1`
 > Cadre : [plan directeur v0.1](Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md) §7 B4,
@@ -106,14 +106,14 @@ validation de ce plan.
 | 5 | **Pas d'idempotence par snapshot (R7)** | Valider R7 : une restauration est une remise, pas un snapshot de plus |
 | 6 | **Option (a) avec couture interne (R10)** | Valider R10 (a), couture en commit isolé soumis à la revue de non-régression avant tout code de `restore` |
 
-Questions nouvelles, ouvertes par la revue croisée de la v0.2 (§0.6), sur
-lesquelles le CTO ne s'est pas encore prononcé :
+Questions ouvertes par la revue croisée de la v0.2 (§0.6), arbitrées par la
+revue CTO de la v0.2 (§0.7) :
 
-| # | Question | Proposition de ce plan |
-| --- | --- | --- |
-| 7 | **Chemin de référence sur une lettre sans volume** : disque du jeu perdu ou débranché, alias `subst` retiré | **Refus**, code 1, « separation cannot be proven » : la lettre a pu désigner un alias ou un volume monté aujourd'hui sous une autre lettre, et aucune règle par les noms ne le démontre. Recours documenté : rattacher un volume à cette lettre, l'ancien disque ou son remplaçant. Conséquence assumée : pas de restauration tant qu'une lettre de référence n'a pas de volume |
-| 8 | **Receipt d'une restauration remise perdu** par une coupure | Ambiguïté, code 3, qui ferme la zone aux nouvelles restaurations ; la copie remise reste en place ; une nouvelle zone reste possible. L'alternative serait une information, comme ADR 0008 pour un snapshot |
-| 9 | **Chemins réellement sauvegardés** : ceux des `sources` du receipt de snapshot | Ajoutés aux chemins de référence, à la création comme à la récupération, sans exiger qu'ils égalent ceux du manifeste |
+| # | Question | Proposition de ce plan | Avis de la revue CTO de la v0.2 |
+| --- | --- | --- | --- |
+| 7 | **Chemin de référence sur une lettre sans volume** : disque du jeu perdu ou débranché, alias `subst` retiré | **Refus**, code 1, « separation cannot be proven » : la lettre a pu désigner un alias ou un volume monté aujourd'hui sous une autre lettre, et aucune règle par les noms ne le démontre. Pas de restauration tant qu'une lettre de référence n'a pas de volume | **Accepté**, avec une limitation fonctionnelle explicite : B4 ne garantit pas la restauration lorsque le disque d'origine est indisponible, et ne se présente pas comme une reprise après sinistre complète. Rattacher un volume de remplacement rend les identités observables sans prouver l'identité historique de l'ancien disque. Réexamen dans un lot dédié |
+| 8 | **Receipt d'une restauration remise perdu** par une coupure | Ambiguïté, code 3, qui ferme la zone aux nouvelles restaurations ; la copie remise reste en place ; une nouvelle zone reste possible | **Accepté** : aucune reconstruction conjecturale ; copie conservée, examinable à la main ; nouvelle zone possible |
+| 9 | **Chemins réellement sauvegardés** : ceux des `sources` du receipt de snapshot | Ajoutés aux chemins de référence, à la création comme à la récupération, sans exiger qu'ils égalent ceux du manifeste | **Accepté, ajout obligatoire** : références historiques des données sauvegardées, complétant le manifeste actuel, qui a pu évoluer |
 
 ### 0.5 Corrections de la revue CTO de la v0.1
 
@@ -143,6 +143,21 @@ destination. Deux P0 et neuf P1, tous intégrés ; P2 intégrés.
 | P1-7 | E1 à E4 désignaient à la fois l'enveloppe et les écarts | Écarts renommés X1 à X4 | Partout |
 | P1-8 | ADR 0009 contredisait ADR 0006 §11 sur une destination absente en récupération | Code 0 écrit dans les deux | ADR 0009 |
 | P1-9 | Une copie remise supprimée entre le plan et Z6 bloquait une nouvelle restauration | Observations des restaurations remises exclues de la comparaison de Z6 | §4.2, ADR 0009 |
+
+### 0.7 Revue CTO de la v0.2
+
+Transmise par le propriétaire le 2 novembre 2026 : empreintes des quatre
+documents conformes ; **avis favorable, aucun nouveau P0 démontré** ; les
+deux P0 de la revue croisée correctement traités ; Q7 à Q9 arbitrées (§0.4) ;
+R1 à R15, X1 à X4 et les frontières proposées conservés ; pas d'extraction du
+moteur dans ce lot. Ce n'est pas l'acceptation formelle des ADR, qui reste au
+propriétaire, ni un GO de développement. Trois ajustements, intégrés :
+
+| # | Constat | Correction intégrée | Où |
+| --- | --- | --- | --- |
+| V1 | Deux reprises `--recover --apply` de Z3, sans verrou, peuvent viser la même zone : issue du perdant non écrite | Concurrence écrite : un seul renommage du marqueur réussit ; le perdant n'écrit plus rien et sort en code 1, `destination-changed`, son temporaire restant un essai abandonné ; E1 borne les essais. Test Windows réel de concurrence, et test déterministe sur le faux | §4.2, §9, ADR 0006 §11, ADR 0009 |
+| V2 | Le statut du §10 d'ADR 0006 disait encore qu'aucun code ne l'implémentait | Correction documentaire dans un commit séparé des changements normatifs, avec sa propre entrée d'amendement ; aucune règle de B3 ne change | ADR 0006 |
+| V3 | Les anciennes phrases d'ADR 0004 présentaient encore `snapshot` et `restore` comme de futures features | Phrases conservées, marquées historiques avec leur renvoi ; priorité de l'amendement écrite | ADR 0004 |
 
 ---
 
@@ -470,9 +485,14 @@ s'applique décide :
   qu'ils se résolvent aujourd'hui. Des données déplacées sans que ces chemins
   le reflètent ne sont protégées que si un cas décisif les atteint ; la
   documentation demande de tenir le manifeste à jour avant de restaurer.
-- **Conséquence de la ligne 2**, question 7 : tant qu'une lettre de référence
-  n'a pas de volume, disque du jeu perdu ou débranché, la restauration est
-  refusée ; le recours est de rattacher un volume à cette lettre.
+- **Conséquence de la ligne 2**, question 7, acceptée : tant qu'une lettre de
+  référence n'a pas de volume, disque du jeu perdu ou débranché, la
+  restauration est refusée. **B4 ne garantit pas la restauration lorsque le
+  disque d'origine est indisponible**, et ne se présente pas comme une reprise
+  après sinistre complète. Rattacher un volume à cette lettre rend les
+  identités observables sans prouver l'identité historique de l'ancien
+  disque : la décision porte alors sur le chemin tel qu'il se résout. Un lot
+  dédié réexaminera la restauration avec des références hors ligne.
 
 **Initialisation de la zone**, sur le modèle d'I1 à I9 d'ADR 0006 §4, faite
 uniquement de créations exclusives :
@@ -500,6 +520,20 @@ remplacé. Un ajout dans cette fenêtre laisse marqueur et verrou à côté de c
 fichier ; Z6 le voit, sort en code 1 et n'écrit rien de plus ; les exécutions
 suivantes y voient une entrée imprévue de la zone, code 3. Z2 à Z4 ne
 concernent qu'une zone nouvelle ; une zone marquée commence en Z5.
+
+**Concurrence de la validation du marqueur (V1).** La reprise de Z3 ne prend
+pas de verrou : deux `--recover --apply`, ou une reprise et une création,
+peuvent viser la même `<dest>`. Chacun prend le plus petit `k` libre par
+`CREATE_NEW`, qui ne peut être pris deux fois ; `MoveFileEx` sans drapeau ne
+remplaçant jamais, **un seul marqueur est validé**. Le perdant ne réessaie
+pas, n'écrit plus rien, relit `<dest>` et sort en code 1,
+`destination-changed`, ligne d'état `metadata only; nothing staged or
+published` ; son temporaire reste, essai abandonné accepté à côté du
+marqueur. Un processus qui ne relit `<dest>` qu'après la validation y voit
+une zone marquée sans objet d'opération. Neuf temporaires épuisent E1,
+code 3. L'état laissé est toujours reconnu : temporaires seuls, ou zone
+marquée avec des temporaires abandonnés. Le texte normatif est celui d'ADR
+0006 §11.
 
 ### 4.3 Authentification du snapshot (R1, R2, R15)
 
@@ -1019,6 +1053,7 @@ sauf mention.
 | `TestRestoreToAnotherVolume` | Coffre et zone sur deux volumes du faux : restauration publiée, rien écrit sur le volume du coffre |
 | `TestRestoreAreaInitializationIsResumable` | Crash à chaque étape Z2 à Z9, et pendant la reprise de Z3 elle-même : état reconnu ; temporaires du marqueur seuls : `--recover --apply` les reprend sans verrou, distinctions refaites ; `restore.lock` n'apparaît jamais dans un dossier non marqué ; structure complétée |
 | `TestNothingToRecoverOpensNoSession` | `<dest>` absent, vide, ou zone marquée de structure seule, même sans `restore.lock` : code 0, aucun `Vaults.Open`, rien écrit |
+| `TestMarkerValidationRaceHasOneWinner` (V1) | Faux déterministe : marqueur validé par un autre processus entre le temporaire et le renommage, et `k` pris entre le choix et la création, en reprise comme en création : un seul marqueur ; perdant en code 1, `destination-changed`, sans autre écriture ; temporaire abandonné accepté ensuite ; neuf temporaires : code 3 |
 | `TestRestoreSpaceIsCheckedBeforeAnyWrite`, `TestRestoreLongPathIsReported` | Espace insuffisant : aucune structure ni journal ; chemins longs mesurés sur `I` |
 
 **Restauration**
@@ -1058,6 +1093,7 @@ sauf mention.
 | `TestRestoreFromAWriteDeniedVault` | Coffre sous ACL de refus d'écriture : plan, `--apply` et récupération aboutissent |
 | `TestRestoreBesideRealSyncAndSnapshot` | Portée de lecture de la restauration ouverte, épingles et fichier de `S` tenus, pendant qu'une rotation `sync --apply` et un `snapshot --apply` réels aboutissent ; puis l'inverse |
 | `TestRestoreRefusesASubstAlias` (C4) | Arborescence synthétique en `t.TempDir()` ; lettre libre attribuée par `subst` à un dossier source, puis au coffre ; précondition vérifiée : même identité par les deux lettres ; `restore --apply` vers une zone sous l'alias, et l'inverse, zone par le chemin réel et source par l'alias : code 1, aucune écriture, empreinte de l'arborescence inchangée ; même refus pour `--recover --apply` d'une zone glissée sous l'alias ; puis alias retiré alors que le manifeste le nomme encore : refus, code 1, « separation cannot be proven » ; alias retiré en fin de test dans tous les cas. Exécuté par la CI Windows : l'impossibilité d'attribuer l'alias y est un échec, jamais un saut |
+| `TestConcurrentMarkerRecovery` (V1) | `<dest>` ne contenant que des temporaires du marqueur, sur des arborescences synthétiques neuves, à de nombreuses reprises : deux `restore --recover --apply` lancés ensemble, puis une reprise et une création ensemble ; à chaque fois un seul marqueur validé, chaque processus en code 0 ou 1, jamais 3 ni de second marqueur, aucun `restore.lock` dans un dossier non marqué ; la zone obtenue est acceptée par le plan et par `--apply` suivants |
 | `TestHandedOverJunctionIsNeverFollowed` | Après `published`, `P` remplacé par une jonction vers un dossier témoin : `restore-replaced`, empreinte du dossier témoin inchangée, aucune ouverture à travers la jonction |
 | `TestRestorePlanUnderDeniedWrites`, `TestRestoreRecoverPlanUnderDeniedWrites` | Plans sous ACL de refus d'écriture : rien écrit |
 | `TestRestoreRenameRefusedByAnOpenFile` | Fichier ouvert dans `I` : erreur 5, `rolled back`, code 1 |
@@ -1147,7 +1183,9 @@ La reprise manuelle des fichiers dans le jeu reste hors du pilote.
     réel par la CI.
 11. Un objet de tout type portant le nom d'une restauration remise n'est
     jamais suivi, lu, déplacé ni bloquant ; une zone sans journal n'est
-    déclarée sans objet que si elle ne porte aucun objet d'opération.
+    déclarée sans objet que si elle ne porte aucun objet d'opération ; deux
+    validations concurrentes du marqueur n'en valident qu'un, sur le faux et
+    sur Windows réel, et le perdant n'écrit plus rien.
 12. Revues indépendantes consignées : non-régression, protocole, sécurité.
 13. 7 checks requis verts sur le SHA exact, avec lien du run.
 14. Documentation, guide de récupération de la zone, CHANGELOG et ADR
@@ -1176,7 +1214,7 @@ La reprise manuelle des fichiers dans le jeu reste hors du pilote.
 | Volumes réseau, optiques, RAM, ou d'un autre système que NTFS | Refusés, comme pour le coffre, qui n'accepte que NTFS sur un lecteur local fixe ou amovible |
 | ReFS | Toujours non qualifié |
 | Destination dans un dossier redirigé ou synchronisé par un service de nuage | Refusée si un ancêtre est un lien ou un point d'analyse ; sinon non qualifiée, documentée |
-| Chemin de référence sur une lettre sans volume, disque du jeu perdu ou débranché | Restauration refusée, code 1, tant qu'un volume n'est pas rattaché à cette lettre (question 7) ; une preuve plus fine exigerait une capacité nouvelle de lecture des volumes, hors de B4 |
+| Chemin de référence sur une lettre sans volume, disque du jeu perdu ou débranché | Restauration refusée, code 1, tant qu'un volume n'est pas rattaché à cette lettre (question 7, acceptée) ; un volume de remplacement ne prouve pas l'identité historique de l'ancien disque. **B4 ne garantit pas la restauration lorsque le disque d'origine est indisponible** ; lot dédié pour la restauration avec des références hors ligne |
 | Installation ou source déplacée sans mise à jour du manifeste | Protégée seulement dans un cas décisif de la règle d'observabilité ; documentation : mettre le manifeste à jour avant de restaurer |
 
 ---
@@ -1222,3 +1260,4 @@ recommandation **sans auto-approbation**.
 | --- | --- | --- | --- |
 | 0.1 | 1er novembre 2026 | local, branche `docs/b4-framing` | Brouillon de cadrage sur le GO du propriétaire : décisions R1 à R15 proposées, protocole de restauration proposé comme ADR 0006 §11, réexamen de l'extraction du moteur, points ouverts de B3 et leur effet sur B4, matrice de tests, critères. Revue indépendante en lecture seule intégrée avant remise : aucun P0 ; huit P1, soit état du snapshot côté coffre en code 1 sans sonder `sync.lock` (E4), reprise d'une initialisation interrompue, distinctions refaites par la récupération, recouvrement par identité entre lettres de lecteur, relecture de `<dest>` avant le marqueur, écarts E1 à E4 nommés, coffre retiré pendant la copie, couture source et cible du moteur et lecteurs amovibles acceptés comme pour le coffre ; P2 intégrés. Aucun ADR rédigé, aucun GO de développement |
 | 0.2 | 1er novembre 2026 | local, branche `docs/b4-framing` ; fichier renommé depuis la v0.1 | Revue CTO de la v0.1 : architecture favorable, aucun P0 ; R1 à R15 et X1 à X4 recommandés, ratification par le propriétaire attendue. C1, grammaire de la zone en deux classes et protocole de remise quel que soit le type de l'objet ; C2, zone sans journal sans objet d'opération seulement ; C3, règle d'observabilité des chemins de référence, à la création comme à la récupération ; C4, test Windows réel par `subst` en CI. Projets d'ADR 0004, 0006 §11 et 0009, non acceptés. Revue croisée indépendante des textes, intégrée avant remise (§0.6) : P0-1, refus pour une lettre de référence sans volume ; P0-2, aucune session ni verrou avant le marqueur en récupération ; P1-1 à P1-9, dont les écarts renommés X1 à X4 ; questions 7 à 9 ouvertes. Aucun GO de développement |
+| 0.2, revue CTO | 2 novembre 2026 | local, branche `docs/b4-framing` | Revue CTO de la v0.2 : avis favorable, aucun nouveau P0 ; Q7 acceptée avec la limitation de reprise après sinistre écrite, Q8 et Q9 acceptées ; V1, concurrence de la validation du marqueur et ses tests ; V2, statut du §10 d'ADR 0006 corrigé dans un commit séparé ; V3, phrases historiques d'ADR 0004 marquées et priorité de l'amendement écrite. R1 à R15 et X1 à X4 inchangés. ADR non acceptés ; aucun GO de développement |

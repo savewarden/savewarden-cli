@@ -68,7 +68,10 @@ sans opération non terminale ni ambiguïté ; distinctions d'ADR 0006 §11 avec
 ses chemins de référence, coffre, installation, sources du manifeste et
 chemins sauvegardés du receipt de snapshot, selon sa règle d'observabilité :
 un chemin de référence non observable, ou sur une lettre sans volume, donne
-code 1, « separation from `X` cannot be proven » ;
+code 1, « separation from `X` cannot be proven ». **Limite** : B4 ne garantit
+pas la restauration lorsque le disque d'origine est indisponible ; rattacher
+un volume de remplacement à la lettre rend les identités observables sans
+prouver l'identité historique de l'ancien disque ;
 aucun ancêtre lien, point d'analyse, coffre ou zone ; volume NTFS sur un
 lecteur local fixe ou amovible ; espace : taille du snapshot plus max(64 Mio,
 5 %), disponible pour l'utilisateur, au plan puis sous verrou.
@@ -85,7 +88,10 @@ du coffre et dépendante du manifeste.
 **Verrou.** Avec `--apply`, `restore` prend `restore.lock` de la zone par la
 même primitive que `sync.lock`, qui le crée vide s'il manque ; il ne l'écrit
 ni ne le supprime jamais, et ne le prend que dans une zone marquée : la
-reprise d'une initialisation interrompue valide le marqueur sans verrou. Il
+reprise d'une initialisation interrompue valide le marqueur sans verrou.
+Deux validations concurrentes du marqueur ne peuvent aboutir qu'une fois ; le
+perdant sort en code 1, `destination-changed`, sans rien écrire de plus
+(ADR 0006 §11). Il
 n'ouvre jamais `sync.lock`. Le plan sonde
 `restore.lock` en lecture seule avant de déclarer une opération de la zone en
 attente.
