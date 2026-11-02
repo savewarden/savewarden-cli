@@ -623,9 +623,10 @@ relève de son propriétaire.
 ### 10. Snapshots (B3)
 
 **Statut : accepté** par le propriétaire le 31 octobre 2026, avec le plan B3
-v0.2, rédigé le 30 octobre 2026. Normatif pour tout code de snapshot ; aucun
-code ne l'implémente encore. Il ne change aucune règle des §1 à §9 pour le
-domaine de `current`.
+v0.2, rédigé le 30 octobre 2026. Normatif pour tout code de snapshot ;
+implémenté par B3, fusionné en `08ec0c2` (PR #11) et qualifié par le pilote
+du 1er novembre 2026. Il ne change aucune règle des §1 à §9 pour le domaine
+de `current`.
 
 Un snapshot est la copie vérifiée d'une génération `current` publiée, rangée
 sous `games\<game-id>\snapshots\`, approuvée à sa publication, puis jamais
@@ -1371,6 +1372,9 @@ dans l'installation, une source, un coffre ou une autre zone.
   récupération sans le coffre, distinctions refaites selon une règle
   d'observabilité ; restaurations remises classées sans suivi ni blocage,
   exception au §3 ; écarts X1 à X4 nommés ; invariant des snapshots publiés.
-  Renvois ajoutés aux §1, §2 (I8), §3 et §8 et dans les Conséquences ; en-tête
-  corrigé, le §10 étant implémenté depuis `08ec0c2`. Aucune règle des §1 à
-  §10 ne change pour le coffre.
+  Renvois ajoutés aux §1, §2 (I8), §3 et §8 et dans les Conséquences. Aucune
+  règle des §1 à §10 ne change pour le coffre.
+- **2 novembre 2026, correction documentaire**, séparée des changements
+  normatifs : l'en-tête et le statut du §10 disaient qu'aucun code ne
+  l'implémentait ; B3 l'implémente depuis `08ec0c2` (PR #11), qualifié par le
+  pilote du 1er novembre 2026. Aucune règle ne change.
