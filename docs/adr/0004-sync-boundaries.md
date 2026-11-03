@@ -183,9 +183,9 @@ le lecteur des snapshots et les faux de test ; l'extraction immédiate du
 moteur dans un package de protocole, avec authentification servie par un
 port que `sync.Service` satisferait.
 
-**Erratum proposé, 3 novembre 2026, en attente de ratification par le
-propriétaire.** Relevé par la revue indépendante de non-régression du
-commit 2 de B4 et précisé par la vérification de ses corrections.
+**Erratum, 3 novembre 2026, ratifié par le propriétaire le même jour.**
+Relevé par la revue indépendante de non-régression du commit 2 de B4 et
+précisé par la vérification de ses corrections.
 
 - « Une opération ne porte plus le plan de `sync` » se lit ainsi : le moteur
   ne tire plus aucune racine des champs du plan. La cible d'écriture, le

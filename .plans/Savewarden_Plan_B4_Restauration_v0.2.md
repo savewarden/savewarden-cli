@@ -1003,8 +1003,8 @@ cadrage, comme celles de B2c et de B3.
 | 6 | Tests Windows réels et binaires ; documentation | — |
 | 7 | Rapport `docs/validation/b4.md` | **Revue de sécurité indépendante**, avant le GO de fusion |
 
-**Erratum proposé, 3 novembre 2026, en attente de ratification par le
-propriétaire**, avec celui de l'amendement B4 d'ADR 0004, qui le détaille :
+**Erratum, 3 novembre 2026, ratifié par le propriétaire le même jour**, avec
+celui de l'amendement B4 d'ADR 0004, qui le détaille :
 
 - au §3.1, option (a), « `operation` cessant d'embarquer le `Plan` de
   `sync` », et au commit 2 ci-dessus, « `operation` sans le `Plan` de
@@ -1286,3 +1286,4 @@ recommandation **sans auto-approbation**.
 | 0.2, validation | 3 novembre 2026 | local, branche `docs/b4-framing` | Paquet `342167f` certifié par le CTO ; plan validé par le propriétaire ; R1 à R15, X1 à X4 et Q7 à Q9 ratifiés ; ADR 0004 (amendement B4), 0006 §11 et 0009 passés au statut accepté ; contenu normatif inchangé. GO de développement B4 non donné |
 | 0.2, correction éditoriale | 3 novembre 2026 | local, branche `docs/b4-framing` | Deux P2 de la revue CTO du commit d'acceptation : l'avertissement d'en-tête ne dit plus que le plan ne vaut pas acceptation d'ADR, acceptés par décision distincte ; §3.3 renommé « ADR du lot ». Contenu normatif inchangé |
 | 0.2, erratum proposé | 3 novembre 2026 | local, branche `feat/b4-restore` | Revue de non-régression du commit 2 et vérification de ses corrections : erratum proposé au §3.1, au §8 et à l'amendement B4 d'ADR 0004 sur le plan de `sync` porté par la seule opération de `sync`, la couture répartie sur le commit 2 et ses corrections, et le faux coffre devenu plus strict ; en attente de ratification par le propriétaire. Aucune autre règle ne change |
+| 0.2, erratum ratifié | 3 novembre 2026 | local, branche `feat/b4-restore` | Erratum sur le plan de `sync` ratifié par le propriétaire ; contenu inchangé depuis `bc207fd` |
