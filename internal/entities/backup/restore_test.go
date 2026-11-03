@@ -438,6 +438,16 @@ func TestRestoreStepFieldsAreStrict(t *testing.T) {
 	if _, err := backup.NewRestoreRecord(1, backup.StepPlanned, restOp, restAt, "", both); err == nil || !strings.Contains(err.Error(), "two plans") {
 		t.Errorf("restore record with two plans: %v", err)
 	}
+	current := valuesFor(t, backup.StepPlanned, false)
+	current.RestorePlan = restorePlan(t)
+	if _, err := backup.NewRecord(1, backup.StepPlanned, op, at, "", current); err == nil || !strings.Contains(err.Error(), "two plans") {
+		t.Errorf("record of current with a restore plan: %v", err)
+	}
+	snapshot := snapshotValues(t, backup.StepPlanned, sha256.Sum256(sourceReceipt(t)))
+	snapshot.RestorePlan = restorePlan(t)
+	if _, err := backup.NewSnapshotRecord(1, backup.StepPlanned, snapOp, snapAt, "", snapshot); err == nil || !strings.Contains(err.Error(), "two plans") {
+		t.Errorf("snapshot record with a restore plan: %v", err)
+	}
 	// The three modes never read each other's records.
 	planned := build(backup.StepPlanned)
 	if _, err := planned.Values(); err == nil {

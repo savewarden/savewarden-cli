@@ -90,11 +90,10 @@ func (s *Service) SnapshotApply(ctx context.Context, request SnapshotRequest, w 
 	case plan.UpToDate != "":
 		return result, nil
 	}
-	o, err := s.begin(ctx, Plan{Vault: plan.Vault, Game: plan.Game, vaultVolume: plan.vaultVolume, vaultSegments: plan.vaultSegments}, w)
+	o, err := s.openVault(ctx, plan.Vault, plan.Game.ID, snapshotDomain, w)
 	if err != nil {
 		return result, err
 	}
-	o.domain = snapshotDomain
 	err = o.unfinished(o.snapshot(request, plan))
 	if closeErr := o.vault.Close(); err == nil && closeErr != nil {
 		err = closeErr
@@ -137,18 +136,18 @@ func (o *operation) snapshot(request SnapshotRequest, plan SnapshotPlan) error {
 // structure, the operation directory and the planned record (ADR 0006
 // §10, creation step 1).
 func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPlan) error {
-	for _, dir := range []string{gamesDir, o.target.dir} {
+	for _, dir := range o.target.chain() {
 		if err := o.vault.Hold(dir); err != nil {
-			return errVault(o.plan.Vault, "%w", err)
+			return o.target.errorf("%w", err)
 		}
 	}
 	// The lock is taken as sync takes it: created empty if it is missing.
 	if err := o.vault.Lock(o.at(o.target.lock)); err != nil {
 		var busy interface{ Busy() bool }
 		if errors.As(err, &busy) && busy.Busy() {
-			return errVault(o.plan.Vault, "%s", o.domain.busy)
+			return o.target.errorf("%s", o.domain.busy)
 		}
-		return errVault(o.plan.Vault, "lock: %w", err)
+		return o.target.errorf("lock: %w", err)
 	}
 	if !before.observed.lock {
 		o.wrote()
@@ -160,7 +159,7 @@ func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPl
 		return err
 	}
 	if len(again.Interventions) > 0 || again.UpToDate != "" || !sameSnapshotPlan(before, again) {
-		return errVault(o.plan.Vault, "vault-changed: the vault changed since the plan; run snapshot again")
+		return o.target.errorf("vault-changed: the vault changed since the plan; run snapshot again")
 	}
 	for _, finding := range again.Findings {
 		if finding.Severity == backup.Blocking {
@@ -170,21 +169,21 @@ func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPl
 	if again.observed.journals[o.op].Op != "" || again.observed.receiptSum[o.op] != ([32]byte{}) ||
 		again.domain.journals[o.op].Op != "" || again.domain.receipts[o.op] != nil ||
 		again.domain.present[o.op] || again.domain.present[o.op+".incomplete"] {
-		return errVault(o.plan.Vault, "operation id %s is already used in this vault; run snapshot again", o.op)
+		return o.target.errorf("operation id %s is already used in this vault; run snapshot again", o.op)
 	}
 	// The structure, made of exclusive creations, after the space check.
 	for _, dir := range []string{snapshotsDir, snapshotsDir + "/" + receiptsDir, snapshotsDir + "/" + journalDir} {
-		if err := o.ensureDir(o.target.dir + "/" + dir); err != nil {
-			return errVault(o.plan.Vault, "%w", err)
+		if err := o.ensureDir(o.at(dir)); err != nil {
+			return o.target.errorf("%w", err)
 		}
 	}
 	// Only the ancestors of the journal stay pinned across the switch
 	// (ADR 0006 §10, creation step 5); receipts is held again to be written.
-	if err := o.vault.Release(o.target.dir + "/" + snapshotsDir + "/" + receiptsDir); err != nil {
-		return errVault(o.plan.Vault, "%w", err)
+	if err := o.vault.Release(o.at(snapshotsDir + "/" + receiptsDir)); err != nil {
+		return o.target.errorf("%w", err)
 	}
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
-		return errVault(o.plan.Vault, "operation directory: %w", err)
+		return o.target.errorf("operation directory: %w", err)
 	}
 	// Metadata only until a copy exists to be kept (ADR 0008).
 	o.effect, o.open = EffectMetadata, true
@@ -234,12 +233,12 @@ func (o *operation) copyCurrent() error {
 		return fmt.Errorf("incomplete copy: %w", err)
 	}
 	o.effect = EffectStaged
-	scope, err := o.s.files.OpenScope(o.plan.vaultVolume)
+	scope, err := o.s.files.OpenScope(o.reads.volume)
 	if err != nil {
-		return fmt.Errorf("open volume %s: %w", o.plan.vaultVolume, err)
+		return fmt.Errorf("open volume %s: %w", o.reads.volume, err)
 	}
 	defer func() { _ = scope.Close() }()
-	current := strings.Join(append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, currentDir), "/")
+	current := o.reads.scopeName(currentDir)
 	copyErr := o.copyContent(scope, current)
 	// A swapped current is code 3, never taken for a change of content.
 	if id, err := scope.Identity(current); err != nil || id != o.sourceIdentity {
@@ -293,12 +292,11 @@ func (o *operation) copyContent(scope Scope, current string) error {
 // a swapped current is code 3 with nothing recorded, a change of content
 // current-modified, code 2 (ADR 0006 §10, creation step 2).
 func (o *operation) currentUnchanged() error {
-	segments := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, currentDir)
-	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
+	dir, err := o.s.inventories.Directory(o.ctx, o.reads.volume, o.reads.game(currentDir))
 	if err != nil {
 		return err
 	}
-	if id, err := o.vault.Identity(o.target.dir + "/" + currentDir); err != nil || id != o.sourceIdentity {
+	if id, err := o.vault.Identity(o.at(currentDir)); err != nil || id != o.sourceIdentity {
 		return o.intervene(fmt.Sprintf("current was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
 	}
 	if differences := compareWithReceipt(dir, backup.Receipt{Sources: o.content}); len(differences) > 0 {
@@ -353,7 +351,7 @@ func (o *operation) provenanceBeforePublish() error {
 // published record. From publish-intent on, nothing is recorded as
 // failed: an interrupted switch is left to recovery.
 func (o *operation) publishSnapshot() error {
-	published := o.target.dir + "/" + o.domain.published(o.op)
+	published := o.at(o.domain.published(o.op))
 	if err := o.record(backup.StepPublishIntent, backup.StepValues{Staging: o.staging}); err != nil {
 		return err
 	}
@@ -415,12 +413,12 @@ func (o *operation) snapshotProvenance() error {
 // §10). contradictory tells contradictory evidence from evidence that
 // cannot be read now.
 func (o *operation) checkProvenance() (contradictory bool, err error) {
-	scope, err := o.s.files.OpenScope(o.plan.vaultVolume)
+	scope, err := o.s.files.OpenScope(o.reads.volume)
 	if err != nil {
-		return false, fmt.Errorf("open volume %s: %w", o.plan.vaultVolume, err)
+		return false, fmt.Errorf("open volume %s: %w", o.reads.volume, err)
 	}
 	defer func() { _ = scope.Close() }()
-	receipts := strings.Join(append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, receiptsDir), "/")
+	receipts := o.reads.scopeName(receiptsDir)
 	name := receipts + "/" + o.source.Operation + ".json"
 	for _, path := range []string{receipts, name} {
 		info, err := scope.Lstat(path)
@@ -451,7 +449,7 @@ func (o *operation) checkProvenance() (contradictory bool, err error) {
 		return false, err
 	}
 	j := backup.Journal{Op: o.op, Snapshot: true, SnapshotPlan: o.snapshotPlan, SnapshotSource: o.source}
-	if err := backup.CheckSourceReceipt(data, o.plan.Game.ID, j); err != nil {
+	if err := backup.CheckSourceReceipt(data, o.reads.gameID, j); err != nil {
 		return true, err
 	}
 	return false, nil
@@ -469,7 +467,7 @@ func (o *operation) writeSnapshotReceipt(publishedAt, recoveredAt *time.Time, re
 	if err != nil {
 		return [32]byte{}, err
 	}
-	receipts := o.target.dir + "/" + snapshotsDir + "/" + receiptsDir
+	receipts := o.at(snapshotsDir + "/" + receiptsDir)
 	if err := o.vault.Hold(receipts); err != nil {
 		return [32]byte{}, err
 	}

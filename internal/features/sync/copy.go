@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ func (o *operation) stage() error {
 	if err := o.record(backup.StepStagingIntent, backup.StepValues{}); err != nil {
 		return err
 	}
-	if err := o.ensureDir(o.target.dir + "/" + o.domain.stagings); err != nil {
+	if err := o.ensureDir(o.at(o.domain.stagings)); err != nil {
 		return err
 	}
 	if err := o.vault.CreateDir(o.stagingDir()); err != nil {
@@ -227,12 +228,21 @@ func (o *operation) verify() error {
 	return o.record(backup.StepVerified, backup.StepValues{Digest: digest})
 }
 
-// readBack inventories name, a directory the operation wrote, below the
-// root of its target: never below the root a plan read from (ADR 0004,
-// amendment B4).
+// readBack inventories name, a directory the operation wrote or moved,
+// named for its session, below the root of its target: never below the
+// root a plan read from (ADR 0004, amendment B4).
 func (o *operation) readBack(name string) (backup.Directory, error) {
-	segments := append(append([]string{}, o.target.segments...), strings.Split(name, "/")...)
-	return o.s.inventories.Directory(o.ctx, o.target.volume, segments)
+	return o.readBackIn(o.ctx, name)
+}
+
+// readBackIn is readBack under ctx, which a check between two moves does
+// not let a cancellation interrupt.
+func (o *operation) readBackIn(ctx context.Context, name string) (backup.Directory, error) {
+	segments := append([]string{}, o.target.segments...)
+	if name != "." {
+		segments = append(segments, strings.Split(name, "/")...)
+	}
+	return o.s.inventories.Directory(ctx, o.target.volume, segments)
 }
 
 func orDash(s string) string {

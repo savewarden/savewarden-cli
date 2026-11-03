@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/savewarden/savewarden-cli/internal/entities/backup"
+	"github.com/savewarden/savewarden-cli/internal/entities/game"
 	"github.com/savewarden/savewarden-cli/internal/features/sync"
 )
 
@@ -110,9 +111,30 @@ func parentName(name string) string {
 	return "."
 }
 
+// checkName applies the name rules of platform/vault: "." for the root, or
+// an io/fs name without backslash whose every segment Windows keeps as
+// written. The fake refuses every name the real session refuses.
+func checkName(name string) error {
+	if name == "." {
+		return nil
+	}
+	if !fs.ValidPath(name) || strings.Contains(name, `\`) {
+		return &fs.PathError{Op: "vault", Path: name, Err: fs.ErrInvalid}
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if err := game.CheckWindowsName(segment); err != nil {
+			return &fs.PathError{Op: "vault", Path: name, Err: err}
+		}
+	}
+	return nil
+}
+
 func (s *fakeVault) requireParent(name string) error {
 	if s.v.dead {
 		return errCrash
+	}
+	if err := checkName(name); err != nil {
+		return err
 	}
 	if name == "." || s.held[parentName(name)] {
 		return nil
@@ -151,9 +173,18 @@ func (s *fakeVault) Hold(name string) error {
 	return nil
 }
 
+// Release refuses, unlike the real session, an invalid name and the root:
+// no operation ever releases them, and the real Release would silently
+// release nothing, or every pin.
 func (s *fakeVault) Release(dir string) error {
+	if err := checkName(dir); err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	if dir == "." {
+		return errors.New("release: the root is never released")
+	}
 	for name := range s.held {
-		if dir == "." || name == dir || strings.HasPrefix(name, dir+"/") {
+		if name == dir || strings.HasPrefix(name, dir+"/") {
 			delete(s.held, name)
 		}
 	}

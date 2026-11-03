@@ -292,13 +292,20 @@ func (s *Service) Recover(ctx context.Context, request Request, w Writer) (Resul
 	if err != nil || rec.Action == RecoverNothing {
 		return result, err
 	}
+	t, err := vaultTarget(rec.Vault, rec.Game.ID)
+	if err != nil {
+		return result, err
+	}
+	src, err := vaultReadRoot(rec.Vault, rec.Game.ID)
+	if err != nil {
+		return result, err
+	}
 	session, err := w.Vaults.Open(request.VaultPath)
 	if err != nil {
 		return result, errVault(request.VaultPath, "%w", err)
 	}
 	o := &operation{
-		s: s, w: w, ctx: ctx, vault: session, domain: currentDomain, op: rec.Operation, target: vaultTarget(rec.Vault, rec.vaultVolume, rec.vaultSegments, rec.Game.ID), recovering: true,
-		plan:     Plan{Vault: rec.Vault, Game: rec.Game, vaultVolume: rec.vaultVolume, vaultSegments: rec.vaultSegments},
+		s: s, w: w, ctx: ctx, vault: session, domain: currentDomain, op: rec.Operation, target: t, reads: src, recovering: true,
 		attempts: map[int]map[int]bool{}, receipt: map[int]bool{}, marker: map[int]bool{},
 	}
 	err = o.unfinished(o.recover(&rec, request))
@@ -336,7 +343,7 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 		}
 		return nil
 	}
-	for _, dir := range []string{gamesDir, o.target.dir, o.target.dir + "/" + o.domain.journals, o.journalDir()} {
+	for _, dir := range append(o.target.chain(), o.at(o.domain.journals), o.journalDir()) {
 		if err := o.vault.Hold(dir); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
@@ -383,14 +390,14 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 	case RecoverVerifyPublish, RecoverUnpublish, RecoverVerifyPromote, RecoverUnpromote, RecoverRestore, RecoverFinishRestore:
 		// current may move back below it, and a restoration checks the
 		// staging by its identity; it exists since staging-intent.
-		if err := o.vault.Hold(o.target.dir + "/" + o.domain.stagings); err != nil {
+		if err := o.vault.Hold(o.at(o.domain.stagings)); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
 	}
 	switch rec.Action {
 	case RecoverVerifyPromote, RecoverUnpromote, RecoverRestore, RecoverFinishRestore:
 		// The old generation moves back from it; it exists since M1.
-		if err := o.vault.Hold(o.target.dir + "/" + retainedDir); err != nil {
+		if err := o.vault.Hold(o.at(retainedDir)); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
 	}
@@ -425,12 +432,11 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 // are committed, the receipt rebuilt if missing; different, it is moved
 // back to staging, and a rotation restores its retained generation.
 func (o *operation) verifyThenPublish(rec *Recovery) error {
-	segments := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, currentDir)
-	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
+	dir, err := o.readBack(o.at(currentDir))
 	if err != nil {
 		return err
 	}
-	if id, err := o.vault.Identity(o.target.dir + "/" + currentDir); err != nil || id != o.staging {
+	if id, err := o.vault.Identity(o.at(currentDir)); err != nil || id != o.staging {
 		// Swapped while it was read: nothing is recorded on its strength.
 		return o.intervene(fmt.Sprintf("current was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
 	}
@@ -477,7 +483,7 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 // then records rolled-back. A failure is recorded once as rollback-failed
 // (envelope E3) and stops in code 3.
 func (o *operation) unpublish(retried bool) error {
-	moved, err := o.switchTo(o.target.dir+"/"+o.domain.published(o.op), o.stagingDir(), o.staging)
+	moved, err := o.switchTo(o.at(o.domain.published(o.op)), o.stagingDir(), o.staging)
 	var unexplained *unexplainedError
 	switch {
 	case err == nil:
@@ -492,7 +498,7 @@ func (o *operation) unpublish(retried bool) error {
 				return o.intervene(fmt.Sprintf("rollback failed (%v) and could not be recorded: %v", err, recordErr))
 			}
 		}
-		return o.intervene("rollback failed: " + err.Error() + "; close the programs that use the vault, then run " + o.domain.command + " --recover --apply again")
+		return o.intervene("rollback failed: " + err.Error() + "; close the programs that use the " + o.target.label + ", then run " + o.domain.command + " --recover --apply again")
 	}
 	if err := o.record(backup.StepRolledBack, backup.StepValues{}); err != nil {
 		return o.intervene("current was moved back to staging but the journal is not closed: " + err.Error())

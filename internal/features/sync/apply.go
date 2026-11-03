@@ -127,6 +127,7 @@ type operation struct {
 	vault   Vault
 	domain  domain
 	target  target
+	reads   readRoot
 	op      string
 	started time.Time
 	effect  Effect
@@ -212,7 +213,7 @@ func (s *Service) Apply(ctx context.Context, request Request, w Writer) (Result,
 }
 
 func (s *Service) begin(ctx context.Context, plan Plan, w Writer) (*operation, error) {
-	o, err := s.open(ctx, vaultTarget(plan.Vault, plan.vaultVolume, plan.vaultSegments, plan.Game.ID), w)
+	o, err := s.openVault(ctx, plan.Vault, plan.Game.ID, currentDomain, w)
 	if err != nil {
 		return nil, err
 	}
@@ -220,9 +221,28 @@ func (s *Service) begin(ctx context.Context, plan Plan, w Writer) (*operation, e
 	return o, nil
 }
 
-// open starts an operation that writes below t, through a new session on
-// its root, with a new operation id and the domain of current.
-func (s *Service) open(ctx context.Context, t target, w Writer) (*operation, error) {
+// openVault starts an operation of domain d on game gameID in the vault at
+// vaultPath, which it both reads and writes.
+func (s *Service) openVault(ctx context.Context, vaultPath, gameID string, d domain, w Writer) (*operation, error) {
+	t, err := vaultTarget(vaultPath, gameID)
+	if err != nil {
+		return nil, err
+	}
+	src, err := vaultReadRoot(vaultPath, gameID)
+	if err != nil {
+		return nil, err
+	}
+	o, err := s.open(ctx, t, d, w)
+	if err != nil {
+		return nil, err
+	}
+	o.reads = src
+	return o, nil
+}
+
+// open starts an operation of domain d that writes below t, through a new
+// session on its root, with a new operation id.
+func (s *Service) open(ctx context.Context, t target, d domain, w Writer) (*operation, error) {
 	now := w.Clock.Now().UTC()
 	random := make([]byte, 4)
 	if _, err := io.ReadFull(w.Random, random); err != nil {
@@ -233,7 +253,7 @@ func (s *Service) open(ctx context.Context, t target, w Writer) (*operation, err
 		return nil, t.errorf("%v", err)
 	}
 	return &operation{
-		s: s, w: w, ctx: ctx, vault: session, domain: currentDomain, target: t,
+		s: s, w: w, ctx: ctx, vault: session, domain: d, target: t,
 		op:       now.Format("20060102T150405") + "-" + hex.EncodeToString(random),
 		started:  now,
 		attempts: map[int]map[int]bool{}, receipt: map[int]bool{}, marker: map[int]bool{},
@@ -269,7 +289,7 @@ func (o *operation) unfinished(err error) error {
 	o.effect = EffectIntervention
 	if o.op == "" {
 		// Resuming a vault initialization: only its marker was at stake.
-		return &InterventionError{Cause: oneLine(err.Error()) + "; the vault initialization is still interrupted, run sync --recover --apply again"}
+		return &InterventionError{Cause: oneLine(err.Error()) + "; the " + o.target.label + " initialization is still interrupted, run " + o.domain.command + " --recover --apply again"}
 	}
 	return &InterventionError{Operation: o.op, Cause: oneLine(err.Error()) + "; the operation is not closed, run " + o.domain.command + " --recover"}
 }
@@ -281,11 +301,9 @@ func (o *operation) result() Result {
 		r.Operation = ""
 	}
 	if o.effect == EffectPublished {
-		receipt := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, receiptsDir, o.op+".json")
-		r.Receipt = windowsPath(o.plan.vaultVolume, receipt)
+		r.Receipt = o.target.windowsPath(receiptsDir + "/" + o.op + ".json")
 		if o.rotation() {
-			retained := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID, retainedDir, o.previous)
-			r.Retained = windowsPath(o.plan.vaultVolume, retained)
+			r.Retained = o.target.windowsPath(retainedDir + "/" + o.previous)
 		}
 		for _, source := range o.planned.Sources {
 			r.Files += len(source.Entries)
@@ -319,9 +337,9 @@ func (o *operation) initialize() error {
 	if state == VaultAbsent {
 		if err := o.vault.CreateDir("."); err != nil {
 			if errors.Is(err, fs.ErrExist) {
-				return errVault(o.plan.Vault, "vault-changed: the vault appeared since the plan; run sync again")
+				return o.target.errorf("vault-changed: the vault appeared since the plan; run sync again")
 			}
-			return errVault(o.plan.Vault, "%w", err)
+			return o.target.errorf("%w", err)
 		}
 		o.wrote()
 	}
@@ -332,22 +350,22 @@ func (o *operation) initialize() error {
 			return err
 		}
 		if err := o.commitFile(backup.MarkerName, marker, o.marker, o.wrote); err != nil {
-			return errVault(o.plan.Vault, "marker: %w", err)
+			return o.target.errorf("marker: %w", err)
 		}
 	}
 	// I5: games and the game directory, each only if missing.
-	for _, dir := range []string{gamesDir, o.target.dir} {
+	for _, dir := range o.target.chain() {
 		if err := o.ensureDir(dir); err != nil {
-			return errVault(o.plan.Vault, "%w", err)
+			return o.target.errorf("%w", err)
 		}
 	}
 	// I6: the lock, never written or deleted.
 	if err := o.vault.Lock(o.at(o.target.lock)); err != nil {
 		var busy interface{ Busy() bool }
 		if errors.As(err, &busy) && busy.Busy() {
-			return errVault(o.plan.Vault, "%s", o.domain.busy)
+			return o.target.errorf("%s", o.domain.busy)
 		}
-		return errVault(o.plan.Vault, "lock: %w", err)
+		return o.target.errorf("lock: %w", err)
 	}
 	if o.plan.observed == nil || !o.plan.observed.lock {
 		o.wrote()
@@ -357,11 +375,11 @@ func (o *operation) initialize() error {
 		return err
 	}
 	// I8: the operation directory, exclusive.
-	if err := o.ensureDir(o.target.dir + "/" + o.domain.journals); err != nil {
-		return errVault(o.plan.Vault, "%w", err)
+	if err := o.ensureDir(o.at(o.domain.journals)); err != nil {
+		return o.target.errorf("%w", err)
 	}
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
-		return errVault(o.plan.Vault, "operation directory: %w", err)
+		return o.target.errorf("operation directory: %w", err)
 	}
 	o.effect, o.open = EffectStaged, true
 	// I9: the planned record, which starts the operation.
@@ -382,7 +400,7 @@ func (o *operation) initialize() error {
 // current to be recognised again, by the same identity, and its content to
 // match its receipt in full, before any journal (ADR 0006 §5, A2).
 func (o *operation) underLock() error {
-	v, err := o.s.observe(o.plan.Vault, o.plan.vaultVolume, o.plan.vaultSegments, o.plan.Game.ID)
+	v, err := o.s.observe(o.reads.path, o.reads.volume, o.reads.segments, o.reads.gameID)
 	if err != nil {
 		return err
 	}
@@ -391,7 +409,7 @@ func (o *operation) underLock() error {
 		// Recognition refused under lock: current is not the generation the
 		// plan recognised, code 3 before any journal (ADR 0006 §5, A2).
 		for _, intervention := range v.interventions {
-			if intervention.Subject == o.target.dir+"/"+currentDir || intervention.Subject == o.target.dir+"/"+retainedDir+"/"+o.previous {
+			if intervention.Subject == o.at(currentDir) || intervention.Subject == o.at(retainedDir+"/"+o.previous) {
 				o.effect = EffectIntervention
 				return &InterventionError{Cause: string(intervention.Cause) + " " + intervention.Subject + ": " + intervention.Detail}
 			}
@@ -405,7 +423,7 @@ func (o *operation) underLock() error {
 		v.current != before.current || v.currentLink != before.currentLink ||
 		!sameOperations(v.receipts, before.receipts) || len(v.invalid) != len(before.invalid)
 	if changed {
-		return errVault(o.plan.Vault, "vault-changed: the vault changed since the plan; run sync again")
+		return o.target.errorf("vault-changed: the vault changed since the plan; run sync again")
 	}
 	if o.rotation() && v.currentID != o.old {
 		o.effect = EffectIntervention
@@ -416,11 +434,11 @@ func (o *operation) underLock() error {
 			return err
 		}
 	}
-	volume, err := o.s.volumes.Describe(o.plan.Vault)
+	volume, err := o.s.volumes.Describe(o.target.path)
 	if err != nil {
-		return errVault(o.plan.Vault, "volume cannot be described: %w", err)
+		return o.target.errorf("volume cannot be described: %w", err)
 	}
-	if err := qualify(o.plan.Vault, volume); err != nil {
+	if err := qualify(o.target.path, volume); err != nil {
 		return err
 	}
 	if volume.Available < o.plan.Needed {
@@ -559,7 +577,7 @@ func (o *operation) move(from, to string) error {
 			return err
 		}
 		if o.w.Clock.Now().Sub(start)+delay > retryBudget {
-			return fmt.Errorf("still in use after %s: %w; close the programs that use the vault", retryBudget, err)
+			return fmt.Errorf("still in use after %s: %w; close the programs that use the %s", retryBudget, err, o.target.label)
 		}
 		if err := o.w.Clock.Sleep(ctx, delay); err != nil {
 			return err
