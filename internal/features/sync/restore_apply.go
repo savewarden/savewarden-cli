@@ -54,6 +54,8 @@ type RestoreResult struct {
 	Receipt string
 	Files   int
 	Bytes   int64
+	// Recovery is what --recover found and did, nil for --apply.
+	Recovery *RestoreRecovery
 }
 
 // State is the state of the restore area, as "savewarden: destination:

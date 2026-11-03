@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -17,13 +18,16 @@ import (
 type Restorer interface {
 	RestorePlan(ctx context.Context, request sync.RestoreRequest) (sync.RestorePlan, error)
 	RestoreApply(ctx context.Context, request sync.RestoreRequest) (sync.RestoreResult, error)
+	RestoreRecoverPlan(ctx context.Context, request sync.RestoreRequest) (sync.RestoreRecovery, error)
+	RestoreRecover(ctx context.Context, request sync.RestoreRequest) (sync.RestoreResult, error)
 }
 
 func newRestoreCommand(restorer Restorer) *cobra.Command {
 	var manifest, vault, snapshot, destination string
-	var apply bool
+	var apply, recover bool
 	command := &cobra.Command{
-		Use:   "restore --manifest <path> --vault <directory> --snapshot <id> --to <directory> [--apply]",
+		Use: "restore --manifest <path> --vault <directory> --snapshot <id> --to <directory> [--apply]\n" +
+			"  savewarden restore --manifest <path> --to <directory> --recover [--apply]",
 		Short: "Plan the restore of an approved snapshot into an isolated directory",
 		Long: `Plan the restore of an approved snapshot into an isolated directory.
 
@@ -49,18 +53,51 @@ published restore is handed over to you: restore never opens it for
 writing, moves or deletes it again. Copy out what you need rather than
 renaming anything in the area.
 
-Exit codes: 0 plan without blocking findings, or restore published; 1
+--recover shows how an interrupted restore of the area would be recovered,
+without writing anything; --recover --apply performs that recovery. It
+relies on the area and the manifest alone and never reads the vault:
+--vault and --snapshot are refused with it.
+
+Exit codes: 0 plan without blocking findings, restore published, or
+recovery done or not needed; 1
 invalid invocation, manifest, vault or destination, a snapshot that is not
 found, not published, not verifiable or not restorable now, or a failure;
 2 blocked, such as a degraded snapshot, insufficient space or a snapshot
 changed during the copy, nothing published; 3 the restore area needs an
-intervention first. With --apply, the last stderr line is
+intervention first. With --apply or --recover, the last stderr line is
 "savewarden: destination: <state>"; do not use <to>\<operation> before it
 says "published restore <operation>". Trust the exit code, never the
 presence of output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			switch {
+			case recover && (vault != "" || snapshot != ""):
+				return errors.New("--recover never reads the vault: --vault and --snapshot are refused with it")
+			case !recover && (vault == "" || snapshot == ""):
+				return errors.New(`required flag(s) "snapshot" and "vault" not set; they are refused only with --recover`)
+			}
 			request := sync.RestoreRequest{ManifestPath: manifest, VaultPath: vault, Snapshot: snapshot, Destination: destination}
+			switch {
+			case recover && apply:
+				result, err := restorer.RestoreRecover(cmd.Context(), request)
+				report := ""
+				if result.Recovery != nil && result.Recovery.ManifestPath != "" {
+					report = RenderRestoreRecovery(*result.Recovery, "recovery")
+				}
+				return finishAs(cmd, report, "destination", result.State(), err)
+			case recover:
+				recovery, err := restorer.RestoreRecoverPlan(cmd.Context(), request)
+				report := ""
+				if recovery.ManifestPath != "" {
+					report = RenderRestoreRecovery(recovery, "recovery plan only, nothing written")
+				}
+				state := sync.RestoreResult{}.State()
+				var intervention *sync.InterventionError
+				if errors.As(err, &intervention) {
+					state = sync.RestoreResult{Operation: intervention.Operation, Effect: sync.EffectIntervention, Cause: intervention.Cause}.State()
+				}
+				return finishAs(cmd, report, "destination", state, err)
+			}
 			if apply {
 				result, err := restorer.RestoreApply(cmd.Context(), request)
 				report := ""
@@ -87,14 +124,53 @@ presence of output.`,
 		},
 	}
 	command.Flags().StringVar(&manifest, "manifest", "", "path to the game's manifest.yaml (required)")
-	command.Flags().StringVar(&vault, "vault", "", "vault directory, absolute Windows path (required)")
-	command.Flags().StringVar(&snapshot, "snapshot", "", "approved snapshot to restore, such as 20261106T101500-5e6f7a8b (required)")
+	command.Flags().StringVar(&vault, "vault", "", "vault directory, absolute Windows path (required, refused with --recover)")
+	command.Flags().StringVar(&snapshot, "snapshot", "", "approved snapshot to restore, such as 20261106T101500-5e6f7a8b (required, refused with --recover)")
 	command.Flags().StringVar(&destination, "to", "", "restore area, absolute Windows path: new, empty, or marked by restore (required)")
-	command.Flags().BoolVar(&apply, "apply", false, "copy, verify and publish the restore")
-	for _, name := range []string{"manifest", "vault", "snapshot", "to"} {
+	command.Flags().BoolVar(&apply, "apply", false, "copy, verify and publish the restore; with --recover, perform the recovery")
+	command.Flags().BoolVar(&recover, "recover", false, "show how an interrupted restore of the area would be recovered")
+	for _, name := range []string{"manifest", "to"} {
 		_ = command.MarkFlagRequired(name)
 	}
 	return command
+}
+
+// RenderRestoreRecovery formats what restore --recover found and would do,
+// or did. The vault is never named: a recovery does not read it.
+func RenderRestoreRecovery(r sync.RestoreRecovery, mode string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "manifest: %s\n", printable(r.ManifestPath))
+	fmt.Fprintf(&b, "game: %s (%s)\n", r.Game.ID, printable(r.Game.Name))
+	fmt.Fprintf(&b, "destination: %s (%s)", printable(r.Destination), r.State)
+	if r.State == sync.DestinationArea {
+		fmt.Fprintf(&b, ", %d published", len(r.Restores))
+	}
+	b.WriteString("\n")
+	if r.Volume.FileSystem != "" {
+		fmt.Fprintf(&b, "volume: %s, %s drive\n", printable(r.Volume.FileSystem), r.Volume.Drive)
+	}
+	operation, last := r.Operation, string(r.Last)
+	if operation == "" {
+		operation = "none"
+	}
+	if last == "" {
+		last = "none"
+	}
+	fmt.Fprintf(&b, "restore operation: %s\n", operation)
+	fmt.Fprintf(&b, "last committed step: %s\n", last)
+	if r.Observed != nil {
+		fmt.Fprintf(&b, "observed: restore %s, incomplete %s", r.Observed.Published, r.Observed.Incomplete)
+		if r.Observed.Receipt {
+			b.WriteString(", receipt committed")
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "action: %s\n", r.Action)
+	if warning := r.Warning(); warning != "" {
+		fmt.Fprintf(&b, "warning: %s\n", printable(warning))
+	}
+	fmt.Fprintf(&b, "mode: %s\n", mode)
+	return b.String()
 }
 
 // RenderRestoreApply formats the plan of a restore --apply run, then what

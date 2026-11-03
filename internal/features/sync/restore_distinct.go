@@ -20,6 +20,36 @@ type reference struct {
 	segments []string
 }
 
+// manifestReferences are the installation and the sources of manifest.
+func manifestReferences(manifest game.Manifest) []reference {
+	var refs []reference
+	if volume, segments, err := game.ParseWindowsAbsolute(manifest.Installation.Path); err == nil {
+		refs = append(refs, reference{label: "installation", path: manifest.Installation.Path, volume: volume, segments: segments})
+	}
+	for i, source := range manifest.Sources {
+		if volume, segments, err := manifest.SourceSegments(i); err == nil {
+			refs = append(refs, reference{label: "source " + source.ID, path: windowsPath(volume, segments), volume: volume, segments: segments})
+		}
+	}
+	return refs
+}
+
+// backedUpReferences are the paths the sources of a snapshot were backed up
+// from: those of its receipt, or those a restore plan copied from it.
+func backedUpReferences(sources []backup.ReceiptSource) []reference {
+	var refs []reference
+	for _, source := range sources {
+		volume, segments, err := game.ParseWindowsAbsolute(source.Path)
+		if err != nil {
+			// A path that cannot be compared proves nothing: refused by
+			// distinctDestination as a reference on no volume.
+			volume, segments = source.Path, nil
+		}
+		refs = append(refs, reference{label: "backed-up source " + source.ID, path: source.Path, volume: volume, segments: segments})
+	}
+	return refs
+}
+
 // observedChain holds the identities of the existing components of a path,
 // from the root of its volume, root included, and whether the path itself
 // exists.

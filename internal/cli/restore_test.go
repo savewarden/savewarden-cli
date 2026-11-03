@@ -14,12 +14,14 @@ import (
 )
 
 type fakeRestorer struct {
-	plan    sync.RestorePlan
-	result  sync.RestoreResult
-	err     error
-	request sync.RestoreRequest
-	called  int
-	applied bool
+	plan     sync.RestorePlan
+	result   sync.RestoreResult
+	recovery sync.RestoreRecovery
+	err      error
+	request  sync.RestoreRequest
+	called   int
+	applied  bool
+	mode     string
 }
 
 func (f *fakeRestorer) RestorePlan(_ context.Context, request sync.RestoreRequest) (sync.RestorePlan, error) {
@@ -30,6 +32,18 @@ func (f *fakeRestorer) RestorePlan(_ context.Context, request sync.RestoreReques
 
 func (f *fakeRestorer) RestoreApply(_ context.Context, request sync.RestoreRequest) (sync.RestoreResult, error) {
 	f.request, f.applied = request, true
+	f.called++
+	return f.result, f.err
+}
+
+func (f *fakeRestorer) RestoreRecoverPlan(_ context.Context, request sync.RestoreRequest) (sync.RestoreRecovery, error) {
+	f.request, f.mode = request, "recover plan"
+	f.called++
+	return f.recovery, f.err
+}
+
+func (f *fakeRestorer) RestoreRecover(_ context.Context, request sync.RestoreRequest) (sync.RestoreResult, error) {
+	f.request, f.mode = request, "recover"
 	f.called++
 	return f.result, f.err
 }
@@ -211,10 +225,62 @@ func TestRestoreApplyReport(t *testing.T) {
 	}
 }
 
-// Every flag is required; this build has no --recover.
+var recoverArgs = []string{"--manifest", `D:\Manifests\synthetic-game.yaml`, "--to", `G:\Restores\synthetic`, "--recover"}
+
+func TestRestoreRecoveryReport(t *testing.T) {
+	op := "20261107T101500-9a8b7c6d"
+	recovery := sync.RestoreRecovery{ManifestPath: `D:\Manifests\synthetic-game.yaml`, Game: game.Game{ID: "synthetic-game", Name: "Synthetic Game"},
+		Destination: `G:\Restores\synthetic`, State: sync.DestinationArea, Volume: backup.Volume{FileSystem: "NTFS", Drive: backup.DriveFixed},
+		Operation: op, Last: backup.StepPublishIntent, Observed: &backup.RestoreObservation{Published: backup.New, Incomplete: backup.Absent},
+		Action: sync.RecoverRestorePublish}
+	restorer := &fakeRestorer{recovery: recovery}
+	stdout, stderr, err := runRestore(t, restorer, recoverArgs...)
+	if err != nil || restorer.mode != "recover plan" {
+		t.Fatalf("exit %v, mode %q", err, restorer.mode)
+	}
+	want := `manifest: D:\Manifests\synthetic-game.yaml
+game: synthetic-game (Synthetic Game)
+destination: G:\Restores\synthetic (restore area), 0 published
+volume: NTFS, fixed drive
+restore operation: 20261107T101500-9a8b7c6d
+last committed step: publish-intent
+observed: restore new, incomplete absent
+action: ` + string(sync.RecoverRestorePublish) + `
+warning: operation 20261107T101500-9a8b7c6d pending recovery: copy published, receipt missing; do not use G:\Restores\synthetic\20261107T101500-9a8b7c6d yet
+mode: recovery plan only, nothing written
+`
+	if stdout != want || stderr != "savewarden: destination: not modified\n" {
+		t.Fatalf("stdout:\n%s\nwant\n%s\nstderr %q", stdout, want, stderr)
+	}
+	if restorer.request != (sync.RestoreRequest{ManifestPath: `D:\Manifests\synthetic-game.yaml`, Destination: `G:\Restores\synthetic`}) {
+		t.Fatalf("request %+v", restorer.request)
+	}
+	if strings.Contains(stdout, "vault") {
+		t.Fatalf("a recovery never names the vault:\n%s", stdout)
+	}
+	// Performed, and an intervention.
+	result := sync.RestoreResult{Operation: op, Effect: sync.EffectPublished, Recovery: &recovery}
+	restorer = &fakeRestorer{result: result}
+	stdout, stderr, err = runRestore(t, restorer, append(append([]string{}, recoverArgs...), "--apply")...)
+	if err != nil || restorer.mode != "recover" || !strings.Contains(stdout, "mode: recovery\n") ||
+		stderr != "savewarden: destination: published restore "+op+"\n" {
+		t.Fatalf("recover --apply: %v, %q\n%s", err, stderr, stdout)
+	}
+	_, stderr, err = runRestore(t, &fakeRestorer{err: &sync.InterventionError{Subject: "the restore area", Cause: "unexpected-entry notes.txt"}}, recoverArgs...)
+	var exit *cli.ExitError
+	if !errors.As(err, &exit) || exit.Code != cli.ExitIntervention ||
+		!strings.HasSuffix(stderr, "savewarden: destination: intervention required for the restore area: unexpected-entry notes.txt\n") {
+		t.Fatalf("intervention: %v, %q", err, stderr)
+	}
+}
+
+// --manifest and --to are always required; --vault and --snapshot are
+// required, except with --recover, which refuses them.
 func TestRestoreFlags(t *testing.T) {
 	for _, args := range [][]string{nil, restoreArgs[:6], append(append([]string{}, restoreArgs[2:]...), "--apply"),
-		append(append([]string{}, restoreArgs...), "--recover"), append(append([]string{}, restoreArgs...), "extra")} {
+		append(append([]string{}, restoreArgs...), "--recover"), append(append([]string{}, recoverArgs...), "--vault", `F:\Vault`),
+		append(append([]string{}, recoverArgs...), "--snapshot", "20261102T090000-4e5f6a7b"), recoverArgs[2:], recoverArgs[:2],
+		append(append([]string{}, restoreArgs...), "extra")} {
 		restorer := &fakeRestorer{plan: newRestorePlan()}
 		if _, _, err := runRestore(t, restorer, args...); err == nil || restorer.called != 0 {
 			t.Errorf("%v: err %v, called %d", args, err, restorer.called)

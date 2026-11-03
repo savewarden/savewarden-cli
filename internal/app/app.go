@@ -106,6 +106,16 @@ func (s syncCommands) RestoreApply(ctx context.Context, request sync.RestoreRequ
 	return s.service.RestoreApply(ctx, request, s.writer)
 }
 
+func (s syncCommands) RestoreRecoverPlan(ctx context.Context, request sync.RestoreRequest) (sync.RestoreRecovery, error) {
+	return s.service.RestoreRecoverPlan(ctx, request)
+}
+
+// RestoreRecover never reads the vault; its sessions open on the restore
+// area only (ADR 0006 §11).
+func (s syncCommands) RestoreRecover(ctx context.Context, request sync.RestoreRequest) (sync.RestoreResult, error) {
+	return s.service.RestoreRecover(ctx, request, s.writer)
+}
+
 // vaults bridges the create-only vault adapter to the sync port. It
 // returns a nil interface on error, never a typed nil pointer.
 type vaults struct{}

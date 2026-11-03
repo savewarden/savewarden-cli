@@ -15,8 +15,8 @@ nouvelle génération vérifiée du jeu, l'ancienne étant conservée dans
 `snapshot` fige une copie vérifiée et immuable de cette génération. Les
 sources ne sont que lues ; rien n'est jamais supprimé ni écrasé. La commande
 `restore`, en cours de développement (B4), copie un snapshot dans une zone de
-restauration isolée, sans récupération des opérations interrompues pour
-l'instant ; `doctor` n'est pas encore disponible. Aucune release ni
+restauration isolée, et `restore --recover` y reprend une opération
+interrompue sans lire le coffre ; `doctor` n'est pas encore disponible. Aucune release ni
 installation via package manager.
 
 ## Compiler et utiliser

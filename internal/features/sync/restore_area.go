@@ -316,6 +316,13 @@ func (a *area) explain(scope Scope, name string) {
 			a.intervene(CauseJournalAmbiguous, backup.RestoreReceiptsDir+"/"+op+".json", "no restore operation of this area can have committed this receipt")
 		}
 	}
+	// A receipt temporary is an attempt of its operation, which must exist
+	// (ADR 0006 §11, destination without journaled operation).
+	for op := range a.receiptTaken {
+		if _, ok := a.journals[op]; !ok {
+			a.intervene(CauseJournalAmbiguous, backup.RestoreReceiptsDir+"/"+op+".json.tmp-*", "no restore journal explains this receipt temporary")
+		}
+	}
 	for op, j := range a.journals {
 		if j.Last() != backup.StepPublished {
 			continue

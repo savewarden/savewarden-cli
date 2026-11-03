@@ -406,25 +406,9 @@ func (s *Service) planDestination(plan *RestorePlan, manifest game.Manifest, pro
 // installation, the sources of the manifest and, once the snapshot is
 // proved, the paths its receipt backed up (ADR 0006 §11).
 func (p *RestorePlan) references(manifest game.Manifest) []reference {
-	refs := []reference{{label: "vault", path: p.Vault, volume: p.vaultVolume, segments: p.vaultSegments}}
-	if volume, segments, err := game.ParseWindowsAbsolute(manifest.Installation.Path); err == nil {
-		refs = append(refs, reference{label: "installation", path: manifest.Installation.Path, volume: volume, segments: segments})
-	}
-	for i, source := range manifest.Sources {
-		if volume, segments, err := manifest.SourceSegments(i); err == nil {
-			refs = append(refs, reference{label: "source " + source.ID, path: windowsPath(volume, segments), volume: volume, segments: segments})
-		}
-	}
+	refs := append([]reference{{label: "vault", path: p.Vault, volume: p.vaultVolume, segments: p.vaultSegments}}, manifestReferences(manifest)...)
 	if p.snapshot != nil {
-		for _, source := range p.snapshot.receipt.Sources {
-			volume, segments, err := game.ParseWindowsAbsolute(source.Path)
-			if err != nil {
-				// A path that cannot be compared proves nothing: refused by
-				// distinctDestination as a reference on no volume.
-				volume, segments = source.Path, nil
-			}
-			refs = append(refs, reference{label: "backed-up source " + source.ID, path: source.Path, volume: volume, segments: segments})
-		}
+		refs = append(refs, backedUpReferences(p.snapshot.receipt.Sources)...)
 	}
 	return refs
 }
