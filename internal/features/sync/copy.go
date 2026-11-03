@@ -21,7 +21,7 @@ func (o *operation) stage() error {
 	if err := o.record(backup.StepStagingIntent, backup.StepValues{}); err != nil {
 		return err
 	}
-	if err := o.ensureDir(o.game + "/" + o.domain.stagings); err != nil {
+	if err := o.ensureDir(o.target.dir + "/" + o.domain.stagings); err != nil {
 		return err
 	}
 	if err := o.vault.CreateDir(o.stagingDir()); err != nil {
@@ -209,8 +209,7 @@ func sameInventory(a, b backup.Directory) bool {
 // walk, closed before returning: exactly the planned paths and
 // directories, sizes, dates and SHA-256 (plan B2 §4.3, phase 6).
 func (o *operation) verify() error {
-	segments := append(append([]string{}, o.plan.vaultSegments...), strings.Split(o.stagingDir(), "/")...)
-	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
+	dir, err := o.readBack(o.stagingDir())
 	if err != nil {
 		return err
 	}
@@ -226,6 +225,14 @@ func (o *operation) verify() error {
 		return err
 	}
 	return o.record(backup.StepVerified, backup.StepValues{Digest: digest})
+}
+
+// readBack inventories name, a directory the operation wrote, below the
+// root of its target: never below the root a plan read from (ADR 0004,
+// amendment B4).
+func (o *operation) readBack(name string) (backup.Directory, error) {
+	segments := append(append([]string{}, o.target.segments...), strings.Split(name, "/")...)
+	return o.s.inventories.Directory(o.ctx, o.target.volume, segments)
 }
 
 func orDash(s string) string {

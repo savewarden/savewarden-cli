@@ -14,7 +14,7 @@ import (
 // receipt and the published record (ADR 0006 §4). From publish-intent on,
 // nothing is recorded as failed: an interrupted switch is left to recovery.
 func (o *operation) publish() error {
-	current := o.game + "/" + currentDir
+	current := o.target.dir + "/" + currentDir
 	if err := o.record(backup.StepPublishIntent, backup.StepValues{Staging: o.staging}); err != nil {
 		return err
 	}
@@ -122,10 +122,10 @@ func (o *operation) writeReceipt(publishedAt, recoveredAt *time.Time, recoveredB
 	if err != nil {
 		return [32]byte{}, err
 	}
-	if err := o.ensureDir(o.game + "/" + receiptsDir); err != nil {
+	if err := o.ensureDir(o.target.dir + "/" + receiptsDir); err != nil {
 		return [32]byte{}, err
 	}
-	if err := o.commitFile(o.game+"/"+receiptsDir+"/"+o.op+".json", data, o.receipt, nil); err != nil {
+	if err := o.commitFile(o.target.dir+"/"+receiptsDir+"/"+o.op+".json", data, o.receipt, nil); err != nil {
 		return [32]byte{}, err
 	}
 	return sha256.Sum256(data), nil

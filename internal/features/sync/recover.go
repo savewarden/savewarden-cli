@@ -297,7 +297,7 @@ func (s *Service) Recover(ctx context.Context, request Request, w Writer) (Resul
 		return result, errVault(request.VaultPath, "%w", err)
 	}
 	o := &operation{
-		s: s, w: w, ctx: ctx, vault: session, domain: currentDomain, op: rec.Operation, game: gamesDir + "/" + rec.Game.ID, recovering: true,
+		s: s, w: w, ctx: ctx, vault: session, domain: currentDomain, op: rec.Operation, target: vaultTarget(rec.Vault, rec.vaultVolume, rec.vaultSegments, rec.Game.ID), recovering: true,
 		plan:     Plan{Vault: rec.Vault, Game: rec.Game, vaultVolume: rec.vaultVolume, vaultSegments: rec.vaultSegments},
 		attempts: map[int]map[int]bool{}, receipt: map[int]bool{}, marker: map[int]bool{},
 	}
@@ -336,12 +336,12 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 		}
 		return nil
 	}
-	for _, dir := range []string{gamesDir, o.game, o.game + "/" + o.domain.journals, o.journalDir()} {
+	for _, dir := range []string{gamesDir, o.target.dir, o.target.dir + "/" + o.domain.journals, o.journalDir()} {
 		if err := o.vault.Hold(dir); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
 	}
-	if err := o.vault.Lock(o.game + "/" + lockFile); err != nil {
+	if err := o.vault.Lock(o.at(o.target.lock)); err != nil {
 		var busy interface{ Busy() bool }
 		if errors.As(err, &busy) && busy.Busy() {
 			return errVault(rec.Vault, "%s", o.domain.busy)
@@ -383,14 +383,14 @@ func (o *operation) recover(rec *Recovery, request Request) error {
 	case RecoverVerifyPublish, RecoverUnpublish, RecoverVerifyPromote, RecoverUnpromote, RecoverRestore, RecoverFinishRestore:
 		// current may move back below it, and a restoration checks the
 		// staging by its identity; it exists since staging-intent.
-		if err := o.vault.Hold(o.game + "/" + o.domain.stagings); err != nil {
+		if err := o.vault.Hold(o.target.dir + "/" + o.domain.stagings); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
 	}
 	switch rec.Action {
 	case RecoverVerifyPromote, RecoverUnpromote, RecoverRestore, RecoverFinishRestore:
 		// The old generation moves back from it; it exists since M1.
-		if err := o.vault.Hold(o.game + "/" + retainedDir); err != nil {
+		if err := o.vault.Hold(o.target.dir + "/" + retainedDir); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
 	}
@@ -430,7 +430,7 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 	if err != nil {
 		return err
 	}
-	if id, err := o.vault.Identity(o.game + "/" + currentDir); err != nil || id != o.staging {
+	if id, err := o.vault.Identity(o.target.dir + "/" + currentDir); err != nil || id != o.staging {
 		// Swapped while it was read: nothing is recorded on its strength.
 		return o.intervene(fmt.Sprintf("current was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
 	}
@@ -477,7 +477,7 @@ func (o *operation) verifyThenPublish(rec *Recovery) error {
 // then records rolled-back. A failure is recorded once as rollback-failed
 // (envelope E3) and stops in code 3.
 func (o *operation) unpublish(retried bool) error {
-	moved, err := o.switchTo(o.game+"/"+o.domain.published(o.op), o.stagingDir(), o.staging)
+	moved, err := o.switchTo(o.target.dir+"/"+o.domain.published(o.op), o.stagingDir(), o.staging)
 	var unexplained *unexplainedError
 	switch {
 	case err == nil:

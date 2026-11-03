@@ -137,13 +137,13 @@ func (o *operation) snapshot(request SnapshotRequest, plan SnapshotPlan) error {
 // structure, the operation directory and the planned record (ADR 0006
 // §10, creation step 1).
 func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPlan) error {
-	for _, dir := range []string{gamesDir, o.game} {
+	for _, dir := range []string{gamesDir, o.target.dir} {
 		if err := o.vault.Hold(dir); err != nil {
 			return errVault(o.plan.Vault, "%w", err)
 		}
 	}
 	// The lock is taken as sync takes it: created empty if it is missing.
-	if err := o.vault.Lock(o.game + "/" + lockFile); err != nil {
+	if err := o.vault.Lock(o.at(o.target.lock)); err != nil {
 		var busy interface{ Busy() bool }
 		if errors.As(err, &busy) && busy.Busy() {
 			return errVault(o.plan.Vault, "%s", o.domain.busy)
@@ -174,13 +174,13 @@ func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPl
 	}
 	// The structure, made of exclusive creations, after the space check.
 	for _, dir := range []string{snapshotsDir, snapshotsDir + "/" + receiptsDir, snapshotsDir + "/" + journalDir} {
-		if err := o.ensureDir(o.game + "/" + dir); err != nil {
+		if err := o.ensureDir(o.target.dir + "/" + dir); err != nil {
 			return errVault(o.plan.Vault, "%w", err)
 		}
 	}
 	// Only the ancestors of the journal stay pinned across the switch
 	// (ADR 0006 §10, creation step 5); receipts is held again to be written.
-	if err := o.vault.Release(o.game + "/" + snapshotsDir + "/" + receiptsDir); err != nil {
+	if err := o.vault.Release(o.target.dir + "/" + snapshotsDir + "/" + receiptsDir); err != nil {
 		return errVault(o.plan.Vault, "%w", err)
 	}
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
@@ -298,7 +298,7 @@ func (o *operation) currentUnchanged() error {
 	if err != nil {
 		return err
 	}
-	if id, err := o.vault.Identity(o.game + "/" + currentDir); err != nil || id != o.sourceIdentity {
+	if id, err := o.vault.Identity(o.target.dir + "/" + currentDir); err != nil || id != o.sourceIdentity {
 		return o.intervene(fmt.Sprintf("current was replaced while it was read, or cannot be checked: %v %v; nothing recorded", id, err))
 	}
 	if differences := compareWithReceipt(dir, backup.Receipt{Sources: o.content}); len(differences) > 0 {
@@ -313,8 +313,7 @@ func (o *operation) currentUnchanged() error {
 // and compares it with the plan; its identity is read again after the
 // content (ADR 0006 §10, creation step 3).
 func (o *operation) verifyIncomplete() error {
-	segments := append(append([]string{}, o.plan.vaultSegments...), strings.Split(o.stagingDir(), "/")...)
-	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
+	dir, err := o.readBack(o.stagingDir())
 	if err != nil {
 		return err
 	}
@@ -354,7 +353,7 @@ func (o *operation) provenanceBeforePublish() error {
 // published record. From publish-intent on, nothing is recorded as
 // failed: an interrupted switch is left to recovery.
 func (o *operation) publishSnapshot() error {
-	published := o.game + "/" + o.domain.published(o.op)
+	published := o.target.dir + "/" + o.domain.published(o.op)
 	if err := o.record(backup.StepPublishIntent, backup.StepValues{Staging: o.staging}); err != nil {
 		return err
 	}
@@ -470,7 +469,7 @@ func (o *operation) writeSnapshotReceipt(publishedAt, recoveredAt *time.Time, re
 	if err != nil {
 		return [32]byte{}, err
 	}
-	receipts := o.game + "/" + snapshotsDir + "/" + receiptsDir
+	receipts := o.target.dir + "/" + snapshotsDir + "/" + receiptsDir
 	if err := o.vault.Hold(receipts); err != nil {
 		return [32]byte{}, err
 	}

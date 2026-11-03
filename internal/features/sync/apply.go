@@ -126,7 +126,7 @@ type operation struct {
 	plan    Plan
 	vault   Vault
 	domain  domain
-	game    string // games/<id>
+	target  target
 	op      string
 	started time.Time
 	effect  Effect
@@ -212,18 +212,28 @@ func (s *Service) Apply(ctx context.Context, request Request, w Writer) (Result,
 }
 
 func (s *Service) begin(ctx context.Context, plan Plan, w Writer) (*operation, error) {
+	o, err := s.open(ctx, vaultTarget(plan.Vault, plan.vaultVolume, plan.vaultSegments, plan.Game.ID), w)
+	if err != nil {
+		return nil, err
+	}
+	o.plan = plan
+	return o, nil
+}
+
+// open starts an operation that writes below t, through a new session on
+// its root, with a new operation id and the domain of current.
+func (s *Service) open(ctx context.Context, t target, w Writer) (*operation, error) {
 	now := w.Clock.Now().UTC()
 	random := make([]byte, 4)
 	if _, err := io.ReadFull(w.Random, random); err != nil {
 		return nil, fmt.Errorf("operation id: %w", err)
 	}
-	session, err := w.Vaults.Open(plan.Vault)
+	session, err := w.Vaults.Open(t.path)
 	if err != nil {
-		return nil, errVault(plan.Vault, "%v", err)
+		return nil, t.errorf("%v", err)
 	}
 	return &operation{
-		s: s, w: w, ctx: ctx, plan: plan, vault: session, domain: currentDomain,
-		game:     gamesDir + "/" + plan.Game.ID,
+		s: s, w: w, ctx: ctx, vault: session, domain: currentDomain, target: t,
 		op:       now.Format("20060102T150405") + "-" + hex.EncodeToString(random),
 		started:  now,
 		attempts: map[int]map[int]bool{}, receipt: map[int]bool{}, marker: map[int]bool{},
@@ -294,9 +304,12 @@ func (o *operation) wrote() {
 
 func (o *operation) now() time.Time { return o.w.Clock.Now().UTC() }
 
-func (o *operation) journalDir() string { return o.game + "/" + o.domain.journals + "/" + o.op }
+func (o *operation) journalDir() string { return o.at(o.domain.journals + "/" + o.op) }
 
-func (o *operation) stagingDir() string { return o.game + "/" + o.domain.staging(o.op) }
+func (o *operation) stagingDir() string { return o.at(o.domain.staging(o.op)) }
+
+// at names rel below the directory of the operation's target.
+func (o *operation) at(rel string) string { return o.target.at(rel) }
 
 // initialize follows steps I2 to I9 of ADR 0006 §4, made only of exclusive
 // creations, up to the planned record.
@@ -323,13 +336,13 @@ func (o *operation) initialize() error {
 		}
 	}
 	// I5: games and the game directory, each only if missing.
-	for _, dir := range []string{gamesDir, o.game} {
+	for _, dir := range []string{gamesDir, o.target.dir} {
 		if err := o.ensureDir(dir); err != nil {
 			return errVault(o.plan.Vault, "%w", err)
 		}
 	}
 	// I6: the lock, never written or deleted.
-	if err := o.vault.Lock(o.game + "/" + lockFile); err != nil {
+	if err := o.vault.Lock(o.at(o.target.lock)); err != nil {
 		var busy interface{ Busy() bool }
 		if errors.As(err, &busy) && busy.Busy() {
 			return errVault(o.plan.Vault, "%s", o.domain.busy)
@@ -344,7 +357,7 @@ func (o *operation) initialize() error {
 		return err
 	}
 	// I8: the operation directory, exclusive.
-	if err := o.ensureDir(o.game + "/" + o.domain.journals); err != nil {
+	if err := o.ensureDir(o.target.dir + "/" + o.domain.journals); err != nil {
 		return errVault(o.plan.Vault, "%w", err)
 	}
 	if err := o.vault.CreateDir(o.journalDir()); err != nil {
@@ -378,7 +391,7 @@ func (o *operation) underLock() error {
 		// Recognition refused under lock: current is not the generation the
 		// plan recognised, code 3 before any journal (ADR 0006 §5, A2).
 		for _, intervention := range v.interventions {
-			if intervention.Subject == o.game+"/"+currentDir || intervention.Subject == o.game+"/"+retainedDir+"/"+o.previous {
+			if intervention.Subject == o.target.dir+"/"+currentDir || intervention.Subject == o.target.dir+"/"+retainedDir+"/"+o.previous {
 				o.effect = EffectIntervention
 				return &InterventionError{Cause: string(intervention.Cause) + " " + intervention.Subject + ": " + intervention.Detail}
 			}
