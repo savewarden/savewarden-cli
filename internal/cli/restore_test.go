@@ -258,6 +258,13 @@ mode: recovery plan only, nothing written
 	if strings.Contains(stdout, "vault") {
 		t.Fatalf("a recovery never names the vault:\n%s", stdout)
 	}
+	// Nothing to recover is concluded before the manifest is read.
+	nothing := sync.RestoreRecovery{ManifestPath: `D:\Manifests\synthetic-game.yaml`, Destination: `G:\Restores\synthetic`,
+		State: sync.DestinationNew, Action: sync.RecoverNothing}
+	stdout, _, err = runRestore(t, &fakeRestorer{recovery: nothing}, recoverArgs...)
+	if err != nil || !strings.Contains(stdout, "game: not read, nothing to recover\ndestination: G:\\Restores\\synthetic (new restore area)\nrestore operation: none\n") {
+		t.Fatalf("nothing to recover: %v\n%s", err, stdout)
+	}
 	// Performed, and an intervention.
 	result := sync.RestoreResult{Operation: op, Effect: sync.EffectPublished, Recovery: &recovery}
 	restorer = &fakeRestorer{result: result}

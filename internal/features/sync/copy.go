@@ -115,7 +115,7 @@ func (o *operation) copyFile(scope Scope, sourceID, from, to string, want backup
 	}
 	out, err := o.vault.NewFile(to, want.ModTime)
 	if err != nil {
-		return fmt.Errorf("staging %s: %w", to, err)
+		return fmt.Errorf("%s %s: %w", o.domain.copy, to, err)
 	}
 	hash := sha256.New()
 	read, copyErr := copyHashed(out, hash, file, want.Size)
@@ -125,7 +125,7 @@ func (o *operation) copyFile(scope Scope, sourceID, from, to string, want backup
 	var write *writeError
 	switch {
 	case errors.As(copyErr, &write):
-		return fmt.Errorf("staging %s: %w", to, write.err)
+		return fmt.Errorf("%s %s: %w", o.domain.copy, to, write.err)
 	case copyErr != nil:
 		return fmt.Errorf("source %s, %s: %w", sourceID, want.Path, copyErr)
 	}

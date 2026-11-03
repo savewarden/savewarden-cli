@@ -316,11 +316,13 @@ func (a *area) explain(scope Scope, name string) {
 			a.intervene(CauseJournalAmbiguous, backup.RestoreReceiptsDir+"/"+op+".json", "no restore operation of this area can have committed this receipt")
 		}
 	}
-	// A receipt temporary is an attempt of its operation, which must exist
-	// (ADR 0006 §11, destination without journaled operation).
+	// A receipt temporary is an attempt of its operation, made only after
+	// publish-intent: its journal must have reached that step, whatever
+	// followed, a rollback included (ADR 0006 §11).
 	for op := range a.receiptTaken {
-		if _, ok := a.journals[op]; !ok {
-			a.intervene(CauseJournalAmbiguous, backup.RestoreReceiptsDir+"/"+op+".json.tmp-*", "no restore journal explains this receipt temporary")
+		if j, ok := a.journals[op]; !ok || !reached(j, backup.StepPublishIntent) {
+			a.intervene(CauseJournalAmbiguous, backup.RestoreReceiptsDir+"/"+op+".json.tmp-*",
+				"no restore operation of this area can have written this receipt temporary: its journal never reached publish-intent")
 		}
 	}
 	for op, j := range a.journals {
@@ -340,6 +342,16 @@ func (a *area) explain(scope Scope, name string) {
 		a.restores = append(a.restores, HandedOverRestore{ID: op, Snapshot: j.RestoredSnapshot.Operation,
 			Condition: backup.HandedOverCondition(published, incomplete, publishedKnown, incompleteKnown)})
 	}
+}
+
+// reached reports whether the journal committed step at some point.
+func reached(j backup.Journal, step backup.Step) bool {
+	for _, r := range j.Records {
+		if r.Step == step {
+			return true
+		}
+	}
+	return false
 }
 
 // handedPresence describes one name of a handed-over restore: Absent, New

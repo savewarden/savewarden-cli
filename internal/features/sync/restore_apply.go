@@ -24,6 +24,8 @@ var restoreDomain = domain{
 	newRecord: backup.NewRestoreRecord,
 	changed:   CodeChangedDuringRestore,
 	busy:      "another restore is running in this area",
+	copy:      "incomplete copy",
+	movedBack: "the restore was moved back to its incomplete copy",
 }
 
 // areaSubject names a restore area in an intervention no operation explains.
@@ -333,12 +335,50 @@ func (o *operation) commitAreaMarker(data []byte) error {
 		err = o.move(temporary, backup.RestoreAreaMarkerName)
 		switch {
 		case errors.Is(err, fs.ErrExist):
-			return o.target.errorf("destination-changed: another run marked this area first; its temporary %s is left as an abandoned attempt, run restore again", temporary)
+			// The loser writes nothing more and tries nothing again: it reads
+			// the destination again, for its diagnostic only.
+			return o.target.errorf("destination-changed: another run marked this area first; read again, it %s; its temporary %s is left as an abandoned attempt, run restore again",
+				o.describeAfterLoss(), temporary)
 		case err != nil:
 			return o.target.errorf("marker: %w", err)
 		}
 		return nil
 	}
+}
+
+// describeAfterLoss reads the destination again without following
+// anything, after another run validated its marker first, and classifies
+// what it now holds (ADR 0006 §11, concurrency of the marker validation).
+// Nothing it finds is adopted.
+func (o *operation) describeAfterLoss() string {
+	scope, err := o.s.files.OpenScope(o.target.volume)
+	if err != nil {
+		return "cannot be read: " + err.Error()
+	}
+	defer func() { _ = scope.Close() }()
+	name := strings.Join(o.target.segments, "/")
+	entries, err := list(scope, name)
+	if err != nil {
+		return "cannot be read: " + err.Error()
+	}
+	root := backup.ClassifyRestoreRoot(entries)
+	switch root.State {
+	case backup.RestoreRootMarked:
+		data, err := readFile(scope, join(name, backup.RestoreAreaMarkerName), markerReadLimit)
+		if err != nil {
+			return "holds a marker that cannot be read: " + err.Error()
+		}
+		marker, err := backup.DecodeRestoreAreaMarker(data)
+		if err != nil {
+			return "holds an invalid marker: " + err.Error()
+		}
+		return fmt.Sprintf("is a restore area of game %q", marker.GameID)
+	case backup.RestoreRootInterrupted:
+		return "holds only marker temporaries"
+	case backup.RestoreRootEmpty:
+		return "is empty"
+	}
+	return "is not a restore area"
 }
 
 // copySnapshot creates <op>.incomplete after its intent, copies the

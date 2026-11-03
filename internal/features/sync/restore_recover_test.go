@@ -335,6 +335,31 @@ func TestNothingToRecoverOpensNoSession(t *testing.T) {
 			}
 		})
 	}
+	// P2-01 of the protocol review, the order of ADR 0006 §11: nothing to
+	// recover is concluded before the manifest is read, even an invalid
+	// one; a recovery that may write requires it.
+	invalid := manifest()
+	invalid.Game.ID = ""
+	recoverWithInvalid := func(f *fakeFS) (sync.RestoreResult, error) {
+		return service(f, invalid).RestoreRecover(context.Background(), restoreRecoverRequest(),
+			restoreWriter(newFakeVaults(f), restoreAt.Add(timeLater), "\x00\x00\x00\x00"))
+	}
+	for name, change := range map[string]func(t *testing.T, f *fakeFS){
+		"absent":    func(*testing.T, *fakeFS) {},
+		"empty":     func(_ *testing.T, f *fakeFS) { f.mkdir(restoreDir) },
+		"structure": func(t *testing.T, f *fakeFS) { markArea(t, f, restoreDir, "synthetic-game") },
+	} {
+		f := restorable(t)
+		change(t, f)
+		if result, err := recoverWithInvalid(f); err != nil || result.Recovery.Action != sync.RecoverNothing || result.Recovery.Game.ID != "" {
+			t.Fatalf("%s with an invalid manifest: %+v, %v", name, result, err)
+		}
+	}
+	f := interruptedRestoreAt(t, restoreMove, true)
+	before := everything(f)
+	if _, err := recoverWithInvalid(f); err == nil || everything(f) != before {
+		t.Fatalf("a recovery that may write requires the manifest: %v", err)
+	}
 	// A destination that is not an area is refused, code 1.
 	for name, change := range map[string]func(f *fakeFS){
 		"file":      func(f *fakeFS) { f.put(restoreDir, f.file("x")) },
@@ -415,21 +440,64 @@ func TestRestoreAreaInitializationIsResumable(t *testing.T) {
 		f.put(restoreDir+`\savewarden-restore.json`, f.file(string(data)))
 	}
 	result, err := restoreRecoverWith(f, hooks)
-	expectRestoreRefused(t, err, "destination-changed: another run marked this area first")
+	expectRestoreRefused(t, err, `destination-changed: another run marked this area first; read again, it is a restore area of game "synthetic-game"`)
 	if result.Effect != sync.EffectMetadata {
 		t.Fatalf("loser: %+v", result)
 	}
 	if rec, err := restoreRecoverPlan(f); err != nil || rec.Action != sync.RecoverNothing {
 		t.Fatalf("after the race: %q, %v", rec.Action, err)
 	}
-	// A marker validated between the plan and the resume: nothing to do.
-	f = interruptedRestoreAt(t, "Close savewarden-restore.json.tmp-1", true)
-	hooks = hookedRestore(f)
-	hooks.before["Open"] = func() {
-		f.put(restoreDir+`\savewarden-restore.json`, f.file(string(f.get(restoreDir+`\savewarden-restore.json.tmp-1`).data)))
+	// P1-03 of the protocol review: a marker validated between the plan and
+	// the resume is read strictly. Only a marker of this game over an area
+	// without operation leaves nothing to do; anything else is refused,
+	// code 1, nothing written.
+	markerOf := func(gameID string) string {
+		data, err := backup.EncodeRestoreAreaMarker(backup.RestoreAreaMarker{CreatedAt: restoreAt, ToolVersion: "other", GameID: gameID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
 	}
-	if result, err := restoreRecoverWith(f, hooks); err != nil || result.Effect != sync.EffectNone {
-		t.Fatalf("validated meanwhile: %+v, %v", result, err)
+	for _, tt := range []struct {
+		name    string
+		change  func(f *fakeFS)
+		mention string
+	}{
+		{"same game", func(f *fakeFS) { f.put(restoreDir+`\savewarden-restore.json`, f.file(markerOf("synthetic-game"))) }, ""},
+		{"same game, structure", func(f *fakeFS) {
+			f.put(restoreDir+`\savewarden-restore.json`, f.file(markerOf("synthetic-game")))
+			f.mkdir(restoreDir + `\receipts`)
+			f.mkdir(restoreDir + `\journal`)
+		}, ""},
+		{"other game", func(f *fakeFS) { f.put(restoreDir+`\savewarden-restore.json`, f.file(markerOf("other-game"))) }, `is a restore area of game "other-game"`},
+		{"invalid marker", func(f *fakeFS) { f.put(restoreDir+`\savewarden-restore.json`, f.file(`{"schema":"savewarden.vault"}`)) }, "a marker is never rewritten"},
+		{"operation object", func(f *fakeFS) {
+			f.put(restoreDir+`\savewarden-restore.json`, f.file(markerOf("synthetic-game")))
+			f.mkdir(restoreDir + `\` + restored2)
+		}, "destination-changed: another run marked this area, which now holds unexpected-entry " + restored2},
+		{"operation journal", func(f *fakeFS) {
+			f.put(restoreDir+`\savewarden-restore.json`, f.file(markerOf("synthetic-game")))
+			f.mkdir(restoreDir + `\receipts`)
+			f.mkdir(restoreDir + `\journal\` + restored2)
+		}, "destination-changed: another run marked this area, which now holds pending-operation " + restored2},
+	} {
+		t.Run("validated meanwhile, "+tt.name, func(t *testing.T) {
+			f := interruptedRestoreAt(t, "Close savewarden-restore.json.tmp-1", true)
+			hooks := hookedRestore(f)
+			var before string
+			hooks.before["Open"] = func() { tt.change(f); before = everything(f) }
+			result, err := restoreRecoverWith(f, hooks)
+			if len(hooks.calls) != 0 || everything(f) != before {
+				t.Fatalf("written: %q", hooks.calls)
+			}
+			if tt.mention == "" {
+				if err != nil || result.Effect != sync.EffectNone {
+					t.Fatalf("nothing to do: %+v, %v", result, err)
+				}
+				return
+			}
+			expectRestoreRefused(t, err, tt.mention)
+		})
 	}
 	// Nine temporaries exhaust envelope E1: code 3, nothing written.
 	f = restorable(t)
@@ -501,6 +569,72 @@ func TestRestoreRecoveryRereadsUnderLock(t *testing.T) {
 	expectRestoreRefused(t, err, "destination-changed: the restore area changed since the recovery plan")
 	if restoreJournal(f, restoreApplied) != journal || f.get(restoreDir+`\receipts\`+restoreApplied+".json") != nil {
 		t.Fatalf("a changed area was recovered: %s", restoreJournal(f, restoreApplied))
+	}
+}
+
+// P1-01 of the protocol review: a receipt temporary is written only after
+// publish-intent. Beside a journal that never reached it, it is an
+// ambiguity, code 3, nothing written; after a rollback that followed
+// publish-intent, it stays an accepted abandoned attempt.
+func TestReceiptTemporaryNeedsPublishIntent(t *testing.T) {
+	f := restorable(t)
+	startRestore(t, f, restoreDir, restored2, restoreAt, backup.StepPlanned)
+	f.put(restoreDir+`\receipts\`+restored2+".json.tmp-1", f.file("{"))
+	before := everything(f)
+	vaults := newFakeVaults(f)
+	result, err := restoreRecoverWith(f, vaults)
+	var intervention *sync.InterventionError
+	if !errors.As(err, &intervention) || !strings.Contains(err.Error(), "never reached publish-intent") || result.Effect != sync.EffectIntervention ||
+		len(vaults.sessions) != 0 || everything(f) != before {
+		t.Fatalf("receipt temporary after planned: %+v, %v", result, err)
+	}
+	if p := restorePlanOf(t, f); !slices.Contains(restoreCauses(p), "journal-ambiguous receipts/"+restored2+".json.tmp-*") {
+		t.Fatalf("plan: %q", restoreCauses(p))
+	}
+	// Written after the switch, then rolled back: accepted afterwards.
+	f = interruptedRestoreAt(t, "NewFile receipts/"+restoreApplied+".json.tmp-1", true)
+	f.get(restoreDir + `\` + restoreApplied + `\saves\1.save`).data = []byte("uno")
+	var blocked *sync.BlockedError
+	if _, err := restoreRecoverWith(f, newFakeVaults(f)); !errors.As(err, &blocked) || blocked.Code != sync.CodeVerificationMismatch {
+		t.Fatalf("move back: %v", err)
+	}
+	if f.get(restoreDir+`\receipts\`+restoreApplied+".json.tmp-1") == nil || lastRestoreStep(f) != "rolled-back.rec" {
+		t.Fatalf("journal %s", restoreJournal(f, restoreApplied))
+	}
+	if p := restorePlanOf(t, f); len(p.Interventions) != 0 {
+		t.Fatalf("plan after the rollback: %q", restoreCauses(p))
+	}
+}
+
+// P2-02 of the protocol review: the diagnostics of a restore never speak of
+// current or staging.
+func TestRestoreDiagnosticsNameTheRestore(t *testing.T) {
+	f := interruptedRestoreAt(t, restoreMove, true)
+	f.get(restoreDir + `\` + restoreApplied + `\saves\1.save`).data = []byte("uno")
+	vaults := newFakeVaults(f)
+	vaults.failWrite = func(call string) error {
+		if strings.Contains(call, "-rolled-back.rec") {
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	_, err := restoreRecoverWith(f, vaults)
+	if err == nil || !strings.Contains(err.Error(), "the restore was moved back to its incomplete copy but the journal is not closed") ||
+		strings.Contains(err.Error(), "current") || strings.Contains(err.Error(), "staging") {
+		t.Fatalf("move back not recorded: %v", err)
+	}
+	f = restorable(t)
+	vaults = newFakeVaults(f)
+	vaults.failWrite = func(call string) error {
+		if strings.HasPrefix(call, "Write "+restoreApplied+".incomplete/") {
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	result, err := restoreApply(f, vaults)
+	if err == nil || !strings.Contains(err.Error(), "incomplete copy "+restoreApplied+".incomplete/") || strings.Contains(err.Error(), "staging") ||
+		result.Effect != sync.EffectStaged || lastRestoreStep(f) != "failed.rec" {
+		t.Fatalf("write failure: %+v, %v", result, err)
 	}
 }
 

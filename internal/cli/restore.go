@@ -140,7 +140,12 @@ presence of output.`,
 func RenderRestoreRecovery(r sync.RestoreRecovery, mode string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "manifest: %s\n", printable(r.ManifestPath))
-	fmt.Fprintf(&b, "game: %s (%s)\n", r.Game.ID, printable(r.Game.Name))
+	if r.Game.ID == "" {
+		// Nothing to recover is concluded before the manifest is read.
+		b.WriteString("game: not read, nothing to recover\n")
+	} else {
+		fmt.Fprintf(&b, "game: %s (%s)\n", r.Game.ID, printable(r.Game.Name))
+	}
 	fmt.Fprintf(&b, "destination: %s (%s)", printable(r.Destination), r.State)
 	if r.State == sync.DestinationArea {
 		fmt.Fprintf(&b, ", %d published", len(r.Restores))

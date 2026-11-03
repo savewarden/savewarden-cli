@@ -501,7 +501,7 @@ func (o *operation) unpublish(retried bool) error {
 		return o.intervene("rollback failed: " + err.Error() + "; close the programs that use the " + o.target.label + ", then run " + o.domain.command + " --recover --apply again")
 	}
 	if err := o.record(backup.StepRolledBack, backup.StepValues{}); err != nil {
-		return o.intervene("current was moved back to staging but the journal is not closed: " + err.Error())
+		return o.intervene(o.domain.movedBack + " but the journal is not closed: " + err.Error())
 	}
 	o.critical, o.effect = false, EffectRolledBack
 	return nil

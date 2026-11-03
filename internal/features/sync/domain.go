@@ -27,6 +27,9 @@ type domain struct {
 	// busy, the diagnostic of the lock held by another operation.
 	changed backup.Code
 	busy    string
+	// copy names the staging in the diagnostics of a write, and movedBack
+	// a publication moved back to it.
+	copy, movedBack string
 }
 
 // target is the root an operation writes below, through its session, and
@@ -144,4 +147,6 @@ var currentDomain = domain{
 	newRecord: backup.NewRecord,
 	changed:   CodeChangedDuringSync,
 	busy:      "another sync is running on this game",
+	copy:      "staging",
+	movedBack: "current was moved back to staging",
 }

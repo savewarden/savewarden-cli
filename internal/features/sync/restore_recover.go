@@ -68,16 +68,12 @@ func (s *Service) RestoreRecoverPlan(ctx context.Context, request RestoreRequest
 // restoreRecoverPlan is RestoreRecoverPlan; a run that holds the lock of
 // the area does not probe it.
 func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest, underLock bool) (RestoreRecovery, error) {
-	manifest, err := s.manifests.Read(request.ManifestPath)
-	if err != nil {
-		return RestoreRecovery{}, err
-	}
 	path := request.Destination
 	volume, segments, err := game.ParseWindowsAbsolute(path)
 	if err != nil {
 		return RestoreRecovery{}, errDestination(path, "%v", err)
 	}
-	rec := RestoreRecovery{ManifestPath: request.ManifestPath, Game: manifest.Game, Destination: path, Action: RecoverNothing,
+	rec := RestoreRecovery{ManifestPath: request.ManifestPath, Destination: path, Action: RecoverNothing,
 		destVolume: volume, destSegments: segments}
 	if len(segments) == 0 {
 		return rec, errDestination(path, "is the root of a volume; choose a directory")
@@ -91,17 +87,29 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 	}
 	defer func() { _ = scope.Close() }()
 	name := strings.Join(segments, "/")
+	// Step 1: a destination with nothing to recover concludes at once,
+	// before the manifest is even read (ADR 0006 §11).
+	if state, nothing, err := nothingToRecover(scope, path, name); err != nil || nothing {
+		rec.State = state
+		return rec, err
+	}
+	// Step 2: the recovery may write; the manifest is required.
+	manifest, err := s.manifests.Read(request.ManifestPath)
+	if err != nil {
+		return rec, err
+	}
+	rec.Game = manifest.Game
 	a, err := readArea(scope, path, name, manifest.Game.ID)
 	if err != nil {
 		return rec, err
 	}
 	rec.area = a
-	switch {
-	case !a.exists:
-		rec.State = DestinationNew
-		return rec, nil
-	case a.root.State == backup.RestoreRootEmpty:
+	if !a.exists || a.root.State == backup.RestoreRootEmpty {
+		// Emptied since step 1: still nothing to recover.
 		rec.State = DestinationEmpty
+		if !a.exists {
+			rec.State = DestinationNew
+		}
 		return rec, nil
 	}
 	rec.State, rec.Restores = DestinationArea, a.restores
@@ -149,6 +157,51 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 		}
 	}
 	return rec, s.distinctDestination(path, volume, segments, refs)
+}
+
+// nothingToRecover applies the first step of a recovery, the table of the
+// destination without journaled operation (ADR 0006 §11), on names alone:
+// a destination absent, empty, or marked with only its marker, marker
+// temporaries, restore.lock and empty or absent receipts and journal has
+// nothing to recover; a file, a link or a directory that is not an area is
+// refused. Anything else needs the manifest and the full reading of the
+// area: nothing is concluded from an entry that cannot be read.
+func nothingToRecover(scope Scope, path, name string) (state string, nothing bool, err error) {
+	info, err := scope.Lstat(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return DestinationNew, true, nil
+	case err != nil:
+		return "", false, errDestination(path, "%v", err)
+	case isLink(info.Mode()) || !info.IsDir():
+		return "", false, errDestination(path, "is a link, a file or a reparse point; not a restore area")
+	}
+	entries, err := list(scope, name)
+	if err != nil {
+		return DestinationArea, false, nil
+	}
+	root := backup.ClassifyRestoreRoot(entries)
+	switch root.State {
+	case backup.RestoreRootEmpty:
+		return DestinationEmpty, true, nil
+	case backup.RestoreRootForeign:
+		return "", false, errDestination(path, "is not empty and not a restore area; choose a new or empty directory, an existing directory is never adopted")
+	case backup.RestoreRootInterrupted:
+		return DestinationArea, false, nil
+	}
+	if len(root.Published) > 0 || len(root.Incomplete) > 0 || len(root.Unexpected) > 0 {
+		return DestinationArea, false, nil
+	}
+	for dir, present := range map[string]bool{backup.RestoreReceiptsDir: root.Receipts, backup.RestoreJournalDir: root.Journal} {
+		if !present {
+			continue
+		}
+		children, err := scope.ReadDir(join(name, dir))
+		if err != nil || len(children) > 0 {
+			return DestinationArea, false, nil
+		}
+	}
+	return DestinationArea, true, nil
 }
 
 // classify decides the recovery of the pending operation of the area from
@@ -322,7 +375,7 @@ func (o *operation) verifyRestoreThenPublish(rec *RestoreRecovery) error {
 	if rec.Action == RecoverRestoreConfirm {
 		if len(differences) > 0 {
 			return o.intervene(fmt.Sprintf("the restore no longer matches the plan of %s, whose receipt is committed: %s %s, %s",
-				o.op, orDash(differences[0].source), orDash(differences[0].path), differences[0].detail))
+				o.op, orDash(differences[0].source), orDash(differences[0].path), restoreDetail(differences[0].detail)))
 		}
 		data := rec.area.receipts[o.op]
 		if _, err := backup.CheckRestoreReceipt(data, rec.journal); err != nil {
@@ -343,7 +396,7 @@ func (o *operation) verifyRestoreThenPublish(rec *RestoreRecovery) error {
 			return err
 		}
 		return &BlockedError{Code: CodeVerificationMismatch, Detail: fmt.Sprintf("restore %s %s %s: %s; %d difference(s) in all, moved back to %s",
-			o.op, orDash(first.source), orDash(first.path), strings.ReplaceAll(first.detail, "its receipt", "the plan"), len(differences),
+			o.op, orDash(first.source), orDash(first.path), restoreDetail(first.detail), len(differences),
 			backup.RestoreStagingName(o.op))}
 	}
 	now := o.now()
@@ -358,6 +411,12 @@ func (o *operation) verifyRestoreThenPublish(rec *RestoreRecovery) error {
 	return nil
 }
 
+// restoreDetail words a difference found by compareWithReceipt for a
+// restore, checked against its plan.
+func restoreDetail(detail string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(detail, "its receipt", "the plan"), "current", "the restore")
+}
+
 // resumeAreaMarker resumes an interrupted initialization, step Z3: the
 // destination, pinned by the session, is read again and must hold only
 // marker temporaries; a new marker is validated at the next free attempt,
@@ -368,16 +427,18 @@ func (o *operation) resumeAreaMarker(rec *RestoreRecovery) error {
 	if err != nil {
 		return o.target.errorf("open volume %s: %v", o.target.volume, err)
 	}
-	entries, err := list(scope, strings.Join(o.target.segments, "/"))
-	_ = scope.Close()
+	defer func() { _ = scope.Close() }()
+	name := strings.Join(o.target.segments, "/")
+	entries, err := list(scope, name)
 	if err != nil {
 		return o.target.errorf("cannot be read again before its marker: %v", err)
 	}
 	root := backup.ClassifyRestoreRoot(entries)
 	switch root.State {
 	case backup.RestoreRootMarked:
-		// Validated by another run: a marked area without operation.
-		return nil
+		// Marked by another run meanwhile: nothing to do only for a strict
+		// marker of this game and an area without any operation object.
+		return o.markedMeanwhile(scope, name, rec.Game.ID)
 	case backup.RestoreRootInterrupted:
 	default:
 		return o.target.errorf("destination-changed: it no longer holds only marker temporaries; nothing is marked, run restore --recover again")
@@ -391,4 +452,26 @@ func (o *operation) resumeAreaMarker(rec *RestoreRecovery) error {
 		return err
 	}
 	return o.commitAreaMarker(data)
+}
+
+// markedMeanwhile judges an area another run marked between the recovery
+// plan and the resume, read as strictly as any area: a marker unreadable,
+// of an unknown schema or of another game is refused, code 1, never
+// rewritten; an area holding anything beyond its structure is
+// destination-changed, code 1, nothing written. Only a marker of this game
+// over an area without any operation object leaves nothing to do, code 0.
+func (o *operation) markedMeanwhile(scope Scope, name, gameID string) error {
+	a, err := readArea(scope, o.target.path, name, gameID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case len(a.interventions) > 0:
+		first := a.interventions[0]
+		return o.target.errorf("destination-changed: another run marked this area, which now holds %s %s; nothing is written, run restore --recover again",
+			first.Cause, first.Subject)
+	case len(a.journals) > 0 || len(a.receipts) > 0 || len(a.receiptTaken) > 0 || len(a.root.Published) > 0 || len(a.root.Incomplete) > 0:
+		return o.target.errorf("destination-changed: another run marked this area, which now holds operations; nothing is written, run restore --recover again")
+	}
+	return nil
 }

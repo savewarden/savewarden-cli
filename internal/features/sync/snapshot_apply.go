@@ -23,6 +23,9 @@ var snapshotDomain = domain{
 	newRecord: backup.NewSnapshotRecord,
 	changed:   CodeCurrentModified,
 	busy:      "another operation is running on this game",
+	// The diagnostics of B3, kept as they are (ADR 0008).
+	copy:      "staging",
+	movedBack: "current was moved back to staging",
 }
 
 // CauseSourceUnverified: the receipt of the generation a snapshot copies

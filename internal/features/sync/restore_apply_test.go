@@ -466,14 +466,31 @@ func TestMarkerValidationRaceHasOneWinner(t *testing.T) {
 	hooks := hookedRestore(f)
 	hooks.before["Move savewarden-restore.json.tmp-1 savewarden-restore.json"] = func() {
 		f.put(restoreDir+`\savewarden-restore.json`, f.file(string(other(f))))
+		f.reads = nil
 	}
 	result, err := restoreApply(f, hooks)
-	expectRestoreRefused(t, err, "destination-changed: another run marked this area first")
+	// P1-02 of the protocol review: the loser reads the destination again,
+	// without following anything, then refuses; it adopts nothing and
+	// writes nothing more.
+	expectRestoreRefused(t, err, `destination-changed: another run marked this area first; read again, it is a restore area of game "synthetic-game"`)
 	if result.Effect != sync.EffectMetadata || result.State() != "metadata only; nothing staged or published" ||
 		!slices.Equal(names(f.get(restoreDir)), []string{"savewarden-restore.json", "savewarden-restore.json.tmp-1"}) ||
 		string(f.get(restoreDir+`\savewarden-restore.json`).data) != string(other(f)) {
 		t.Fatalf("loser: %+v, area %q", result, names(f.get(restoreDir)))
 	}
+	if !slices.Contains(f.reads, "ReadDir "+restoreDir) || !strings.HasPrefix(hooks.calls[len(hooks.calls)-1], "Move savewarden-restore.json.tmp-1 ") {
+		t.Fatalf("no reading again, or a write after the rename: reads %q, calls %q", f.reads, hooks.calls)
+	}
+	// An invalid marker validated by another process is described, never
+	// adopted.
+	f2 := restorable(t)
+	hooks2 := hookedRestore(f2)
+	hooks2.before["Move savewarden-restore.json.tmp-1 savewarden-restore.json"] = func() {
+		f2.put(restoreDir+`\savewarden-restore.json`, f2.file(`{"schema":"savewarden.vault"}`))
+	}
+	_, err = restoreApply(f2, hooks2)
+	expectRestoreRefused(t, err, "read again, it holds an invalid marker")
+	expectRestoreRefused(t, restoreError(f2, restoreDir), "a marker is never rewritten")
 	// The abandoned temporary is accepted beside the marker afterwards.
 	if result, err := restoreApply(f, newFakeVaults(f)); err != nil || result.Effect != sync.EffectPublished {
 		t.Fatalf("after the race: %+v, %v", result, err)
