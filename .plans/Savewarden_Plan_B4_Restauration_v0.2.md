@@ -1,6 +1,6 @@
 # Savewarden — Plan B4 : restauration vers un dossier isolé
 
-> **Statut : v0.2 — CADRAGE SOUMIS AU PROPRIÉTAIRE : R1 à R15 et X1 à X4 recommandés par la revue CTO de la v0.1, ratification formelle par le propriétaire attendue ; corrections C1 à C4 de cette revue et revue croisée indépendante intégrées ; revue CTO de la v0.2 favorable, questions 7 à 9 arbitrées, ajustements V1 à V3 intégrés ; projets d'ADR 0004, 0006 §11 et 0009 rédigés, non acceptés ; acceptation formelle par le propriétaire attendue ; aucun GO de développement**
+> **Statut : v0.2 — VALIDÉ PAR LE PROPRIÉTAIRE le 3 novembre 2026, sur `342167f` certifié par le CTO : R1 à R15, X1 à X4 et arbitrages Q7 à Q9 ratifiés ; corrections C1 à C4, revue croisée indépendante et ajustements V1 à V3 intégrés ; ADR 0004 (amendement B4), 0006 §11 et 0009 acceptés ; GO de développement B4 non donné ; push, PR, fusion et pilote soumis à des GO distincts**
 > Version du plan : `0.2` — 1er novembre 2026 ; remplace le brouillon v0.1 (`1bb33d7`)
 > Lot : **B4**, cible `release/v0.1.0-a1`
 > Cadre : [plan directeur v0.1](Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md) §7 B4,
@@ -23,9 +23,9 @@ un ADR de sécurité et la protection de l'état actif.
 
 ADR 0006 reste la **référence de sécurité** : son §1 range déjà « la
 restauration vers un dossier isolé en B4, pour son staging et sa
-publication » dans sa portée. Son amendement, le §11, rédigé en projet avec
-cette v0.2, porte le protocole de la restauration et nomme ses écarts X1 à
-X4.
+publication » dans sa portée. Son amendement, le §11, rédigé avec cette
+v0.2 et accepté avec elle le 3 novembre 2026, porte le protocole de la
+restauration et nomme ses écarts X1 à X4.
 
 Ce plan ne vaut ni GO de développement, ni acceptation d'ADR, ni autorisation
 de push, de tag ou de release, ni accès aux sauvegardes réelles.
@@ -38,9 +38,10 @@ de push, de tag ou de release, ni accès aux sauvegardes réelles.
 
 Revue CTO de la v0.1, transmise au propriétaire le 1er novembre 2026 :
 architecture favorable, aucun P0 ; **R1 à R15 et X1 à X4 recommandés tels
-quels**, sous réserve de quatre corrections normatives, intégrées (§0.5). Ce
-n'est pas encore leur ratification par le propriétaire, qui accompagnera
-l'acceptation des ADR. La première question de fond était celle de
+quels**, sous réserve de quatre corrections normatives, intégrées (§0.5). Le
+propriétaire les a ratifiés le 3 novembre 2026, avec l'acceptation des ADR,
+après la certification par le CTO du paquet `342167f`. La première question
+de fond était celle de
 l'emplacement du journal : B4 est la première opération qui écrit hors du
 coffre (R3 à R5).
 
@@ -69,7 +70,7 @@ API d'écriture nouvelle, attributs ou ACL, suppression ou nettoyage, toute
 ### 0.2 Écarts à ADR 0006, nommés comme tels
 
 Comme B3 nommait I8 par domaine et S13, B4 nomme ses assouplissements ; chacun
-est écrit dans le projet d'ADR 0006 §11 avec sa raison.
+est écrit dans ADR 0006 §11 avec sa raison.
 
 | # | Écart | Raison |
 | --- | --- | --- |
@@ -338,10 +339,10 @@ s'ouvre sur un coffre ou sur une zone, avec son verrou.
 
 ### 3.3 ADR à rédiger
 
-Rédigés sur `docs/b4-framing` avec cette v0.2, comme pour B3, et marqués
-**projet, non accepté**. Aucun code ne les implémente. Leur acceptation par
-le propriétaire précède tout code d'écriture ; ils sont versés comme premiers
-commits de la PR (§8).
+Rédigés sur `docs/b4-framing` avec cette v0.2, comme pour B3, et **acceptés
+par le propriétaire le 3 novembre 2026**. Aucun code ne les implémente
+encore. Ils sont versés comme premiers commits de la PR, avant tout code
+d'écriture (§8).
 
 | ADR | Objet |
 | --- | --- |
@@ -788,7 +789,7 @@ use `<dest>\<op>` yet ». ADR 0009 fait foi pour ces tableaux.
 
 ## 5. Protocole proposé : ADR 0006 §11
 
-Résumé ; le texte normatif est celui d'ADR 0006 §11, en projet avec cette
+Résumé ; le texte normatif est celui d'ADR 0006 §11, accepté avec cette
 v0.2, qui prévaut en cas d'écart.
 
 ### 5.1 Notation
@@ -985,13 +986,14 @@ Changements interdits :
 
 ## 8. Plan d'exécution
 
-Avant tout code : cette v0.2 validée et ses projets d'ADR acceptés par le
-propriétaire sur `docs/b4-framing`, puis un GO de développement distinct. La PR `feat/b4-restore` part de ces commits de
+Avant tout code : cette v0.2 validée et ses ADR acceptés par le propriétaire
+sur `docs/b4-framing`, fait le 3 novembre 2026, puis un GO de développement
+distinct, non donné. La PR `feat/b4-restore` part de ces commits de
 cadrage, comme celles de B2c et de B3.
 
 | # | Commit | Point de contrôle |
 | --- | --- | --- |
-| 0 | Plan validé ; ADR 0006 et 0004 amendés ; ADR 0009 ; statuts passés à « accepté » | **Revue du cadrage** par le propriétaire |
+| 0 | Plan validé ; ADR 0006 et 0004 amendés ; ADR 0009 ; statuts passés à « accepté » : commits de cadrage de `docs/b4-framing`, jusqu'à l'acceptation du 3 novembre 2026 | **Revue du cadrage** par le propriétaire, faite |
 | 1 | `entities/backup` : receipt de restauration, marqueur de zone, mode restauration de l'automate et ses champs, classement, tests purs | — |
 | 2 | Couture du moteur de `features/sync` : source de lecture et cible d'écriture explicites, `operation` sans le `Plan` de `sync`, sans changement de comportement : suites B2 et B3 inchangées, sorties de `sync` et `snapshot` identiques octet pour octet | **Revue indépendante de non-régression, obligatoire** avant le commit 3 : aucun usage de la racine de session par `o.plan.vault*` |
 | 3 | Lecteur ciblé d'un snapshot ; lecture de la zone ; plan de restauration en lecture seule ; CLI `restore` sans `--apply` | — |
@@ -1261,3 +1263,4 @@ recommandation **sans auto-approbation**.
 | 0.1 | 1er novembre 2026 | local, branche `docs/b4-framing` | Brouillon de cadrage sur le GO du propriétaire : décisions R1 à R15 proposées, protocole de restauration proposé comme ADR 0006 §11, réexamen de l'extraction du moteur, points ouverts de B3 et leur effet sur B4, matrice de tests, critères. Revue indépendante en lecture seule intégrée avant remise : aucun P0 ; huit P1, soit état du snapshot côté coffre en code 1 sans sonder `sync.lock` (E4), reprise d'une initialisation interrompue, distinctions refaites par la récupération, recouvrement par identité entre lettres de lecteur, relecture de `<dest>` avant le marqueur, écarts E1 à E4 nommés, coffre retiré pendant la copie, couture source et cible du moteur et lecteurs amovibles acceptés comme pour le coffre ; P2 intégrés. Aucun ADR rédigé, aucun GO de développement |
 | 0.2 | 1er novembre 2026 | local, branche `docs/b4-framing` ; fichier renommé depuis la v0.1 | Revue CTO de la v0.1 : architecture favorable, aucun P0 ; R1 à R15 et X1 à X4 recommandés, ratification par le propriétaire attendue. C1, grammaire de la zone en deux classes et protocole de remise quel que soit le type de l'objet ; C2, zone sans journal sans objet d'opération seulement ; C3, règle d'observabilité des chemins de référence, à la création comme à la récupération ; C4, test Windows réel par `subst` en CI. Projets d'ADR 0004, 0006 §11 et 0009, non acceptés. Revue croisée indépendante des textes, intégrée avant remise (§0.6) : P0-1, refus pour une lettre de référence sans volume ; P0-2, aucune session ni verrou avant le marqueur en récupération ; P1-1 à P1-9, dont les écarts renommés X1 à X4 ; questions 7 à 9 ouvertes. Aucun GO de développement |
 | 0.2, revue CTO | 2 novembre 2026 | local, branche `docs/b4-framing` | Revue CTO de la v0.2 : avis favorable, aucun nouveau P0 ; Q7 acceptée avec la limitation de reprise après sinistre écrite, Q8 et Q9 acceptées ; V1, concurrence de la validation du marqueur et ses tests ; V2, statut du §10 d'ADR 0006 corrigé dans un commit séparé ; V3, phrases historiques d'ADR 0004 marquées et priorité de l'amendement écrite. R1 à R15 et X1 à X4 inchangés. ADR non acceptés ; aucun GO de développement |
+| 0.2, validation | 3 novembre 2026 | local, branche `docs/b4-framing` | Paquet `342167f` certifié par le CTO ; plan validé par le propriétaire ; R1 à R15, X1 à X4 et Q7 à Q9 ratifiés ; ADR 0004 (amendement B4), 0006 §11 et 0009 passés au statut accepté ; contenu normatif inchangé. GO de développement B4 non donné |

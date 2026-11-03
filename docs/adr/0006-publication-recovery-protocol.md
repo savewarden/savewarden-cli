@@ -7,8 +7,9 @@ cadrage et les revues de B2c ; amendements de B2c postérieurs au cadrage
 ratifiés par le propriétaire le 30 octobre 2026 (voir Amendements). Le §10,
 snapshots de B3, est accepté par le propriétaire le 31 octobre 2026, avec le
 plan B3 v0.2, et implémenté par B3, fusionné en `08ec0c2`. Le §11, restauration
-isolée de B4, et ses renvois depuis les §1, §2, §3 et §8 sont un **projet,
-non accepté**, rédigé le 1er novembre 2026 avec le plan B4 v0.2.
+isolée de B4, et ses renvois depuis les §1, §2, §3 et §8, rédigés le
+1er novembre 2026, sont acceptés par le propriétaire le 3 novembre 2026, avec
+le plan B4 v0.2 ; aucun code ne les implémente encore.
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -36,10 +37,10 @@ celles du plan.
 
 ADR 0006 s'applique à **toute opération qui rend visible un ensemble de
 fichiers sous un nom stable** dans un coffre Savewarden, ou dans une zone de
-restauration (§11, projet), et à **toute
+restauration (§11), et à **toute
 récupération** : `current` en B2, snapshots en B3, restauration vers un dossier
 isolé en B4 pour son staging et sa publication, dans une zone de restauration
-hors du coffre (§11, projet). Une future opération qui ne
+hors du coffre (§11). Une future opération qui ne
 peut pas s'y conformer exige un amendement de l'ADR, revu, avant son code.
 
 ### 2. Invariants
@@ -53,7 +54,7 @@ peut pas s'y conformer exige un amendement de l'ADR, revu, avant son code.
 | I5 | Fail-closed : toute ambiguïté arrête tout, sans déplacement ni écriture, code 3, diagnostic |
 | I6 | Rollback par défaut avant publication achevée ; finalisation seulement après revérification intégrale du nouvel état contre le plan |
 | I7 | Une génération publiée ou conservée, un receipt, un enregistrement ne sont jamais rouverts en écriture |
-| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` ; précisé par domaine pour les snapshots au §10 (B3), et par zone pour les restaurations, qui n'écrivent pas le coffre, au §11 (B4, projet) |
+| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` ; précisé par domaine pour les snapshots au §10 (B3), et par zone pour les restaurations, qui n'écrivent pas le coffre, au §11 (B4) |
 | I9 | La publication est **transactionnelle par protocole, pas atomique** : la fenêtre où `current` est absent est reconnue et récupérable |
 | I10 | Seules les garanties documentées de Windows sont revendiquées ; le reste est une hypothèse couverte par une récupération fondée sur l'observation |
 | I11 | L'initialisation du coffre, qui précède tout journal, n'est faite que de créations exclusives et d'un marqueur validé par renommage ; chaque état partiel est reconnu par le tableau du §4 ou refusé sans mutation, jamais adopté implicitement |
@@ -205,7 +206,7 @@ l'observation et les temporaires du numéro suivant.
 | Neuf temporaires du numéro suivant quand la reprise doit l'écrire | Enveloppe E1 épuisée |
 | Second `rollback-failed` pour la même intention | Enveloppe E3 dépassée |
 | Enregistrement d'une autre opération dans le dossier | Mélange d'opérations |
-| Deux opérations non terminales pour un jeu ; par domaine selon le §10 (B3) ; par zone selon le §11 (B4, projet) | Exclusivité violée |
+| Deux opérations non terminales pour un jeu ; par domaine selon le §10 (B3) ; par zone selon le §11 (B4) | Exclusivité violée |
 | Enregistrement après un état terminal | Opération close modifiée |
 | Observation contraire au dernier enregistrement, dans un sens ou dans l'autre : `published` sans `current` de l'identité attendue, ou `current` publié alors que `publish-intent` manque | Durabilité ou intervention extérieure non prouvées |
 | Identité de fichier indisponible, dossier du journal illisible | Observation impossible |
@@ -589,7 +590,7 @@ suivre un lien ; déplacer ou lire un objet dont l'identité n'est pas celle
 attendue ; agir sur un journal ambigu ; écrire dans un dossier non marqué,
 hormis l'initialisation I2 à I4 d'un dossier absent, vide ou ne contenant que
 des temporaires de marqueur, et celle, Z2 à Z4, d'une zone de restauration
-(§11, projet) ; supprimer un temporaire pour rouvrir
+(§11) ; supprimer un temporaire pour rouvrir
 l'enveloppe ; toucher une génération `retained\` autre que celle retirée par
 la même opération, lors de son propre rollback.
 
@@ -900,8 +901,9 @@ limites d'ADR 0008.
 
 ### 11. Restauration isolée (B4)
 
-**Statut : projet, non accepté**, rédigé le 1er novembre 2026 avec le plan B4
-v0.2. Aucun code ne l'implémente. Il ne change aucune règle des §1 à §10 :
+**Statut : accepté** par le propriétaire le 3 novembre 2026, avec le plan B4
+v0.2, rédigé le 1er novembre 2026. Normatif pour tout code de restauration ;
+aucun code ne l'implémente encore. Il ne change aucune règle des §1 à §10 :
 une restauration n'écrit pas le coffre. Il ajoute un invariant, plus bas, qui
 contraint toute opération future du coffre.
 
@@ -1297,7 +1299,7 @@ dans l'installation, une source, un coffre ou une autre zone.
   enfant par un parent épinglé, sont confrontées à des tests réels avant le
   code qui en dépend ; un écart amende cet ADR d'abord.
 - B3 et B4 publieront snapshots et restaurations selon ce protocole, ou
-  l'amenderont : B3 par le §10, B4 par le §11, en projet.
+  l'amenderont : B3 par le §10, B4 par le §11.
 
 ## Amendements
 
@@ -1395,7 +1397,8 @@ dans l'installation, une source, un coffre ou une autre zone.
   au §3 pour une opération de snapshot terminale en `published`, dont le
   snapshot dégradé est signalé sans blocage. Aucune règle des §1 à §9 ne
   change pour le domaine de `current`.
-- **1er novembre 2026, cadrage de B4, projet non accepté** (plan B4 v0.2) :
+- **1er novembre 2026, cadrage de B4**, accepté par le propriétaire le
+  3 novembre 2026 (plan B4 v0.2) :
   §11, restauration isolée dans une zone marquée hors du coffre, que la
   restauration n'écrit jamais ; journal, receipt et verrou dans la zone ;
   récupération sans le coffre, distinctions refaites selon une règle

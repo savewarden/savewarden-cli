@@ -2,7 +2,7 @@
 
 Date : 29 octobre 2026. Statut : accepté pour B2, plan B2 v0.2 §3, validé par
 le propriétaire le 29 octobre 2026. Amendement B3 accepté le 31 octobre 2026.
-Amendement B4 : projet, non accepté.
+Amendement B4 accepté le 3 novembre 2026.
 
 ## Contexte
 
@@ -80,7 +80,7 @@ est visible et vérifiée. Les types d'inventaire migrent vers
 octet. Une future feature, `snapshot` ou `restore`, réutilisera
 `entities/backup` et le même principe de port. *Phrase historique, conservée
 pour la traçabilité : remplacée pour `snapshot` par l'amendement B3, et pour
-`restore` par l'amendement B4, en projet, dès son acceptation.*
+`restore` par l'amendement B4.*
 
 ## Amendement B2b
 
@@ -118,7 +118,7 @@ d'un jeu**, `current` et snapshots, et leurs récupérations. La phrase des
 Conséquences qui annonçait une feature `snapshot` réutilisant
 `entities/backup` est remplacée par celle-ci ; `restore` (B4) reste une
 feature à cadrer. *Cette dernière phrase est historique : remplacée par
-l'amendement B4, en projet, dès son acceptation.*
+l'amendement B4.*
 
 - Le moteur de publication, non exporté, est paramétré par la disposition et
   les codes de l'opération, dans le même package, sans changement de
@@ -137,7 +137,8 @@ protocole, frontière durable nouvelle, réexaminée au cadrage de B4.
 
 ## Amendement B4
 
-1er novembre 2026, plan B4 v0.2 ; **projet, non accepté**. La restauration
+1er novembre 2026, plan B4 v0.2 ; accepté par le propriétaire le
+3 novembre 2026, à livrer par la PR B4. La restauration
 isolée n'est pas une feature séparée : `features/sync` possède **toutes les
 publications selon ADR 0006**, dans le coffre d'un jeu et dans une zone de
 restauration (ADR 0006 §11), et leurs récupérations. Elle remplace la phrase

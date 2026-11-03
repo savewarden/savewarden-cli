@@ -1,7 +1,8 @@
 # ADR 0009 — Contrat de `restore`, receipt de restauration v1 et marqueur de zone v1
 
-Date : 1er novembre 2026. Statut : **projet, non accepté**, rédigé avec le
-plan B4 v0.2. Aucun code ne l'implémente.
+Date : 1er novembre 2026. Statut : **accepté** par le propriétaire le
+3 novembre 2026, avec le plan B4 v0.2. Aucun code ne l'implémente encore :
+B4 le livrera sur un GO de développement distinct.
 
 ## Contexte
 
