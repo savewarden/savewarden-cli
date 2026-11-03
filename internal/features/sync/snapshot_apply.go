@@ -108,9 +108,8 @@ func (s *Service) SnapshotApply(ctx context.Context, request SnapshotRequest, w 
 		result.Cause = intervention.Cause
 	}
 	if o.effect == EffectPublished {
-		game := append(append([]string{}, plan.vaultSegments...), gamesDir, plan.Game.ID)
-		result.Snapshot = windowsPath(plan.vaultVolume, append(append([]string{}, game...), snapshotsDir, o.op))
-		result.Receipt = windowsPath(plan.vaultVolume, append(append([]string{}, game...), snapshotsDir, receiptsDir, o.op+".json"))
+		result.Snapshot = o.target.windowsPath(snapshotsDir + "/" + o.op)
+		result.Receipt = o.target.windowsPath(snapshotsDir + "/" + receiptsDir + "/" + o.op + ".json")
 		for _, source := range o.content {
 			result.Files += len(source.Entries)
 			result.Bytes += source.Bytes()

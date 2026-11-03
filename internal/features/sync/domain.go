@@ -88,7 +88,11 @@ func (t target) chain() []string {
 // windowsPath is the Windows path of rel below the directory of the
 // operations, as reports name it.
 func (t target) windowsPath(rel string) string {
-	return windowsPath(t.volume, append(append([]string{}, t.segments...), strings.Split(t.at(rel), "/")...))
+	segments := append([]string{}, t.segments...)
+	if name := t.at(rel); name != "." {
+		segments = append(segments, strings.Split(name, "/")...)
+	}
+	return windowsPath(t.volume, segments)
 }
 
 // errorf reports a root the run must refuse outright: exit code 1.

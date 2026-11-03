@@ -482,6 +482,11 @@ func (o *operation) plannedContent() (*backup.Planned, error) {
 
 // ensureDir holds dir, creating it only if it is missing.
 func (o *operation) ensureDir(dir string) error {
+	if dir == "." {
+		// The root of a session is created only by its initialization:
+		// I2 for a vault, Z2 for a restore area.
+		return errors.New("the root of the session is never created here")
+	}
 	err := o.vault.Hold(dir)
 	if !errors.Is(err, fs.ErrNotExist) {
 		return err

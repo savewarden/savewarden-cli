@@ -55,6 +55,9 @@ func TestTargetNames(t *testing.T) {
 	if got, want := vault.windowsPath("receipts/op.json"), windowsPath(volume, append(append([]string{}, segments...), "games", "synthetic-game", "receipts", "op.json")); got != want {
 		t.Errorf("vault path %q, want %q", got, want)
 	}
+	if got, want := area.windowsPath("."), windowsPath(area.volume, area.segments); got != want {
+		t.Errorf("area root %q, want %q", got, want)
+	}
 	if got := area.errorf("%s", "refused").Error(); got != `destination G:\Area: refused` {
 		t.Errorf("area error %q", got)
 	}
@@ -76,16 +79,16 @@ func TestTargetNames(t *testing.T) {
 	}
 }
 
-// The engine never reads the plan of sync: only the own phases of sync do,
-// in apply.go and copy.go. The helpers that a restore shares, and every
-// file of the snapshot and restore operations, are checked on their syntax
-// tree (ADR 0004, amendment B4).
-func TestEngineNeverReadsThePlanOfSync(t *testing.T) {
-	engine := map[string]bool{
-		"open": true, "openVault": true, "record": true, "commitFile": true, "move": true, "fail": true,
-		"ensureDir": true, "unfinished": true, "journalDir": true, "stagingDir": true, "at": true,
-		"readBack": true, "readBackIn": true, "switchTo": true, "intervene": true, "wrote": true, "now": true,
-		"copyContent": true, "copyFile": true, "verifyIncomplete": true,
+// Only the own phases of sync read its plan, the operation field plan, and
+// only begin sets it: the engine, the snapshot and restore operations and
+// every recovery never read or set it (ADR 0004, amendment B4, erratum).
+// The allowed functions are named one by one; every other function of the
+// package is checked on its syntax tree, whatever its receiver is called.
+func TestOnlySyncReadsItsPlan(t *testing.T) {
+	allowed := map[string]bool{
+		"apply.go begin": true, "apply.go result": true, "apply.go initialize": true,
+		"apply.go underLock": true, "apply.go plannedContent": true,
+		"copy.go stage": true, "copy.go copySource": true, "copy.go recheck": true,
 	}
 	names, err := filepath.Glob("*.go")
 	if err != nil {
@@ -101,29 +104,40 @@ func TestEngineNeverReadsThePlanOfSync(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		whole := name != "apply.go" && name != "copy.go"
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
 				continue
 			}
-			if !whole && !engine[fn.Name.Name] {
-				continue
-			}
-			found[fn.Name.Name] = true
+			key := name + " " + fn.Name.Name
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "plan" {
-					if id, ok := sel.X.(*ast.Ident); ok && id.Name == "o" {
-						t.Errorf("%s: %s reads o.plan", fset.Position(sel.Pos()), fn.Name.Name)
+				switch n := n.(type) {
+				case *ast.SelectorExpr:
+					// No other type of the package has a field named plan.
+					if n.Sel.Name == "plan" {
+						found[key] = true
+						if !allowed[key] {
+							t.Errorf("%s: %s reads the plan of sync", fset.Position(n.Pos()), fn.Name.Name)
+						}
+					}
+				case *ast.CompositeLit:
+					if id, ok := n.Type.(*ast.Ident); ok && id.Name == "operation" {
+						for _, elt := range n.Elts {
+							if kv, ok := elt.(*ast.KeyValueExpr); ok {
+								if k, ok := kv.Key.(*ast.Ident); ok && k.Name == "plan" {
+									t.Errorf("%s: %s builds an operation with a plan", fset.Position(kv.Pos()), fn.Name.Name)
+								}
+							}
+						}
 					}
 				}
 				return true
 			})
 		}
 	}
-	for name := range engine {
-		if !found[name] {
-			t.Errorf("engine helper %s not found: update the list", name)
+	for key := range allowed {
+		if !found[key] {
+			t.Errorf("%s no longer reads the plan: shorten the list", key)
 		}
 	}
 }

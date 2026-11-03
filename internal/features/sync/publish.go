@@ -61,6 +61,11 @@ func (o *operation) intervene(cause string) error {
 // rename that fails or cannot be read is an unexplainedError: nothing may
 // then be recorded as if the state were known (ADR 0006 §3).
 func (o *operation) switchTo(from, to string, want backup.FileID) (moved bool, err error) {
+	// A session releases every pin for ".", and nothing for a name io/fs
+	// refuses: no switch ever moves the root or such a name.
+	if from == "." || !fs.ValidPath(from) {
+		return false, &unexplainedError{fmt.Sprintf("%q is not a directory a switch may move", from)}
+	}
 	if err := o.vault.Release(from); err != nil {
 		return false, &unexplainedError{fmt.Sprintf("%s cannot be released before its rename: %v", from, err)}
 	}
