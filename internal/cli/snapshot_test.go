@@ -45,7 +45,7 @@ func (f *fakeSnapshotter) SnapshotPlan(_ context.Context, request sync.SnapshotR
 func runSnapshot(t *testing.T, snapshotter cli.Snapshotter, args ...string) (string, string, error) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	root := cli.NewRootCommand("dev", &stdout, &stderr, nil, nil, snapshotter)
+	root := cli.NewRootCommand("dev", &stdout, &stderr, nil, nil, snapshotter, nil)
 	root.SetArgs(append([]string{"snapshot"}, args...))
 	err := root.ExecuteContext(context.Background())
 	return stdout.String(), stderr.String(), err
