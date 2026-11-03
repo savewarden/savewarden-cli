@@ -182,3 +182,14 @@ Alternatives écartées pour B4 : une feature `restore` dupliquant le moteur,
 le lecteur des snapshots et les faux de test ; l'extraction immédiate du
 moteur dans un package de protocole, avec authentification servie par un
 port que `sync.Service` satisferait.
+
+**Erratum proposé, 3 novembre 2026, en attente de ratification par le
+propriétaire.** Relevé par la revue indépendante de non-régression du
+commit 2 de B4. La phrase « une opération ne porte plus le plan de `sync` »
+se lit ainsi : le plan de `sync` ne fournit plus de racine à aucune
+opération. Seule l'opération de `sync` le porte, pour ses propres phases :
+inventaire des sources, état du coffre planifié, espace requis. Le moteur,
+les opérations de snapshot et de restauration et toutes les récupérations ne
+le lisent ni ne le renseignent ; `TestEngineNeverReadsThePlanOfSync` le
+vérifie sur l'arbre syntaxique. La source de lecture est le type `readRoot`,
+la cible d'écriture le type `target`. Aucune autre règle ne change.
