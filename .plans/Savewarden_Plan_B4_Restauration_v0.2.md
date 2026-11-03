@@ -27,8 +27,9 @@ publication » dans sa portée. Son amendement, le §11, rédigé avec cette
 v0.2 et accepté avec elle le 3 novembre 2026, porte le protocole de la
 restauration et nomme ses écarts X1 à X4.
 
-Ce plan ne vaut ni GO de développement, ni acceptation d'ADR, ni autorisation
-de push, de tag ou de release, ni accès aux sauvegardes réelles.
+Ce plan ne vaut ni GO de développement, ni autorisation de push, de tag ou de
+release, ni accès aux sauvegardes réelles. Ses ADR ont été acceptés par une
+décision distincte du propriétaire, le 3 novembre 2026.
 
 ---
 
@@ -337,7 +338,7 @@ commentaires changent : ceux de `platform/vault` et de `ports.go` qui
 parlent d'un « vault directory » ou de « sync.lock » diront qu'une session
 s'ouvre sur un coffre ou sur une zone, avec son verrou.
 
-### 3.3 ADR à rédiger
+### 3.3 ADR du lot
 
 Rédigés sur `docs/b4-framing` avec cette v0.2, comme pour B3, et **acceptés
 par le propriétaire le 3 novembre 2026**. Aucun code ne les implémente
@@ -1264,3 +1265,4 @@ recommandation **sans auto-approbation**.
 | 0.2 | 1er novembre 2026 | local, branche `docs/b4-framing` ; fichier renommé depuis la v0.1 | Revue CTO de la v0.1 : architecture favorable, aucun P0 ; R1 à R15 et X1 à X4 recommandés, ratification par le propriétaire attendue. C1, grammaire de la zone en deux classes et protocole de remise quel que soit le type de l'objet ; C2, zone sans journal sans objet d'opération seulement ; C3, règle d'observabilité des chemins de référence, à la création comme à la récupération ; C4, test Windows réel par `subst` en CI. Projets d'ADR 0004, 0006 §11 et 0009, non acceptés. Revue croisée indépendante des textes, intégrée avant remise (§0.6) : P0-1, refus pour une lettre de référence sans volume ; P0-2, aucune session ni verrou avant le marqueur en récupération ; P1-1 à P1-9, dont les écarts renommés X1 à X4 ; questions 7 à 9 ouvertes. Aucun GO de développement |
 | 0.2, revue CTO | 2 novembre 2026 | local, branche `docs/b4-framing` | Revue CTO de la v0.2 : avis favorable, aucun nouveau P0 ; Q7 acceptée avec la limitation de reprise après sinistre écrite, Q8 et Q9 acceptées ; V1, concurrence de la validation du marqueur et ses tests ; V2, statut du §10 d'ADR 0006 corrigé dans un commit séparé ; V3, phrases historiques d'ADR 0004 marquées et priorité de l'amendement écrite. R1 à R15 et X1 à X4 inchangés. ADR non acceptés ; aucun GO de développement |
 | 0.2, validation | 3 novembre 2026 | local, branche `docs/b4-framing` | Paquet `342167f` certifié par le CTO ; plan validé par le propriétaire ; R1 à R15, X1 à X4 et Q7 à Q9 ratifiés ; ADR 0004 (amendement B4), 0006 §11 et 0009 passés au statut accepté ; contenu normatif inchangé. GO de développement B4 non donné |
+| 0.2, correction éditoriale | 3 novembre 2026 | local, branche `docs/b4-framing` | Deux P2 de la revue CTO du commit d'acceptation : l'avertissement d'en-tête ne dit plus que le plan ne vaut pas acceptation d'ADR, acceptés par décision distincte ; §3.3 renommé « ADR du lot ». Contenu normatif inchangé |
