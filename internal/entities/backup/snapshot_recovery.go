@@ -36,9 +36,17 @@ func ClassifySnapshot(j Journal, o SnapshotObservation) (Action, error) {
 	if !j.Snapshot {
 		return "", &AmbiguityError{Op: j.Op, Reason: "not the journal of a snapshot operation"}
 	}
+	return classifyCopy(j, o, "snapshot")
+}
+
+// classifyCopy applies the recovery table that snapshots and restores share
+// (ADR 0006 §10 and §11): a copy published under its operation name, with
+// a receipt that, once committed, forbids any rollback. noun names the
+// receipt in diagnostics.
+func classifyCopy(j Journal, o SnapshotObservation, noun string) (Action, error) {
 	last := j.Last()
 	if o.Receipt && last != StepPublishIntent && last != StepPublished {
-		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("a snapshot receipt exists after the step %q", displayStep(last))}
+		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("a %s receipt exists after the step %q", noun, displayStep(last))}
 	}
 	if j.Terminal() {
 		return ActionNone, nil

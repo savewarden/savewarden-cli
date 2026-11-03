@@ -243,7 +243,25 @@ type Journal struct {
 	SnapshotPlan   *SnapshotPlan
 	SnapshotSource SnapshotSource
 	SourceIdentity FileID
+	// Restore marks the journal of a restore operation, read by
+	// ParseRestoreJournal (ADR 0006 §11). Its planned record fixes
+	// RestorePlan and PlanSHA256, the snapshot it restores and the SHA-256
+	// of that snapshot's receipt, and the identity of the snapshot.
+	Restore          bool
+	RestorePlan      *RestorePlan
+	RestoredSnapshot SnapshotSource
+	SnapshotIdentity FileID
 }
+
+// journalMode selects the contract and the coherence rules a journal is
+// read with: the current domain, the snapshot domain or a restore area.
+type journalMode int
+
+const (
+	modeCurrent journalMode = iota
+	modeSnapshot
+	modeRestore
+)
 
 // Last returns the step of the last committed record, empty if none.
 func (j Journal) Last() Step {
@@ -268,12 +286,12 @@ var (
 // ParseJournal validates the listing of journal\<op> and the content of its
 // committed records. Every deviation from ADR 0006 §3 is an AmbiguityError.
 func ParseJournal(op string, names []string, contents map[string][]byte) (Journal, error) {
-	return parseJournal(op, names, contents, false, "")
+	return parseJournal(op, names, contents, modeCurrent, "")
 }
 
-// parseJournal reads the journal of one operation of the current domain, or
-// of the snapshot domain of game gameID.
-func parseJournal(op string, names []string, contents map[string][]byte, snapshot bool, gameID string) (Journal, error) {
+// parseJournal reads the journal of one operation of the current domain, of
+// the snapshot domain of game gameID, or of a restore area of game gameID.
+func parseJournal(op string, names []string, contents map[string][]byte, mode journalMode, gameID string) (Journal, error) {
 	ambiguous := func(format string, args ...any) error {
 		return &AmbiguityError{Op: op, Reason: fmt.Sprintf(format, args...)}
 	}
@@ -307,7 +325,7 @@ func parseJournal(op string, names []string, contents map[string][]byte, snapsho
 		}
 		numbers[name[:3]] = true
 	}
-	j := Journal{Op: op, Prepared: map[Step]int{}, Taken: map[int]bool{}, Snapshot: snapshot}
+	j := Journal{Op: op, Prepared: map[Step]int{}, Taken: map[int]bool{}, Snapshot: mode == modeSnapshot, Restore: mode == modeRestore}
 	var previous []byte
 	for i, name := range finals {
 		m := finalName.FindStringSubmatch(name)
@@ -336,17 +354,23 @@ func parseJournal(op string, names []string, contents map[string][]byte, snapsho
 			return Journal{}, ambiguous("record %s: transition from %q to %q is not allowed", name, j.Last(), r.Step)
 		}
 		var values StepValues
-		if snapshot {
+		switch mode {
+		case modeSnapshot:
 			values, err = r.SnapshotValues()
-		} else {
+		case modeRestore:
+			values, err = r.RestoreValues()
+		default:
 			values, err = r.Values()
 		}
 		if err != nil {
 			return Journal{}, ambiguous("record %s: %v", name, err)
 		}
-		if snapshot {
+		switch mode {
+		case modeSnapshot:
 			err = j.coherentSnapshot(gameID, r, values)
-		} else {
+		case modeRestore:
+			err = j.coherentRestore(gameID, r, values)
+		default:
 			err = j.coherent(r, values)
 		}
 		if err != nil {
