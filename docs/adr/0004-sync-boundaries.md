@@ -185,11 +185,21 @@ port que `sync.Service` satisferait.
 
 **Erratum proposé, 3 novembre 2026, en attente de ratification par le
 propriétaire.** Relevé par la revue indépendante de non-régression du
-commit 2 de B4. La phrase « une opération ne porte plus le plan de `sync` »
-se lit ainsi : le plan de `sync` ne fournit plus de racine à aucune
-opération. Seule l'opération de `sync` le porte, pour ses propres phases :
-inventaire des sources, état du coffre planifié, espace requis. Le moteur,
-les opérations de snapshot et de restauration et toutes les récupérations ne
-le lisent ni ne le renseignent ; `TestEngineNeverReadsThePlanOfSync` le
-vérifie sur l'arbre syntaxique. La source de lecture est le type `readRoot`,
-la cible d'écriture le type `target`. Aucune autre règle ne change.
+commit 2 de B4 et précisé par la vérification de ses corrections.
+
+- « Une opération ne porte plus le plan de `sync` » se lit ainsi : le moteur
+  ne tire plus aucune racine des champs du plan. La cible d'écriture, le
+  type `target`, et la source de lecture, le type `readRoot`, sont
+  construites une fois, à l'ouverture de l'opération, depuis le chemin du
+  coffre et l'identifiant du jeu. Seule l'opération de `sync` porte son
+  plan, pour ses propres phases : inventaires des sources, état du coffre
+  planifié, espace requis, identité du jeu du plan journalisé et résultat
+  rendu. Le moteur, les opérations de snapshot et de restauration et toutes
+  les récupérations ne le lisent ni ne le renseignent :
+  `TestOnlySyncReadsItsPlan` n'en autorise la lecture qu'à ces phases,
+  nommées une à une, et refuse toute construction d'opération qui le
+  renseigne.
+- « Ce commit est isolé » se lit : la couture et les commits qui corrigent
+  ses revues précèdent tout code de `restore`.
+
+Aucune autre règle ne change.

@@ -1004,12 +1004,23 @@ cadrage, comme celles de B2c et de B3.
 | 7 | Rapport `docs/validation/b4.md` | **Revue de sécurité indépendante**, avant le GO de fusion |
 
 **Erratum proposé, 3 novembre 2026, en attente de ratification par le
-propriétaire**, avec celui de l'amendement B4 d'ADR 0004 : au commit 2,
-« `operation` sans le `Plan` de `sync` » se lit « le plan de `sync` ne
-fournit plus de racine ; seule l'opération de `sync` le porte, pour ses
-propres phases, et ni le moteur, ni les opérations de snapshot et de
-restauration, ni les récupérations ne le lisent ». Le point de contrôle est
-inchangé : plus aucun usage de `o.plan.vault*`.
+propriétaire**, avec celui de l'amendement B4 d'ADR 0004, qui le détaille :
+
+- au §3.1, option (a), « `operation` cessant d'embarquer le `Plan` de
+  `sync` », et au commit 2 ci-dessus, « `operation` sans le `Plan` de
+  `sync` », se lisent : le moteur ne tire plus aucune racine du plan ; la
+  cible d'écriture et la source de lecture sont construites à l'ouverture
+  depuis le chemin du coffre et l'identifiant du jeu ; seule l'opération de
+  `sync` porte son plan, pour ses propres phases, que le moteur, les
+  opérations de snapshot et de restauration et les récupérations ne lisent ni
+  ne renseignent, ce que vérifie `TestOnlySyncReadsItsPlan` ;
+- la couture tient dans le commit 2 et dans les commits qui corrigent ses
+  revues, tous avant le commit 3 ;
+- « suites B2 et B3 inchangées » vaut pour leurs assertions : leur faux
+  coffre partagé est devenu plus strict, refusant les noms que refuse la
+  vraie session.
+
+Le point de contrôle est inchangé : plus aucun usage de `o.plan.vault*`.
 
 Chaque commit passe la suite complète à son SHA, dans un worktree propre.
 Push, PR, fusion et pilote attendent chacun un GO distinct du propriétaire.
@@ -1274,4 +1285,4 @@ recommandation **sans auto-approbation**.
 | 0.2, revue CTO | 2 novembre 2026 | local, branche `docs/b4-framing` | Revue CTO de la v0.2 : avis favorable, aucun nouveau P0 ; Q7 acceptée avec la limitation de reprise après sinistre écrite, Q8 et Q9 acceptées ; V1, concurrence de la validation du marqueur et ses tests ; V2, statut du §10 d'ADR 0006 corrigé dans un commit séparé ; V3, phrases historiques d'ADR 0004 marquées et priorité de l'amendement écrite. R1 à R15 et X1 à X4 inchangés. ADR non acceptés ; aucun GO de développement |
 | 0.2, validation | 3 novembre 2026 | local, branche `docs/b4-framing` | Paquet `342167f` certifié par le CTO ; plan validé par le propriétaire ; R1 à R15, X1 à X4 et Q7 à Q9 ratifiés ; ADR 0004 (amendement B4), 0006 §11 et 0009 passés au statut accepté ; contenu normatif inchangé. GO de développement B4 non donné |
 | 0.2, correction éditoriale | 3 novembre 2026 | local, branche `docs/b4-framing` | Deux P2 de la revue CTO du commit d'acceptation : l'avertissement d'en-tête ne dit plus que le plan ne vaut pas acceptation d'ADR, acceptés par décision distincte ; §3.3 renommé « ADR du lot ». Contenu normatif inchangé |
-| 0.2, erratum proposé | 3 novembre 2026 | local, branche `feat/b4-restore` | Revue de non-régression du commit 2 : erratum proposé au §8 et à l'amendement B4 d'ADR 0004 sur le plan de `sync` porté par la seule opération de `sync` ; en attente de ratification par le propriétaire. Aucune autre règle ne change |
+| 0.2, erratum proposé | 3 novembre 2026 | local, branche `feat/b4-restore` | Revue de non-régression du commit 2 et vérification de ses corrections : erratum proposé au §3.1, au §8 et à l'amendement B4 d'ADR 0004 sur le plan de `sync` porté par la seule opération de `sync`, la couture répartie sur le commit 2 et ses corrections, et le faux coffre devenu plus strict ; en attente de ratification par le propriétaire. Aucune autre règle ne change |
