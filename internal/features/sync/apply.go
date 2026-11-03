@@ -107,10 +107,16 @@ func (e *BlockedError) Error() string {
 type InterventionError struct {
 	Operation string
 	Cause     string
+	// Subject names what needs the intervention when no operation does:
+	// the vault if empty, the restore area for a restore.
+	Subject string
 }
 
 func (e *InterventionError) Error() string {
 	subject := e.Operation
+	if subject == "" {
+		subject = e.Subject
+	}
 	if subject == "" {
 		subject = "the vault"
 	}
@@ -167,6 +173,13 @@ type operation struct {
 	snapshotPlan   *backup.SnapshotPlan
 	source         backup.SnapshotSource
 	sourceIdentity backup.FileID
+	// A restore copies the snapshot restored, whose copy in the vault has
+	// the identity snapshotIdentity, into a restore area after its plan
+	// (ADR 0006 §11); areaMarker is the marker this run validated, if any.
+	restorePlan      *backup.RestorePlan
+	restored         backup.SnapshotSource
+	snapshotIdentity backup.FileID
+	areaMarker       *backup.RestoreAreaMarker
 }
 
 // rotation reports whether the operation replaces an existing current.

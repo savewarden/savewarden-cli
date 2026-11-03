@@ -116,12 +116,13 @@ func (r HandedOverRestore) State() string {
 // designated snapshot only; it reads the destination, and the identities of
 // the installation and the sources, never their content.
 func (s *Service) RestorePlan(ctx context.Context, request RestoreRequest) (RestorePlan, error) {
-	return s.restorePlan(ctx, request, true)
+	return s.restorePlan(ctx, request, false)
 }
 
-// restorePlan is RestorePlan; a run that holds the lock of the area does
-// not probe it.
-func (s *Service) restorePlan(ctx context.Context, request RestoreRequest, probe bool) (RestorePlan, error) {
+// restorePlan is RestorePlan. A run that holds the lock of the area plans
+// again under it: it does not probe its own lock, and does not read the
+// content of the snapshot a second time (ADR 0006 §11).
+func (s *Service) restorePlan(ctx context.Context, request RestoreRequest, underLock bool) (RestorePlan, error) {
 	manifest, err := s.manifests.Read(request.ManifestPath)
 	if err != nil {
 		return RestorePlan{}, err
@@ -140,13 +141,13 @@ func (s *Service) restorePlan(ctx context.Context, request RestoreRequest, probe
 	plan := RestorePlan{ManifestPath: request.ManifestPath, Game: manifest.Game, Vault: request.VaultPath,
 		Snapshot: request.Snapshot, Destination: request.Destination,
 		vaultVolume: vaultVolume, vaultSegments: vaultSegments, destVolume: destVolume, destSegments: destSegments}
-	if err := s.authenticate(ctx, &plan, manifest.Game.ID); err != nil {
+	if err := s.authenticate(ctx, &plan, manifest.Game.ID, !underLock); err != nil {
 		return RestorePlan{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return RestorePlan{}, fmt.Errorf("plan interrupted: %w", err)
 	}
-	if err := s.planDestination(&plan, manifest, probe); err != nil {
+	if err := s.planDestination(&plan, manifest, !underLock); err != nil {
 		return RestorePlan{}, err
 	}
 	if plan.snapshot != nil && len(plan.Interventions) == 0 {
@@ -164,8 +165,9 @@ func (s *Service) restorePlan(ctx context.Context, request RestoreRequest, probe
 // receipt and its identity read again after. Nothing else of the vault is
 // read: neither games\<game-id> is listed, nor sync.lock observed. A degraded
 // snapshot is a blocking finding; a state of the snapshot domain that is not
-// terminal, or a read that fails, is a refusal, code 1.
-func (s *Service) authenticate(ctx context.Context, plan *RestorePlan, gameID string) error {
+// terminal, or a read that fails, is a refusal, code 1. Without content, as
+// under the lock of the area, everything but the content is read again.
+func (s *Service) authenticate(ctx context.Context, plan *RestorePlan, gameID string, content bool) error {
 	vaultPath, snap := plan.Vault, plan.Snapshot
 	scope, err := s.files.OpenScope(plan.vaultVolume)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -269,7 +271,7 @@ func (s *Service) authenticate(ctx context.Context, plan *RestorePlan, gameID st
 		return notVerifiable(err)
 	}
 	condition := backup.PublishedSnapshotCondition(backup.SnapshotObservation{Published: published, Incomplete: incomplete}, conforms)
-	if condition == backup.SnapshotIntact {
+	if condition == backup.SnapshotIntact && content {
 		segments := append(append([]string{}, plan.vaultSegments...), gamesDir, gameID, snapshotsDir, snap)
 		dir, err := s.inventories.Directory(ctx, plan.vaultVolume, segments)
 		switch {
@@ -294,7 +296,7 @@ func (s *Service) authenticate(ctx context.Context, plan *RestorePlan, gameID st
 	plan.Condition = condition
 	switch condition {
 	case backup.SnapshotIntact:
-		plan.Verified = true
+		plan.Verified = content
 		plan.snapshot = &restoreSource{journal: j, receiptSum: receiptSum, identity: identity, receipt: receipt}
 	case backup.SnapshotMissing:
 		plan.add(backup.Blocking, CodeSnapshotMissing, "", name, "the approved snapshot is absent; nothing can be restored from it")

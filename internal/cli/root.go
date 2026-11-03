@@ -17,9 +17,9 @@ func NewRootCommand(version string, stdout, stderr io.Writer, inspector Inspecto
 		Long: "Savewarden protects game saves.\n\n" +
 			"This build inspects declared save sources, plans their synchronisation\n" +
 			"into a vault and, with sync --apply, publishes a generation there; snapshot\n" +
-			"plans an immutable copy of that generation, and restore plans the copy of\n" +
-			"a snapshot into an isolated directory. Sources are only read; nothing is\n" +
-			"ever deleted or overwritten.",
+			"plans an immutable copy of that generation, and restore copies a snapshot\n" +
+			"into an isolated directory. Sources are only read; nothing is ever deleted\n" +
+			"or overwritten.",
 		Version:       version,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,

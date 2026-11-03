@@ -15,15 +15,23 @@ import (
 
 type fakeRestorer struct {
 	plan    sync.RestorePlan
+	result  sync.RestoreResult
 	err     error
 	request sync.RestoreRequest
 	called  int
+	applied bool
 }
 
 func (f *fakeRestorer) RestorePlan(_ context.Context, request sync.RestoreRequest) (sync.RestorePlan, error) {
 	f.request = request
 	f.called++
 	return f.plan, f.err
+}
+
+func (f *fakeRestorer) RestoreApply(_ context.Context, request sync.RestoreRequest) (sync.RestoreResult, error) {
+	f.request, f.applied = request, true
+	f.called++
+	return f.result, f.err
 }
 
 func runRestore(t *testing.T, restorer cli.Restorer, args ...string) (string, string, error) {
@@ -156,9 +164,56 @@ func TestRestoreExitCodes(t *testing.T) {
 	}
 }
 
-// Every flag is required; this build has neither --apply nor --recover.
+func TestRestoreApplyReport(t *testing.T) {
+	op := "20261107T101500-9a8b7c6d"
+	result := sync.RestoreResult{Plan: newRestorePlan(), Operation: op, Effect: sync.EffectPublished,
+		Restore: `G:\Restores\synthetic\` + op, Receipt: `G:\Restores\synthetic\receipts\` + op + ".json", Files: 2, Bytes: 6}
+	restorer := &fakeRestorer{result: result}
+	stdout, stderr, err := runRestore(t, restorer, append(append([]string{}, restoreArgs...), "--apply")...)
+	if err != nil || !restorer.applied {
+		t.Fatalf("exit %v, applied %v", err, restorer.applied)
+	}
+	for _, line := range []string{"mode: apply: copy, verify and publish\n", "operation: " + op + "\n",
+		"verification: 2 files, 6 bytes, SHA-256 verified\n", "published: " + result.Restore + "\n", "receipt: " + result.Receipt + "\n"} {
+		if !strings.Contains(stdout, line) {
+			t.Fatalf("missing %q in\n%s", line, stdout)
+		}
+	}
+	if stderr != "savewarden: destination: published restore "+op+"\n" {
+		t.Fatalf("stderr %q", stderr)
+	}
+	for _, tt := range []struct {
+		result sync.RestoreResult
+		err    error
+		code   int
+		state  string
+	}{
+		{sync.RestoreResult{Plan: newRestorePlan(), Operation: op, Effect: sync.EffectStaged},
+			&sync.BlockedError{Code: sync.CodeChangedDuringRestore, Detail: "changed"}, cli.ExitIncomplete, "restore " + op + " kept incomplete"},
+		{sync.RestoreResult{Plan: newRestorePlan(), Operation: op, Effect: sync.EffectRolledBack},
+			errors.New("publication failed"), 1, "rolled back restore " + op},
+		{sync.RestoreResult{Plan: newRestorePlan(), Effect: sync.EffectMetadata},
+			errors.New("destination G:\\Restores\\synthetic: destination-changed"), 1, "metadata only; nothing staged or published"},
+		{sync.RestoreResult{Plan: newRestorePlan(), Effect: sync.EffectIntervention, Cause: "pending-operation " + op},
+			&sync.InterventionError{Subject: "the restore area", Cause: "pending-operation " + op}, cli.ExitIntervention,
+			"intervention required for the restore area: pending-operation " + op},
+		{sync.RestoreResult{}, errors.New("snapshot not found"), 1, "not modified"},
+	} {
+		stdout, stderr, err := runRestore(t, &fakeRestorer{result: tt.result, err: tt.err}, append(append([]string{}, restoreArgs...), "--apply")...)
+		var exit *cli.ExitError
+		if (tt.code == 0) != (err == nil) || (tt.code != 0 && (!errors.As(err, &exit) || exit.Code != tt.code)) ||
+			!strings.HasSuffix(stderr, "savewarden: destination: "+tt.state+"\n") || strings.Contains(stderr, "vault:") {
+			t.Errorf("%s: exit %v, stderr %q", tt.state, err, stderr)
+		}
+		if tt.result.Plan.ManifestPath == "" && stdout != "" {
+			t.Errorf("%s: a run refused before its plan reports nothing: %q", tt.state, stdout)
+		}
+	}
+}
+
+// Every flag is required; this build has no --recover.
 func TestRestoreFlags(t *testing.T) {
-	for _, args := range [][]string{nil, restoreArgs[:6], append(append([]string{}, restoreArgs...), "--apply"),
+	for _, args := range [][]string{nil, restoreArgs[:6], append(append([]string{}, restoreArgs[2:]...), "--apply"),
 		append(append([]string{}, restoreArgs...), "--recover"), append(append([]string{}, restoreArgs...), "extra")} {
 		restorer := &fakeRestorer{plan: newRestorePlan()}
 		if _, _, err := runRestore(t, restorer, args...); err == nil || restorer.called != 0 {

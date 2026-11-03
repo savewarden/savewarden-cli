@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -51,6 +53,59 @@ type area struct {
 
 func (a *area) intervene(cause Cause, subject, detail string) {
 	a.interventions = append(a.interventions, Intervention{Cause: cause, Subject: subject, Detail: detail})
+}
+
+// used reports whether op names anything in the area: an id is never
+// shared (ADR 0006 §11).
+func (a *area) used(op string) bool {
+	_, journal := a.journals[op]
+	_, receipt := a.receipts[op]
+	_, published := a.root.Published[op]
+	_, incomplete := a.root.Incomplete[op]
+	return journal || receipt || published || incomplete || a.receiptTaken[op] != nil
+}
+
+// signature describes what a restore decides on in an area, its marker
+// aside: journals, receipts and their temporaries, operation names and
+// interventions. Two things are left out: the names of the handed-over
+// restores, whose copies belong to the user, who may remove or rename them
+// between the plan and the lock; and the marker temporaries, attempts that
+// another run may abandon beside a validated marker (ADR 0006 §11, Z6 and
+// the concurrency of the marker validation). An area that does not exist,
+// or is empty, has the empty signature.
+func (a *area) signature() string {
+	if !a.exists || a.root.State == backup.RestoreRootEmpty {
+		return ""
+	}
+	handed := map[string]bool{}
+	for _, r := range a.restores {
+		handed[r.ID] = true
+	}
+	var parts []string
+	for op := range a.journals {
+		parts = append(parts, "journal "+op+" "+a.lastRecord[op])
+	}
+	for op, data := range a.receipts {
+		sum := sha256.Sum256(data)
+		parts = append(parts, "receipt "+op+" "+hex.EncodeToString(sum[:]))
+	}
+	for op, taken := range a.receiptTaken {
+		for k := range taken {
+			parts = append(parts, fmt.Sprintf("receipt %s.tmp-%d", op, k))
+		}
+	}
+	for _, set := range []map[string]backup.RestoreObject{a.root.Published, a.root.Incomplete} {
+		for op, object := range set {
+			if !handed[op] {
+				parts = append(parts, fmt.Sprintf("object %s %d", object.Name, object.Kind))
+			}
+		}
+	}
+	for _, i := range a.interventions {
+		parts = append(parts, "intervention "+string(i.Cause)+" "+i.Subject)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n")
 }
 
 // errDestination reports a destination the run must refuse outright: exit

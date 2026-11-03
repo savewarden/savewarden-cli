@@ -40,6 +40,8 @@ type fakeVaults struct {
 	busy map[string]int
 	// failWrite, if set, fails a write or a close.
 	failWrite func(call string) error
+	// sessions lists the path of every session opened, in order.
+	sessions []string
 }
 
 func newFakeVaults(f *fakeFS) *fakeVaults {
@@ -50,6 +52,7 @@ func (v *fakeVaults) Open(path string) (sync.Vault, error) {
 	if v.dead {
 		return nil, errCrash
 	}
+	v.sessions = append(v.sessions, path)
 	parts := strings.Split(path[3:], `\`)
 	n := v.f.volumes[path[:3]]
 	for i, part := range parts {
