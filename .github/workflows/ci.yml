@@ -20,7 +20,7 @@ jobs:
   verify:
     name: Verify (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -58,7 +58,7 @@ jobs:
       - name: Vet workflow checker
         run: go vet ./.github/scripts
       - name: Test CLI, binary smoke, documentation and architecture
-        run: go test -count=1 ./...
+        run: go test -count=1 -timeout 30m ./...
       - name: Test workflow pins
         run: go test -count=1 ./.github/scripts
       - name: Build CLI

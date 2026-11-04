@@ -7,6 +7,51 @@ Aucun tag ni release n'est publié par le bootstrap.
 
 ### Added
 
+- Commande `restore` (B4, ADR 0006 §11, ADR 0009) : restauration d'un
+  snapshot approuvé vers une **zone de restauration** isolée, désignée par
+  `--to`, hors du jeu, du coffre et des sources. Plan sans écriture par
+  défaut ; `--apply` marque la zone, copie le snapshot dans
+  `<op>.incomplete`, relit la copie et la publie sous `<op>` avec un receipt
+  de restauration ; `--recover` et `--recover --apply` reprennent une zone
+  interrompue sans jamais lire le coffre, et refusent `--vault` et
+  `--snapshot`. Dernière ligne de stderr : `savewarden: destination: <état>`.
+- Le coffre n'est jamais écrit par `restore`, ni verrouillé : `sync.lock`
+  n'est ni ouvert ni observé. Seul le snapshot désigné est lu, journal
+  publié, receipt, identité et contenu relu en entier ; un snapshot dégradé
+  est bloquant pour `restore`, code 2 ; un snapshot non publié, en cours,
+  ambigu ou illisible est refusé, code 1.
+- Distinctions de la zone avec le coffre, l'installation, les sources et les
+  chemins sauvegardés par le snapshot, par nom puis par identité NTFS depuis
+  la racine de chaque volume, quelle que soit la lettre de lecteur ; une
+  identité inobservable ou une lettre sans volume ne prouvent jamais la
+  séparation. Aucun ancêtre coffre ou zone. Ces distinctions sont refaites
+  une fois la session d'écriture ouverte, avant sa première écriture, pour
+  `--apply` comme pour `--recover --apply`.
+- Récupération : seule une destination absente ou vide est sans objet avant
+  la lecture du manifeste ; une zone marquée sans opération en attente n'est
+  déclarée sans objet qu'après la relecture stricte de son marqueur, du jeu
+  du manifeste, sinon code 1.
+- Restaurations successives : chaque `--apply` publie une nouvelle
+  restauration ; une restauration publiée est remise à l'utilisateur,
+  observée sans être ouverte ni suivie, et signalée en information :
+  `snapshot-already-restored`, `restore-missing`, `restore-rename-lost`,
+  `restore-replaced`. Codes `changed-during-restore` et
+  `verification-mismatch` pour une copie qui ne correspond pas au plan.
+- [Receipt de restauration v1 et marqueur de zone v1](docs/restore-receipt-v1.md),
+  schémas `savewarden.restore` et `savewarden.restore-area`, relus
+  strictement ; journal de restauration et son automate dans
+  `entities/backup`.
+- Moteur de publication de `features/sync` avec une source de lecture et une
+  cible d'écriture distinctes, sans changement de comportement ni de sortie
+  pour `sync` et `snapshot`.
+- Tests Windows réels de la restauration : bout en bout, coffre sous refus
+  d'écriture, plans sous refus d'écriture, fichier ouvert dans la copie,
+  processus tué pendant la copie, alias `subst` vers une source puis vers le
+  coffre, lettre `subst` réattribuée vers une source entre le plan et
+  l'ouverture de la session, validation concurrente du marqueur, jonction à la place d'une
+  restauration remise, restauration pendant une rotation et un snapshot ; et
+  sorties de `sync`, `snapshot` et `inspect` comparées octet pour octet à
+  celles de B3 sur le scénario différentiel.
 - Commande `snapshot --manifest <chemin> --vault <dossier>` (B3, ADR 0006 §10,
   ADR 0008) : plan sans écriture, `--apply` qui copie la génération `current`
   reconnue dans `snapshots\<opération>.incomplete`, relit la copie, recoupe
@@ -156,7 +201,17 @@ Aucun tag ni release n'est publié par le bootstrap.
 - ReFS n'est pas encore qualifié ; la durabilité d'un renommage après une
   coupure de courant n'est pas garantie par Windows, la récupération repose
   sur l'observation.
-- restore et doctor restent à implémenter ; pas de sortie JSON de la CLI.
+- Une session d'écriture crée et renomme par chemin complet ; ses épingles ne
+  neutralisent pas la réattribution d'une lettre de lecteur. Une lettre
+  réattribuée pendant qu'une session est ouverte reste un risque résiduel,
+  pour `sync`, `snapshot` et `restore`, chantier de sécurité S-01 : aucune
+  garantie technique ne l'empêche ; acceptation provisoire, ratifiée, pour la
+  seule qualification interne, durcissement d'ADR 0005 obligatoire avant
+  toute diffusion publique.
+  `restore` refait ses distinctions une fois la session ouverte, ce qui
+  refuse une réattribution antérieure. Ne modifiez pas les lettres de lecteur
+  pendant une opération.
+- doctor reste à implémenter ; pas de sortie JSON de la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et
   autres placeholders cloud sont refusés ; `subst` n'est pas détecté.
 - Schéma de manifeste v1 provisoire jusqu'à `v0.1.0`.

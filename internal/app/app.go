@@ -32,8 +32,9 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 		service: sync.New(manifests.Reader{}, inspector, syncScopes{}, volumes{}),
 		writer:  sync.Writer{Vaults: vaults{}, Clock: systemClock{}, Random: rand.Reader, ToolVersion: version},
 	}
-	// The sync feature owns snapshots too (ADR 0004, B3 amendment).
-	command := cli.NewRootCommand(version, output, stderr, inspector, syncer, syncer)
+	// The sync feature owns snapshots and restores too (ADR 0004, B3 and B4
+	// amendments).
+	command := cli.NewRootCommand(version, output, stderr, inspector, syncer, syncer, syncer)
 	command.SetArgs(args)
 	err := command.ExecuteContext(ctx)
 	var exit *cli.ExitError
@@ -93,6 +94,26 @@ func (s syncCommands) SnapshotRecoverPlan(ctx context.Context, request sync.Snap
 
 func (s syncCommands) SnapshotRecover(ctx context.Context, request sync.SnapshotRequest) (sync.SnapshotResult, error) {
 	return s.service.SnapshotRecover(ctx, request, s.writer)
+}
+
+func (s syncCommands) RestorePlan(ctx context.Context, request sync.RestoreRequest) (sync.RestorePlan, error) {
+	return s.service.RestorePlan(ctx, request)
+}
+
+// RestoreApply receives the writer, whose sessions open on the restore area
+// only, never on the vault (ADR 0006 §11).
+func (s syncCommands) RestoreApply(ctx context.Context, request sync.RestoreRequest) (sync.RestoreResult, error) {
+	return s.service.RestoreApply(ctx, request, s.writer)
+}
+
+func (s syncCommands) RestoreRecoverPlan(ctx context.Context, request sync.RestoreRequest) (sync.RestoreRecovery, error) {
+	return s.service.RestoreRecoverPlan(ctx, request)
+}
+
+// RestoreRecover never reads the vault; its sessions open on the restore
+// area only (ADR 0006 §11).
+func (s syncCommands) RestoreRecover(ctx context.Context, request sync.RestoreRequest) (sync.RestoreResult, error) {
+	return s.service.RestoreRecover(ctx, request, s.writer)
 }
 
 // vaults bridges the create-only vault adapter to the sync port. It

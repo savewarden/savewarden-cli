@@ -132,6 +132,12 @@ exit code, never the presence of output.`,
 // its diagnostic and, last, the vault state line (ADR 0007). The exit code
 // describes the run; the state line, what the vault now holds.
 func finish(cmd *cobra.Command, report, state string, err error) error {
+	return finishAs(cmd, report, "vault", state, err)
+}
+
+// finishAs is finish for a run whose state line names label: the vault, or
+// the destination of a restore, which never writes the vault (ADR 0009).
+func finishAs(cmd *cobra.Command, report, label, state string, err error) error {
 	code := 0
 	var blocked *sync.BlockedError
 	var intervention *sync.InterventionError
@@ -153,7 +159,7 @@ func finish(cmd *cobra.Command, report, state string, err error) error {
 		// Reporting failure cannot change the already unsuccessful exit code.
 		_, _ = fmt.Fprintf(stderr, "savewarden: %s\n", printable(strings.ReplaceAll(err.Error(), "\n", "; ")))
 	}
-	_, _ = fmt.Fprintf(stderr, "savewarden: vault: %s\n", printable(state))
+	_, _ = fmt.Fprintf(stderr, "savewarden: %s: %s\n", label, printable(state))
 	if code == 0 {
 		return nil
 	}

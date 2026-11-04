@@ -2,6 +2,7 @@
 
 Date : 29 octobre 2026. Statut : accepté pour B2, plan B2 v0.2 §3, validé par
 le propriétaire le 29 octobre 2026. Amendement B3 accepté le 31 octobre 2026.
+Amendement B4 accepté le 3 novembre 2026.
 
 ## Contexte
 
@@ -77,7 +78,9 @@ cmd/savewarden ──► app ─┬─► cli ─┬─► features/inspect ─�
 est visible et vérifiée. Les types d'inventaire migrent vers
 `entities/backup`, prouvé par une sortie `inspect` identique octet pour
 octet. Une future feature, `snapshot` ou `restore`, réutilisera
-`entities/backup` et le même principe de port.
+`entities/backup` et le même principe de port. *Phrase historique, conservée
+pour la traçabilité : remplacée pour `snapshot` par l'amendement B3, et pour
+`restore` par l'amendement B4.*
 
 ## Amendement B2b
 
@@ -114,7 +117,8 @@ séparée : `features/sync` possède **toutes les publications dans le coffre
 d'un jeu**, `current` et snapshots, et leurs récupérations. La phrase des
 Conséquences qui annonçait une feature `snapshot` réutilisant
 `entities/backup` est remplacée par celle-ci ; `restore` (B4) reste une
-feature à cadrer.
+feature à cadrer. *Cette dernière phrase est historique : remplacée par
+l'amendement B4.*
 
 - Le moteur de publication, non exporté, est paramétré par la disposition et
   les codes de l'opération, dans le même package, sans changement de
@@ -130,3 +134,72 @@ feature à cadrer.
 Alternatives écartées pour B3 : une feature `snapshot` dupliquant le moteur
 d'écriture et ses faux de test ; l'extraction du moteur dans un package de
 protocole, frontière durable nouvelle, réexaminée au cadrage de B4.
+
+## Amendement B4
+
+1er novembre 2026, plan B4 v0.2 ; accepté par le propriétaire le
+3 novembre 2026, à livrer par la PR B4. La restauration
+isolée n'est pas une feature séparée : `features/sync` possède **toutes les
+publications selon ADR 0006**, dans le coffre d'un jeu et dans une zone de
+restauration (ADR 0006 §11), et leurs récupérations. Elle remplace la phrase
+des Conséquences qui annonçait une future feature `restore` réutilisant
+`entities/backup`, et celle de l'amendement B3 qui laissait `restore`
+« feature à cadrer ». **Priorité** : un amendement prévaut sur le texte qui le
+précède ; les phrases qu'il remplace restent en place, marquées comme
+historiques, pour la traçabilité, et ne décrivent plus les frontières
+actuelles.
+
+- **Couture interne.** Le moteur de publication distingue, par des types non
+  exportés du même package, la **source de lecture** et la **cible
+  d'écriture** : chemin, volume, segments, nom du verrou et libellé des
+  diagnostics. Ils remplacent le préfixe du dossier de jeu, le nom
+  `sync.lock` et les champs du plan de `sync` dont le moteur tirait sa
+  racine ; une opération ne porte plus le plan de `sync`. Ce commit est isolé,
+  sans changement de comportement pour `current` ni pour les snapshots, et
+  soumis à une revue indépendante de non-régression avant tout code de
+  `restore`.
+- La commande CLI `restore` appelle des méthodes de service propres à la
+  restauration ; `internal/cli` n'importe toujours que des features.
+- Aucun port, aucune frontière, aucune règle d'import ne change.
+  `platform/vault` et ADR 0005 restent inchangés : une session d'écriture
+  s'ouvre sur une zone comme sur un coffre ; seuls des commentaires le disent.
+- `entities/backup` reçoit le receipt de restauration v1, le marqueur de zone
+  v1, l'automate et le contrat des champs du mode restauration, et le
+  classement de ses observations, sans I/O.
+
+**Extraction du moteur, réexaminée et non retenue pour B4.** `restore` a
+besoin du moteur d'écriture et du lecteur du domaine des snapshots, tous deux
+dans `features/sync` ; les extraire déplacerait la plus grande partie du code
+qualifié, pour un gain de nommage. La couture est ce qu'une extraction future
+détacherait. **Critères de réexamen** : une quatrième opération d'écriture,
+restauration en place ou requalification d'un coffre copié notamment ; une
+opération qui aurait besoin du moteur sans le lecteur du coffre ; une
+opération qui renommerait un snapshot publié ou ses ancêtres, ou les
+tiendrait sans partage, levant l'invariant d'ADR 0006 §11 ; une revue qui
+juge le package illisible.
+
+Alternatives écartées pour B4 : une feature `restore` dupliquant le moteur,
+le lecteur des snapshots et les faux de test ; l'extraction immédiate du
+moteur dans un package de protocole, avec authentification servie par un
+port que `sync.Service` satisferait.
+
+**Erratum, 3 novembre 2026, ratifié par le propriétaire le même jour.**
+Relevé par la revue indépendante de non-régression du commit 2 de B4 et
+précisé par la vérification de ses corrections.
+
+- « Une opération ne porte plus le plan de `sync` » se lit ainsi : le moteur
+  ne tire plus aucune racine des champs du plan. La cible d'écriture, le
+  type `target`, et la source de lecture, le type `readRoot`, sont
+  construites une fois, à l'ouverture de l'opération, depuis le chemin du
+  coffre et l'identifiant du jeu. Seule l'opération de `sync` porte son
+  plan, pour ses propres phases : inventaires des sources, état du coffre
+  planifié, espace requis, identité du jeu du plan journalisé et résultat
+  rendu. Le moteur, les opérations de snapshot et de restauration et toutes
+  les récupérations ne le lisent ni ne le renseignent :
+  `TestOnlySyncReadsItsPlan` n'en autorise la lecture qu'à ces phases,
+  nommées une à une, et refuse toute construction d'opération qui le
+  renseigne.
+- « Ce commit est isolé » se lit : la couture et les commits qui corrigent
+  ses revues précèdent tout code de `restore`.
+
+Aucune autre règle ne change.

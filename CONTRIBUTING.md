@@ -33,7 +33,7 @@ git diff --exit-code -- go.mod go.sum
 go mod verify
 go vet ./...
 go vet ./.github/scripts
-go test ./...
+go test -timeout 30m ./...
 go test ./.github/scripts
 go run ./.github/scripts
 go build -trimpath -o bin/savewarden ./cmd/savewarden
@@ -55,6 +55,10 @@ binaires de test fraîchement compilés peuvent être refusés : relancer le
 package concerné, ou s'appuyer sur la CI, sans désactiver cette protection. Une cross-compilation depuis
 Windows ne remplace jamais l'exécution des tests Linux/macOS.
 La CI exécute les mêmes gates sur `ubuntu-24.04`, `windows-2025` et `macos-15`.
+Les tests Windows réels de `cmd/savewarden` durent plusieurs minutes : de 5 à
+6 minutes sur un poste récent, environ 8 minutes sur `windows-2025`. Par
+marge, le délai de `go test` est porté à 30 minutes, au-delà des 10 minutes
+par défaut, en local comme en CI.
 
 Au premier commit, `git diff --exit-code` ne peut pas constater des fichiers
 non suivis. Comparer aussi les empreintes de `go.mod`/`go.sum` avant et après un

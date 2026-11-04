@@ -6,16 +6,18 @@ Savewarden vise à inspecter, centraliser, vérifier et restaurer les sauvegarde
 de jeux à partir de sources explicitement choisies. Le moteur sera indépendant
 de la CLI, local-first et Windows-first.
 
-**État actuel : lot B3, version `dev`.** La commande `inspect` lit un
-[manifeste v1](docs/manifest-v1.md) et inventorie en lecture seule les dossiers
-de sauvegarde qu'il déclare. La commande `sync` planifie, en lecture seule,
-leur copie vers un [coffre](docs/vault.md) ; avec `--apply`, elle y publie une
-nouvelle génération vérifiée du jeu, l'ancienne étant conservée dans
-`retained`, et `--recover` reprend toute opération interrompue. La commande
-`snapshot` fige une copie vérifiée et immuable de cette génération. Les
-sources ne sont que lues ; rien n'est jamais supprimé ni écrasé. Les commandes
-`restore` et `doctor` ne sont pas encore disponibles. Aucune release ni
-installation via package manager.
+**État actuel : lot B4, en développement, version `dev`.** La commande
+`inspect` lit un [manifeste v1](docs/manifest-v1.md) et inventorie en lecture
+seule les dossiers de sauvegarde qu'il déclare. La commande `sync` planifie,
+en lecture seule, leur copie vers un [coffre](docs/vault.md) ; avec `--apply`,
+elle y publie une nouvelle génération vérifiée du jeu, l'ancienne étant
+conservée dans `retained`, et `--recover` reprend toute opération
+interrompue. La commande `snapshot` fige une copie vérifiée et immuable de
+cette génération. La commande `restore` copie un snapshot approuvé dans une
+zone de restauration isolée, hors du jeu et du coffre, qu'elle n'écrit
+jamais. Les sources ne sont que lues ; rien n'est jamais supprimé ni écrasé.
+`doctor` n'est pas encore disponible. Aucune release ni installation via
+package manager.
 
 ## Compiler et utiliser
 
@@ -119,6 +121,28 @@ Savewarden. Cette garantie est protocolaire, pas un stockage WORM. Un même
 état n'est figé qu'une fois : `--apply` répond alors `up to date`. Détails :
 [`savewarden snapshot`](docs/commands/snapshot.md).
 
+## Restaurer un snapshot
+
+Choisissez une zone de restauration : un dossier absent ou vide, hors du jeu,
+du coffre et des sources. Puis :
+
+```powershell
+.\bin\savewarden.exe restore --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre' --snapshot 20261106T101500-5e6f7a8b --to 'G:\Restaurations\mon-jeu'
+.\bin\savewarden.exe restore --manifest 'D:\Manifests\mon-jeu.yaml' --vault 'F:\Coffre' --snapshot 20261106T101500-5e6f7a8b --to 'G:\Restaurations\mon-jeu' --apply
+```
+
+Le plan vérifie le snapshot en entier et dit ce que `--apply` copierait,
+sans rien écrire. `--apply` marque la zone, copie le snapshot, relit la copie
+et la publie sous `<zone>\<opération>`, avec son receipt ; la dernière ligne
+de stderr, `savewarden: destination: published restore <opération>`, dit
+qu'elle peut être utilisée. Le coffre n'est jamais écrit, pas même son
+verrou. Chaque `--apply` publie une nouvelle restauration ; une restauration
+publiée vous appartient, et Savewarden ne la modifie plus. Après une
+interruption, `restore --recover`, sans `--vault`, montre la récupération de
+la zone, et `--recover --apply` l'exécute. Savewarden ne restaure jamais dans
+le jeu : copiez vous-même les fichiers voulus, jeu fermé. Détails :
+[`savewarden restore`](docs/commands/restore.md).
+
 ## Sécurité et support
 
 - `inspect` ne lit que les dossiers déclarés. Il ne suit aucun lien,
@@ -133,6 +157,9 @@ Savewarden. Cette garantie est protocolaire, pas un stockage WORM. Un même
   création seule. Les tests utilisent des données synthétiques.
 - Les sauvegardes sources et les snapshots approuvés ne sont jamais supprimés.
   Un snapshot absent ou altéré est signalé, jamais réparé.
+- `restore` n'écrit que dans une zone qu'il marque, jamais dans le coffre, le
+  jeu ou une source, y compris à travers un alias de lecteur ; une séparation
+  qui ne peut pas être prouvée est refusée.
 - Une copie sur le même disque physique ne protège pas contre la panne du disque.
 
 Windows est le pilote fonctionnel. La CI teste sur Windows, Linux et macOS ;
@@ -155,8 +182,9 @@ complète ; B3 snapshots immuables ; B4 restauration isolée ; B5 `doctor` et
 validation pilote.
 La [roadmap originale](.plans/Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md),
 le [plan B1](.plans/Savewarden_Plan_B1_Manifeste_Inspect_v0.2.md), le
-[plan B2](.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md) et le
-[plan B3](.plans/Savewarden_Plan_B3_Snapshots_v0.2.md) restent les
+[plan B2](.plans/Savewarden_Plan_B2_Synchronisation_v0.2.md), le
+[plan B3](.plans/Savewarden_Plan_B3_Snapshots_v0.2.md) et le
+[plan B4](.plans/Savewarden_Plan_B4_Restauration_v0.2.md) restent les
 sources du périmètre, et le [changelog](CHANGELOG.md) décrit l'existant.
 
 Licence [MIT](LICENSE), choisie explicitement pour ce bootstrap.

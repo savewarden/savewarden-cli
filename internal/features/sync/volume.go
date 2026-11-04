@@ -14,11 +14,17 @@ const minimumMargin = 64 << 20
 // qualify accepts local NTFS volumes only (D11): ReFS, FAT32, exFAT and
 // network, optical or RAM drives are refused before anything is written.
 func qualify(vaultPath string, volume backup.Volume) error {
+	return qualifyVolume(volume, func(format string, args ...any) error { return errVault(vaultPath, format, args...) })
+}
+
+// qualifyVolume is qualify, its refusal worded by fail: a restore area
+// is qualified as a vault is (ADR 0006 §11).
+func qualifyVolume(volume backup.Volume, fail func(format string, args ...any) error) error {
 	if volume.FileSystem != "NTFS" {
-		return errVault(vaultPath, "volume file system is %q; only NTFS is qualified", volume.FileSystem)
+		return fail("volume file system is %q; only NTFS is qualified", volume.FileSystem)
 	}
 	if volume.Drive != backup.DriveFixed && volume.Drive != backup.DriveRemovable {
-		return errVault(vaultPath, "volume is on a %s drive; only local fixed or removable drives are qualified", volume.Drive)
+		return fail("volume is on a %s drive; only local fixed or removable drives are qualified", volume.Drive)
 	}
 	return nil
 }

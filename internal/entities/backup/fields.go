@@ -35,6 +35,12 @@ type StepValues struct {
 	SnapshotSource SnapshotSource
 	SourceIdentity FileID
 	SnapshotPlan   *SnapshotPlan
+	// Planned of a restore operation (ADR 0006 §11): the snapshot it
+	// restores and the SHA-256 of its receipt file, the identity of that
+	// snapshot, and the plan. PlanSHA256 is computed from RestorePlan.
+	RestoredSnapshot SnapshotSource
+	SnapshotIdentity FileID
+	RestorePlan      *RestorePlan
 }
 
 type fieldKind int
@@ -53,6 +59,10 @@ const (
 	fieldSourceReceipt
 	fieldSourceIdentity
 	fieldSnapshotPlan
+	fieldRestoredSnapshot
+	fieldRestoredReceipt
+	fieldSnapshotIdentity
+	fieldRestorePlan
 )
 
 // stepContract names, for every step, its only fields; all are required,
@@ -108,7 +118,13 @@ func newRecord(contracts map[Step]map[string]fieldKind, staging string, seq int,
 	if !ok {
 		return Record{}, fmt.Errorf("unknown step %q", step)
 	}
-	if v.Plan != nil && v.SnapshotPlan != nil {
+	plans := 0
+	for _, set := range []bool{v.Plan != nil, v.SnapshotPlan != nil, v.RestorePlan != nil} {
+		if set {
+			plans++
+		}
+	}
+	if plans > 1 {
 		return Record{}, errors.New("planned record: the values carry two plans")
 	}
 	fields := map[string]json.RawMessage{}
@@ -139,6 +155,8 @@ func newRecord(contracts map[Step]map[string]fieldKind, staging string, seq int,
 			switch {
 			case contract["plan"] == fieldSnapshotPlan && v.SnapshotPlan != nil:
 				_, sum, err = v.SnapshotPlan.Encode()
+			case contract["plan"] == fieldRestorePlan && v.RestorePlan != nil:
+				_, sum, err = v.RestorePlan.Encode()
 			case contract["plan"] == fieldPlan && v.Plan != nil:
 				_, sum, err = v.Plan.Encode()
 			default:
@@ -158,12 +176,28 @@ func newRecord(contracts map[Step]map[string]fieldKind, staging string, seq int,
 			}
 			fields[name] = plan
 			continue
+		case fieldRestorePlan:
+			if v.RestorePlan == nil {
+				return Record{}, errors.New("planned record: plan required")
+			}
+			plan, _, err := v.RestorePlan.Encode()
+			if err != nil {
+				return Record{}, err
+			}
+			fields[name] = plan
+			continue
 		case fieldSourceOperation:
 			value = v.SnapshotSource.Operation
 		case fieldSourceReceipt:
 			value = hex.EncodeToString(v.SnapshotSource.ReceiptSHA256[:])
 		case fieldSourceIdentity:
 			value = v.SourceIdentity.String()
+		case fieldRestoredSnapshot:
+			value = v.RestoredSnapshot.Operation
+		case fieldRestoredReceipt:
+			value = hex.EncodeToString(v.RestoredSnapshot.ReceiptSHA256[:])
+		case fieldSnapshotIdentity:
+			value = v.SnapshotIdentity.String()
 		case fieldStagingName:
 			value = staging
 		case fieldStaging:
@@ -255,19 +289,34 @@ func (r Record) values(contracts map[Step]map[string]fieldKind, staging string) 
 			}
 			v.SnapshotPlan = &plan
 			planSum = sha256.Sum256(raw)
-		case fieldSourceOperation:
+		case fieldRestorePlan:
+			plan, err := DecodeRestorePlan(raw)
+			if err != nil {
+				return StepValues{}, fail("%v", err)
+			}
+			v.RestorePlan = &plan
+			planSum = sha256.Sum256(raw)
+		case fieldSourceOperation, fieldRestoredSnapshot:
 			source, err := decodeString(raw)
 			if err != nil || ValidOperationID(source) != nil || source == r.Op {
 				return StepValues{}, fail(`%q must be another operation id`, name)
 			}
-			v.SnapshotSource.Operation = source
-		case fieldSourceReceipt:
+			if contract[name] == fieldRestoredSnapshot {
+				v.RestoredSnapshot.Operation = source
+			} else {
+				v.SnapshotSource.Operation = source
+			}
+		case fieldSourceReceipt, fieldRestoredReceipt:
 			sum, err := decodeSHA256(raw)
 			if err != nil {
 				return StepValues{}, fail("%q: %v", name, err)
 			}
-			v.SnapshotSource.ReceiptSHA256 = sum
-		case fieldStaging, fieldCurrent, fieldRetained, fieldSourceIdentity:
+			if contract[name] == fieldRestoredReceipt {
+				v.RestoredSnapshot.ReceiptSHA256 = sum
+			} else {
+				v.SnapshotSource.ReceiptSHA256 = sum
+			}
+		case fieldStaging, fieldCurrent, fieldRetained, fieldSourceIdentity, fieldSnapshotIdentity:
 			text, err := decodeString(raw)
 			if err != nil {
 				return StepValues{}, fail("%q: %v", name, err)
@@ -283,6 +332,8 @@ func (r Record) values(contracts map[Step]map[string]fieldKind, staging string) 
 				v.Current = id
 			case fieldSourceIdentity:
 				v.SourceIdentity = id
+			case fieldSnapshotIdentity:
+				v.SnapshotIdentity = id
 			default:
 				v.Retained = id
 			}
@@ -315,7 +366,7 @@ func (r Record) values(contracts map[Step]map[string]fieldKind, staging string) 
 			return StepValues{}, fail(`%q is forbidden for a first publication`, plannedCurrent)
 		}
 	}
-	if v.SnapshotPlan != nil && v.PlanSHA256 != planSum {
+	if (v.SnapshotPlan != nil || v.RestorePlan != nil) && v.PlanSHA256 != planSum {
 		return StepValues{}, fail(`"plan_sha256" does not match the plan`)
 	}
 	return v, nil

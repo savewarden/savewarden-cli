@@ -20,7 +20,7 @@ import (
 func (o *operation) rotate() error {
 	// A2, point 3: just before retire-intent, current is read again in full,
 	// by the identity planned fixed.
-	switch id, err := o.vault.Identity(o.game + "/" + currentDir); {
+	switch id, err := o.vault.Identity(o.at(currentDir)); {
 	case err != nil:
 		return o.intervene("current cannot be checked before its retirement: " + err.Error() + "; nothing recorded or moved")
 	case id != o.old:
@@ -29,17 +29,17 @@ func (o *operation) rotate() error {
 	if err := o.oldUnchanged(currentDir); err != nil {
 		return err
 	}
-	current, retained := o.game+"/"+currentDir, o.retainedDir()
+	current, retained := o.at(currentDir), o.retainedDir()
 	if err := o.record(backup.StepRetireIntent, backup.StepValues{Current: o.old}); err != nil {
 		return err
 	}
 	o.critical = true
 	// M1. The retained directory is created under the intent, like staging.
-	moved, err := false, o.ensureDir(o.game+"/"+retainedDir)
+	moved, err := false, o.ensureDir(o.at(retainedDir))
 	if err != nil {
 		// Only a creation that failed leaves nothing there; anything else,
 		// a link, a file, an entry that cannot be read, is unexplained.
-		if _, idErr := o.vault.Identity(o.game + "/" + retainedDir); !errors.Is(idErr, fs.ErrNotExist) {
+		if _, idErr := o.vault.Identity(o.at(retainedDir)); !errors.Is(idErr, fs.ErrNotExist) {
 			err = &unexplainedError{fmt.Sprintf("%s cannot be held before the retirement: %v", retainedDir, err)}
 		}
 	}
@@ -118,7 +118,7 @@ func (o *operation) restoreOld(why string, intent, retried bool) error {
 			return o.intervene(fmt.Sprintf("%sthe restoration could not be recorded: %v", why, err))
 		}
 	}
-	moved, err := o.switchTo(o.retainedDir(), o.game+"/"+currentDir, o.old)
+	moved, err := o.switchTo(o.retainedDir(), o.at(currentDir), o.old)
 	var unexplained *unexplainedError
 	switch {
 	case err == nil:
@@ -146,7 +146,7 @@ func (o *operation) restoreOld(why string, intent, retried bool) error {
 // unpromote-intent (M4), then restores the old generation. A refused M4 is
 // recorded as rollback-failed unless one already follows the intent (E3).
 func (o *operation) unpromote(retried bool) error {
-	moved, err := o.switchTo(o.game+"/"+currentDir, o.stagingDir(), o.staging)
+	moved, err := o.switchTo(o.at(currentDir), o.stagingDir(), o.staging)
 	var unexplained *unexplainedError
 	switch {
 	case err == nil:
@@ -170,7 +170,7 @@ func (o *operation) unpromote(retried bool) error {
 // planned fixed and read in full against its receipt (ADR 0006 §5, point
 // 5). It moves nothing.
 func (o *operation) checkRetired() error {
-	switch _, err := o.vault.Identity(o.game + "/" + currentDir); {
+	switch _, err := o.vault.Identity(o.at(currentDir)); {
 	case err == nil:
 		return errors.New("an object appeared under current after the retirement; its provenance is not proven")
 	case !errors.Is(err, fs.ErrNotExist):
@@ -215,7 +215,7 @@ func (o *operation) oldUnchanged(name string) error {
 	if err != nil {
 		return err
 	}
-	if id, err := o.vault.Identity(o.game + "/" + name); err != nil || id != o.old {
+	if id, err := o.vault.Identity(o.at(name)); err != nil || id != o.old {
 		return o.refuse(fmt.Sprintf("%s was replaced while it was read, or cannot be checked: %v %v; nothing recorded or moved", name, id, err))
 	}
 	if len(differences) > 0 {
@@ -230,21 +230,19 @@ func (o *operation) oldUnchanged(name string) error {
 // directory, through a read-only no-follow walk closed before returning,
 // and lists how it differs from the receipt of previous.
 func (o *operation) oldDifferences(name string) ([]difference, error) {
-	segments := append(append([]string{}, o.plan.vaultSegments...), gamesDir, o.plan.Game.ID)
-	segments = append(segments, strings.Split(name, "/")...)
 	ctx := o.ctx
 	if o.critical {
 		// Between the moves, a check is part of the switch: it is finished.
 		ctx = context.WithoutCancel(ctx)
 	}
-	dir, err := o.s.inventories.Directory(ctx, o.plan.vaultVolume, segments)
+	dir, err := o.readBackIn(ctx, o.at(name))
 	if err != nil {
 		return nil, err
 	}
 	return compareWithReceipt(dir, o.head), nil
 }
 
-func (o *operation) retainedDir() string { return o.game + "/" + retainedDir + "/" + o.previous }
+func (o *operation) retainedDir() string { return o.at(retainedDir + "/" + o.previous) }
 
 // refuse stops in code 3 with nothing recorded: for the operation once its
 // directory exists, for the vault before.

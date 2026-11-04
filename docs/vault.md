@@ -5,11 +5,13 @@ le contenu. `sync --apply` y publie une copie vérifiée des sources d'un
 manifeste ; le plan, sans `--apply`, le lit sans rien écrire. Une nouvelle
 génération remplace la précédente par rotation : l'ancienne est renommée dans
 `retained`, jamais supprimée. `snapshot --apply` y range en outre des
-snapshots : des copies vérifiées et immuables de `current`. Les règles de
+snapshots : des copies vérifiées et immuables de `current`. `restore` ne fait
+qu'y lire un snapshot : il n'écrit jamais le coffre. Les règles de
 publication et de récupération sont fixées par
 [ADR 0006](adr/0006-publication-recovery-protocol.md), le contrat des
-commandes par [ADR 0007](adr/0007-sync-contract-receipt-v1.md) pour `sync` et
-[ADR 0008](adr/0008-snapshot-contract-receipt-v1.md) pour `snapshot`.
+commandes par [ADR 0007](adr/0007-sync-contract-receipt-v1.md) pour `sync`,
+[ADR 0008](adr/0008-snapshot-contract-receipt-v1.md) pour `snapshot` et
+[ADR 0009](adr/0009-restore-contract-receipt-v1.md) pour `restore`.
 
 ## Disposition
 
@@ -137,6 +139,23 @@ inexpliquée ou `snapshots\receipts` absent à côté d'opérations, bloque la
 création de snapshots et leur récupération jusqu'à votre intervention,
 jamais `sync`. Ne supprimez aucun fichier ; un nouveau coffre reste possible.
 Les copies `.incomplete` des opérations closes ne sont ni relues ni exigées.
+
+## Restaurer : le coffre n'est jamais écrit
+
+[`restore`](commands/restore.md) copie un snapshot approuvé dans une **zone
+de restauration**, un dossier hors du coffre, du jeu et des sources. Le coffre
+n'est jamais écrit par `restore`, ni verrouillé : `sync.lock` n'est ni ouvert
+ni observé, et une restauration peut tourner pendant un `sync` ou un
+`snapshot` du même jeu, ou depuis un coffre protégé en écriture. Seul le
+snapshot désigné est lu, en entier ; une anomalie ailleurs dans le coffre ne
+bloque pas sa restauration. Journal, receipt et verrou d'une restauration
+vivent dans la zone, et sa récupération ne lit jamais le coffre. Une zone
+n'est jamais créée dans un coffre ; un binaire antérieur à B4 lit un coffre
+après une restauration exactement comme avant.
+
+Un snapshot encore en cours ou au journal ambigu n'est pas restaurable : code
+1, avec un renvoi à `snapshot --recover`, qui reste la seule récupération du
+coffre.
 
 ## Espace disque
 

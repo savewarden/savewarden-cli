@@ -224,13 +224,20 @@ func (s *Service) SnapshotRecover(ctx context.Context, request SnapshotRequest, 
 	if err != nil || rec.Action == RecoverNothing {
 		return result, err
 	}
+	t, err := vaultTarget(rec.Vault, rec.Game.ID)
+	if err != nil {
+		return result, err
+	}
+	src, err := vaultReadRoot(rec.Vault, rec.Game.ID)
+	if err != nil {
+		return result, err
+	}
 	session, err := w.Vaults.Open(request.VaultPath)
 	if err != nil {
 		return result, errVault(request.VaultPath, "%w", err)
 	}
 	o := &operation{
-		s: s, w: w, ctx: ctx, vault: session, domain: snapshotDomain, op: rec.Operation, game: gamesDir + "/" + rec.Game.ID, recovering: true,
-		plan:     Plan{Vault: rec.Vault, Game: rec.Game, vaultVolume: rec.vaultVolume, vaultSegments: rec.vaultSegments},
+		s: s, w: w, ctx: ctx, vault: session, domain: snapshotDomain, op: rec.Operation, target: t, reads: src, recovering: true,
 		attempts: map[int]map[int]bool{}, receipt: map[int]bool{}, marker: map[int]bool{},
 	}
 	err = o.unfinished(o.recoverSnapshot(&rec, request))
@@ -249,14 +256,14 @@ func (s *Service) SnapshotRecover(ctx context.Context, request SnapshotRequest, 
 }
 
 func (o *operation) recoverSnapshot(rec *SnapshotRecovery, request SnapshotRequest) error {
-	for _, dir := range []string{gamesDir, o.game, o.game + "/" + snapshotsDir, o.game + "/" + o.domain.journals, o.journalDir()} {
+	for _, dir := range append(o.target.chain(), o.at(snapshotsDir), o.at(o.domain.journals), o.journalDir()) {
 		if err := o.vault.Hold(dir); err != nil {
 			return errVault(rec.Vault, "%w", err)
 		}
 	}
 	// The lock is taken as sync takes it: its absence never makes a
 	// snapshot recovery depend on the current domain.
-	if err := o.vault.Lock(o.game + "/" + lockFile); err != nil {
+	if err := o.vault.Lock(o.at(o.target.lock)); err != nil {
 		var busy interface{ Busy() bool }
 		if errors.As(err, &busy) && busy.Busy() {
 			return errVault(rec.Vault, "%s", o.domain.busy)
@@ -324,9 +331,8 @@ func (o *operation) recoverSnapshot(rec *SnapshotRecovery, request SnapshotReque
 // content. Without a committed receipt, the provenance gate decides; with
 // one (A5, A6), that receipt is the proof and nothing is ever moved back.
 func (o *operation) verifySnapshotThenPublish(rec *SnapshotRecovery) error {
-	published := o.game + "/" + o.domain.published(o.op)
-	segments := append(append([]string{}, o.plan.vaultSegments...), strings.Split(published, "/")...)
-	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
+	published := o.at(o.domain.published(o.op))
+	dir, err := o.readBack(published)
 	if err != nil {
 		return err
 	}

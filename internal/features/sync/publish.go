@@ -14,7 +14,7 @@ import (
 // receipt and the published record (ADR 0006 §4). From publish-intent on,
 // nothing is recorded as failed: an interrupted switch is left to recovery.
 func (o *operation) publish() error {
-	current := o.game + "/" + currentDir
+	current := o.at(currentDir)
 	if err := o.record(backup.StepPublishIntent, backup.StepValues{Staging: o.staging}); err != nil {
 		return err
 	}
@@ -61,6 +61,11 @@ func (o *operation) intervene(cause string) error {
 // rename that fails or cannot be read is an unexplainedError: nothing may
 // then be recorded as if the state were known (ADR 0006 §3).
 func (o *operation) switchTo(from, to string, want backup.FileID) (moved bool, err error) {
+	// A session releases every pin for ".", and nothing for a name io/fs
+	// refuses: no switch ever moves the root or such a name.
+	if from == "." || !fs.ValidPath(from) {
+		return false, &unexplainedError{fmt.Sprintf("%q is not a directory a switch may move", from)}
+	}
 	if err := o.vault.Release(from); err != nil {
 		return false, &unexplainedError{fmt.Sprintf("%s cannot be released before its rename: %v", from, err)}
 	}
@@ -122,10 +127,10 @@ func (o *operation) writeReceipt(publishedAt, recoveredAt *time.Time, recoveredB
 	if err != nil {
 		return [32]byte{}, err
 	}
-	if err := o.ensureDir(o.game + "/" + receiptsDir); err != nil {
+	if err := o.ensureDir(o.at(receiptsDir)); err != nil {
 		return [32]byte{}, err
 	}
-	if err := o.commitFile(o.game+"/"+receiptsDir+"/"+o.op+".json", data, o.receipt, nil); err != nil {
+	if err := o.commitFile(o.at(receiptsDir+"/"+o.op+".json"), data, o.receipt, nil); err != nil {
 		return [32]byte{}, err
 	}
 	return sha256.Sum256(data), nil

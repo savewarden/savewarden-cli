@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ func (o *operation) stage() error {
 	if err := o.record(backup.StepStagingIntent, backup.StepValues{}); err != nil {
 		return err
 	}
-	if err := o.ensureDir(o.game + "/" + o.domain.stagings); err != nil {
+	if err := o.ensureDir(o.at(o.domain.stagings)); err != nil {
 		return err
 	}
 	if err := o.vault.CreateDir(o.stagingDir()); err != nil {
@@ -114,7 +115,7 @@ func (o *operation) copyFile(scope Scope, sourceID, from, to string, want backup
 	}
 	out, err := o.vault.NewFile(to, want.ModTime)
 	if err != nil {
-		return fmt.Errorf("staging %s: %w", to, err)
+		return fmt.Errorf("%s %s: %w", o.domain.copy, to, err)
 	}
 	hash := sha256.New()
 	read, copyErr := copyHashed(out, hash, file, want.Size)
@@ -124,7 +125,7 @@ func (o *operation) copyFile(scope Scope, sourceID, from, to string, want backup
 	var write *writeError
 	switch {
 	case errors.As(copyErr, &write):
-		return fmt.Errorf("staging %s: %w", to, write.err)
+		return fmt.Errorf("%s %s: %w", o.domain.copy, to, write.err)
 	case copyErr != nil:
 		return fmt.Errorf("source %s, %s: %w", sourceID, want.Path, copyErr)
 	}
@@ -209,8 +210,7 @@ func sameInventory(a, b backup.Directory) bool {
 // walk, closed before returning: exactly the planned paths and
 // directories, sizes, dates and SHA-256 (plan B2 §4.3, phase 6).
 func (o *operation) verify() error {
-	segments := append(append([]string{}, o.plan.vaultSegments...), strings.Split(o.stagingDir(), "/")...)
-	dir, err := o.s.inventories.Directory(o.ctx, o.plan.vaultVolume, segments)
+	dir, err := o.readBack(o.stagingDir())
 	if err != nil {
 		return err
 	}
@@ -226,6 +226,23 @@ func (o *operation) verify() error {
 		return err
 	}
 	return o.record(backup.StepVerified, backup.StepValues{Digest: digest})
+}
+
+// readBack inventories name, a directory the operation wrote or moved,
+// named for its session, below the root of its target: never below the
+// root a plan read from (ADR 0004, amendment B4).
+func (o *operation) readBack(name string) (backup.Directory, error) {
+	return o.readBackIn(o.ctx, name)
+}
+
+// readBackIn is readBack under ctx, which a check between two moves does
+// not let a cancellation interrupt.
+func (o *operation) readBackIn(ctx context.Context, name string) (backup.Directory, error) {
+	segments := append([]string{}, o.target.segments...)
+	if name != "." {
+		segments = append(segments, strings.Split(name, "/")...)
+	}
+	return o.s.inventories.Directory(ctx, o.target.volume, segments)
 }
 
 func orDash(s string) string {

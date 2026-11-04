@@ -79,6 +79,10 @@ func (m Manifest) SourceSegments(index int) (volume string, segments []string, e
 	return volume, append(append([]string{}, installation...), relative...), nil
 }
 
+// CheckID validates a game identifier with the rules of manifest v1, for
+// the artifacts that record one outside a manifest.
+func CheckID(id string) error { return checkSlug(id) }
+
 func checkSlug(id string) error {
 	if id == "" {
 		return fmt.Errorf("must not be empty")

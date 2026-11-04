@@ -45,7 +45,7 @@ func TestBinarySmoke(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("synthetic fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"--help"}, {"version"}, {"--version"}, {"sync"}, {"snapshot"}, {"inspect"}} {
+	for _, args := range [][]string{{"--help"}, {"version"}, {"--version"}, {"sync"}, {"snapshot"}, {"inspect"}, {"restore"}} {
 		cmd := exec.Command(binary, args...)
 		cmd.Dir = work
 		var stdout, stderr bytes.Buffer
@@ -55,6 +55,7 @@ func TestBinarySmoke(t *testing.T) {
 			"sync":     `required flag(s) "manifest", "vault" not set`,
 			"snapshot": `required flag(s) "manifest", "vault" not set`,
 			"inspect":  `required flag(s) "manifest" not set`,
+			"restore":  `required flag(s) "manifest", "to" not set`,
 		}[args[0]]
 		if missing {
 			var exit *exec.ExitError
@@ -67,7 +68,7 @@ func TestBinarySmoke(t *testing.T) {
 			}
 			if args[0] == "--help" {
 				if !strings.Contains(stdout.String(), "plans their synchronisation") || !strings.Contains(stdout.String(), "inspect") || !strings.Contains(stdout.String(), "sync") ||
-					!strings.Contains(stdout.String(), "snapshot") {
+					!strings.Contains(stdout.String(), "snapshot") || !strings.Contains(stdout.String(), "restore") {
 					t.Fatalf("help: %q", stdout.String())
 				}
 			} else if stdout.String() != "savewarden dev\n" {
@@ -300,6 +301,47 @@ func TestSnapshotPlanDoesNotWrite(t *testing.T) {
 	})
 }
 
+// The plan of restore writes nothing; without a vault it refuses in code 1,
+// restore never creating anything outside its area.
+func TestRestorePlanDoesNotWrite(t *testing.T) {
+	assertReadOnlyRuns(t, func(base, manifest string) []string {
+		vault, dest := `D:\Coffre synthétique`, `D:\Restaurations\synthétique`
+		if runtime.GOOS == "windows" {
+			vault, dest = filepath.Join(base, "Coffre synthétique"), filepath.Join(base, "Restaurations", "synthétique")
+		}
+		return []string{"restore", "--manifest", manifest, "--vault", vault, "--snapshot", "20261101T090000-0a1b2c3d", "--to", dest}
+	}, func(t *testing.T, stdout, stderr string, err error) {
+		if runtime.GOOS != "windows" {
+			expectWindowsOnly(t, stdout, stderr, err)
+			return
+		}
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout != "" || !strings.Contains(stderr, "does not exist") {
+			t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		}
+	})
+}
+
+// The recovery plan of restore writes nothing either, and reads no vault:
+// nothing to recover in an absent destination, code 0.
+func TestRestoreRecoverPlanDoesNotWrite(t *testing.T) {
+	assertReadOnlyRuns(t, func(base, manifest string) []string {
+		dest := `D:\Restaurations\synthétique`
+		if runtime.GOOS == "windows" {
+			dest = filepath.Join(base, "Restaurations", "synthétique")
+		}
+		return []string{"restore", "--manifest", manifest, "--to", dest, "--recover"}
+	}, func(t *testing.T, stdout, stderr string, err error) {
+		if runtime.GOOS != "windows" {
+			expectWindowsOnly(t, stdout, stderr, err)
+			return
+		}
+		if err != nil || stderr != "savewarden: destination: not modified\n" || !strings.Contains(stdout, "action: nothing to recover\n") {
+			t.Fatalf("err=%v stderr=%q stdout:\n%s", err, stderr, stdout)
+		}
+	})
+}
+
 func values(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for _, v := range m {
@@ -324,6 +366,9 @@ func TestReadmeCommandExamples(t *testing.T) {
 		"docs/commands/sync.md",
 		`.\bin\savewarden.exe snapshot --manifest '`,
 		"docs/commands/snapshot.md",
+		`.\bin\savewarden.exe restore --manifest '`,
+		"--recover --apply",
+		"docs/commands/restore.md",
 	} {
 		if !strings.Contains(string(content), example) {
 			t.Errorf("missing tested README example %q", example)

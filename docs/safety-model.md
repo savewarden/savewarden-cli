@@ -1,6 +1,6 @@
 # Modèle de sécurité
 
-## Garantie actuelle (B3)
+## Garantie actuelle (B4)
 
 `inspect` lit un manifeste désigné par l'utilisateur et les fichiers des
 sources qu'il déclare. `sync` et `snapshot`, en mode plan, lisent en plus le
@@ -8,8 +8,11 @@ coffre désigné par `--vault`, s'il existe ; `snapshot` ne lit pas le contenu
 des sources. `--apply` et `--recover --apply` écrivent, mais **seulement dans
 ce coffre**, et seulement par créations exclusives et renommages qui ne
 remplacent rien ; `snapshot` n'écrit que sous `snapshots\`, hormis le verrou
-vide que `sync` créerait aussi. Aucune découverte d'installation, création
-de lien ou mutation de configuration ; aucune écriture dans une source.
+vide que `sync` créerait aussi. `restore` lit dans le coffre le seul snapshot
+désigné et **n'écrit jamais le coffre** : il n'écrit que dans la zone de
+restauration désignée par `--to`, distincte du coffre, du jeu et des sources,
+avec les mêmes primitives. Aucune découverte d'installation, création de lien
+ou mutation de configuration ; aucune écriture dans une source.
 
 | Garantie | Mécanisme | Preuve |
 | --- | --- | --- |
@@ -18,6 +21,9 @@ de lien ou mutation de configuration ; aucune écriture dans une source.
 | Publication vérifiée | Copie hachée, source inventoriée deux fois, staging relu depuis le disque, identité du staging contrôlée avant et après le renommage | Fautes injectées : source changée, écriture refusée, octet altéré, course sur le renommage |
 | Rotation sans perte | `current` reconnu par receipt, journal publié et identité, relu en entier sous verrou et juste avant le retrait ; identité fixée par `planned` ; génération retirée relue avant la promotion ; restauration seulement si elle est intacte ; toute anomalie après le retrait : code 3, rien déplacé | Fautes injectées à chaque fenêtre : contenu ou identité changés, `current` réapparu, génération retenue altérée ; crash avant et après chaque appel, puis récupération ; test Windows réel de bout en bout |
 | Snapshot fidèle, jamais réécrit | `current` reconnu et relu en entier sous verrou ; copie relue depuis le disque et comparée au receipt de `current` ; porte de provenance avant toute approbation ; aucune écriture sous un snapshot publié ; domaines séparés, une anomalie des snapshots ne bloque jamais `sync` | Fautes injectées : `current` changé pendant la copie, receipt source altéré ou disparu, copie altérée ; crash avant et après chaque appel, puis récupération ; test croisé des deux domaines ; test Windows réel de bout en bout |
+| Restauration isolée, coffre jamais écrit | Snapshot authentifié par une lecture ciblée, contenu relu en entier ; seule session d'écriture ouverte sur la zone ; zone créée vide ou marquée du même jeu, jamais adoptée ; copie hachée, relue depuis la zone, publiée par renommage ; récupération sans le coffre | Trace des lectures et des sessions sur faux ; crash avant et après chaque appel, puis récupération ; binaire depuis un coffre sous ACL de refus d'écriture, empreinte du coffre identique ; tests Windows réels de bout en bout, fichier ouvert, processus tué |
+| Zone distincte, quelle que soit la lettre | Coffre, installation, sources et chemins sauvegardés comparés par segments puis par identité depuis la racine de chaque volume ; aucun ancêtre coffre ou zone ; identité inobservable ou lettre sans volume : refus | Faux à deux lettres pour les mêmes nœuds ; alias `subst` réel sur Windows, vers une source puis vers le coffre, à la création et à la récupération |
+| Restauration remise, jamais suivie | Après `published`, les noms d'une restauration sont observés par `Lstat` et par l'identité d'un dossier ordinaire seulement, jamais ouverts, listés, suivis ni déplacés ; classement informatif, jamais bloquant | Objets de tout type sous ces noms sur faux ; jonction réelle vers un dossier témoin, témoin identique |
 | Interruption récupérable, jamais devinée | Journal validé par renommage avant chaque action, contrat strict des champs, récupération explicite selon les tableaux d'ADR 0006 ; ambiguïté ou enveloppe épuisée : code 3 sans écriture | Crash avant et après chaque appel au coffre, puis récupération ; crash pendant la récupération ; processus tué pendant le staging |
 | Aucun lien suivi, parents compris | Contrôle de chaque composant depuis la racine du volume ; ouverture Windows avec `FILE_FLAG_OPEN_REPARSE_POINT` et contrôle des attributs sur le handle ; refus des placeholders | Faux système de fichiers sur trois OS ; vraies jonctions Windows dans la portée, en ancre, et substituées après `Lstat` ; lien symbolique relatif qu'`os.Root` seul aurait suivi |
 | Pas de substitution pendant l'inspection | Dossiers traversés gardés ouverts sans partage de suppression jusqu'à la fin | Renommage refusé tant que la portée est ouverte, accepté après fermeture |
@@ -37,6 +43,27 @@ Limites assumées :
   détectée que si un plan suivant relit son contenu, tant qu'il est le
   candidat `up to date` ; il est alors dégradé. Après une rotation, il n'est
   plus relu en B3.
+- Une restauration remise n'est plus vérifiée : une modification à
+  l'intérieur n'est pas signalée. Un snapshot réécrit délibérément avec son
+  receipt et son journal serait restauré fidèlement : la vérification refuse
+  une altération accidentelle ou partielle, pas une falsification cohérente.
+- Les distinctions d'une zone portent sur les chemins tels qu'ils se
+  résolvent aujourd'hui ; une restauration est refusée tant qu'une lettre de
+  référence n'a pas de volume. B4 n'est pas une reprise après sinistre
+  complète.
+- **Risque résiduel, chantier [S-01](#chantiers-de-sécurité-ouverts).** Les
+  sessions de `platform/vault` créent et renomment **par chemin complet**.
+  Leurs épingles interdisent de renommer les dossiers déjà ouverts, mais ne
+  neutralisent pas la réattribution d'une lettre de lecteur. `restore` refait
+  les distinctions une fois sa session ouverte, avant toute écriture : une
+  lettre réattribuée entre le plan et l'ouverture est refusée, ce que prouve
+  un test Windows réel avec `subst`. Une lettre réattribuée **pendant**
+  qu'une session est ouverte, après ce contrôle et avant une écriture, n'est
+  pas exclue, pour `restore` comme pour `sync` et `snapshot` : aucune
+  garantie technique ne l'empêche. Acceptation provisoire, ratifiée par le
+  propriétaire le 4 novembre 2026, limitée à la qualification interne de B4
+  sur volumes stables, sans lettre ni alias modifié pendant une opération ;
+  durcissement obligatoire avant toute diffusion publique (ADR 0006 §11).
 - Le garde statique ne prouve pas l'absence de tout effet indirect ; les
   tests dynamiques couvrent le comportement livré, sur leurs fixtures.
 - Sous Unix, l'adaptateur sert aux tests du contrat ; un échange suivi d'une
@@ -76,7 +103,10 @@ déplacé, remplacé ni supprimé par Savewarden, et aucun snapshot créé hors 
 Savewarden n'est adopté. Cette garantie est **protocolaire, pas matérielle** :
 ce n'est pas un stockage WORM, et un autre programme peut toujours modifier
 un snapshot. Savewarden le signale alors comme dégradé, sans jamais le
-réparer.
+réparer. B4 applique les invariants 2, 4, 6 et 7 à la commande
+[`restore`](commands/restore.md), selon ADR 0006 §11 : une restauration va
+dans un dossier séparé, jamais en place, ne restaure qu'un snapshot approuvé
+et vérifié en entier, et ne touche jamais au coffre.
 
 ## Windows et remplacement de current
 
@@ -100,8 +130,11 @@ Avant tout write, conserver la source originale et l'état actuel, fournir un
 plan/dry-run et attendre l'autorisation du pilote. Si vérification ou
 publication échoue, ne pas supprimer la source ni l'ancien `current` ;
 conserver l'incomplet identifié et diagnostiquer depuis le receipt. Une
-restauration B4 crée un dossier distinct et vérifié ; elle ne change jamais
-la sauvegarde active du jeu.
+restauration crée un dossier distinct et vérifié ; elle ne change jamais la
+sauvegarde active du jeu. Reprendre des fichiers dans le jeu reste un geste
+manuel, décrit dans la page du [receipt de restauration](restore-receipt-v1.md#reprendre-les-fichiers-dans-le-jeu).
+Le rollback du code B4 est neutre pour les coffres, qu'aucune restauration
+n'écrit ; une zone reste un dossier ordinaire, lisible par `inspect`.
 
 En B2b comme en B2c, le rollback du code consiste à reverter la PR du lot
 sur la release branch. Un binaire B2b refuse un coffre qui a connu une
@@ -112,6 +145,23 @@ vérifié sur un coffre synthétique avec un binaire construit depuis
 écrits ne sont jamais réécrits : une génération publiée ou conservée, un
 staging conservé ou un journal clos restent en place ; un nouveau coffre est
 toujours possible.
+
+## Chantiers de sécurité ouverts
+
+### S-01 — Écritures indépendantes des lettres de lecteur
+
+| Champ | Valeur |
+| --- | --- |
+| Statut | **Ouvert**. Ni défaut éditorial, ni résolu |
+| Ouvert le | 4 novembre 2026 : revue de sécurité de B4, P1-02, et revues ciblées de `5184d51` et `0b7bfcf` |
+| Risque | Une lettre de lecteur réattribuée pendant qu'une session d'écriture est ouverte peut faire porter une création ou un renommage ailleurs que là où le dernier contrôle l'a vue, une source par exemple. Les épingles ne l'empêchent pas |
+| Portée | Toutes les sessions de `platform/vault` : `sync`, `snapshot` et `restore` |
+| Déjà fermé | Pour `restore`, la réattribution entre le plan et l'ouverture de la session : `TestRestoreRefusesALetterRemappedBeforeTheSession`, sur Windows réel |
+| Acceptation provisoire | Qualification interne de B4 seulement : volumes NTFS locaux stables, aucune lettre ni alias `subst` créé, retiré ou réattribué pendant une opération ; pilote interne contrôlé après ses autorisations propres. Ratifiée par le propriétaire le 4 novembre 2026, avec l'amendement d'ADR 0006 §11. Elle ne prouve pas l'innocuité du risque : elle borne les conditions dans lesquelles B4 continue |
+| Interdit tant que S-01 est ouvert | Présenter Savewarden comme protégeant contre une réattribution concurrente ; diffuser une version publique |
+| Sortie attendue | Amendement d'ADR 0005 ; primitives d'écriture qui ne résolvent plus de lettre une fois la session ouverte ; requalification de B2, B3 et B4 ; test Windows réel qui réattribue une lettre pendant une session ouverte et montre qu'aucune écriture ne sort de la cible contrôlée ; nouveau gate de sécurité |
+| Pistes, à évaluer | Créations et renommages relatifs aux handles des dossiers épinglés plutôt qu'à un chemin complet ; aucune n'est vérifiée |
+| Gate | **Bloquant pour toute diffusion publique.** Non bloquant pour la qualification interne de B4, dans les conditions ci-dessus |
 
 ## Preuves et confidentialité
 

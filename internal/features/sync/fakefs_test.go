@@ -23,6 +23,7 @@ type node struct {
 	crypted  bool
 	listErr  error
 	busy     bool // held without sharing: cannot be opened
+	statErr  error
 	children map[string]*node
 }
 
@@ -44,6 +45,8 @@ type fakeFS struct {
 	// such as the check under lock.
 	later     *backup.Volume
 	described int
+	// reads lists every read of a scope, "<call> <Windows path>", in order.
+	reads []string
 }
 
 // fakeVolumes describes the fake volumes; a path on a missing volume fails.
@@ -132,7 +135,7 @@ func (f *fakeFS) scope(root string) (*fakeScope, error) {
 	if !ok {
 		return nil, fs.ErrNotExist
 	}
-	return &fakeScope{fs: f, root: volume}, nil
+	return &fakeScope{fs: f, root: volume, volume: root}, nil
 }
 
 // inspectFS and syncFiles adapt the fake to each feature's port, as app
@@ -163,11 +166,21 @@ func (e *notFollowedError) Error() string     { return e.name + ": link not foll
 func (e *notFollowedError) NotFollowed() bool { return true }
 
 type fakeScope struct {
-	fs   *fakeFS
-	root *node
+	fs     *fakeFS
+	root   *node
+	volume string
 }
 
 func isLink(mode fs.FileMode) bool { return mode&(fs.ModeSymlink|fs.ModeIrregular) != 0 }
+
+// trace records one read of name, as a Windows path.
+func (s *fakeScope) trace(call, name string) {
+	path := s.volume
+	if name != "." {
+		path += strings.ReplaceAll(name, "/", `\`)
+	}
+	s.fs.reads = append(s.fs.reads, call+" "+path)
+}
 
 func (s *fakeScope) lookup(name string) (*node, string, error) {
 	if name == "." {
@@ -191,17 +204,22 @@ func (s *fakeScope) lookup(name string) (*node, string, error) {
 }
 
 func (s *fakeScope) Lstat(name string) (fs.FileInfo, error) {
+	s.trace("Lstat", name)
 	if s.fs.onLstat != nil {
 		s.fs.onLstat(name)
 	}
 	n, base, err := s.lookup(name)
-	if err != nil {
+	switch {
+	case err != nil:
 		return nil, err
+	case n.statErr != nil:
+		return nil, n.statErr
 	}
 	return info(base, n), nil
 }
 
 func (s *fakeScope) ReadDir(name string) ([]fs.DirEntry, error) {
+	s.trace("ReadDir", name)
 	n, _, err := s.lookup(name)
 	switch {
 	case err != nil:
@@ -221,6 +239,7 @@ func (s *fakeScope) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 func (s *fakeScope) OpenRegular(name string) (fs.File, error) {
+	s.trace("OpenRegular", name)
 	n, base, err := s.lookup(name)
 	switch {
 	case err != nil:
@@ -243,6 +262,7 @@ func (s *fakeScope) OpenRegular(name string) (fs.File, error) {
 func (s *fakeScope) SameFile(a, b fs.FileInfo) bool { return a.Sys().(int) == b.Sys().(int) }
 
 func (s *fakeScope) Identity(name string) (backup.FileID, error) {
+	s.trace("Identity", name)
 	n, _, err := s.lookup(name)
 	switch {
 	case err != nil:

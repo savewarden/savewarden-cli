@@ -12,10 +12,14 @@ type SnapshotObservation struct {
 	Receipt               bool
 }
 
-func (o SnapshotObservation) String() string {
-	s := fmt.Sprintf("(snapshot %s, incomplete %s)", o.Published, o.Incomplete)
+func (o SnapshotObservation) String() string { return describeCopy(o, "snapshot") }
+
+// describeCopy describes the observation of a copy that noun names, a
+// snapshot or a restore, in diagnostics.
+func describeCopy(o SnapshotObservation, noun string) string {
+	s := fmt.Sprintf("(%s %s, incomplete %s)", noun, o.Published, o.Incomplete)
 	if o.Receipt {
-		s += " with a committed snapshot receipt"
+		s += " with a committed " + noun + " receipt"
 	}
 	return s
 }
@@ -36,20 +40,28 @@ func ClassifySnapshot(j Journal, o SnapshotObservation) (Action, error) {
 	if !j.Snapshot {
 		return "", &AmbiguityError{Op: j.Op, Reason: "not the journal of a snapshot operation"}
 	}
+	return classifyCopy(j, o, "snapshot")
+}
+
+// classifyCopy applies the recovery table that snapshots and restores share
+// (ADR 0006 §10 and §11): a copy published under its operation name, with
+// a receipt that, once committed, forbids any rollback. noun names the
+// receipt in diagnostics.
+func classifyCopy(j Journal, o SnapshotObservation, noun string) (Action, error) {
 	last := j.Last()
 	if o.Receipt && last != StepPublishIntent && last != StepPublished {
-		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("a snapshot receipt exists after the step %q", displayStep(last))}
+		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("a %s receipt exists after the step %q", noun, displayStep(last))}
 	}
 	if j.Terminal() {
 		return ActionNone, nil
 	}
 	action, ok := classifySnapshot(j, o)
 	if !ok {
-		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("observation %s does not match the last step %q", o, displayStep(last))}
+		return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("observation %s does not match the last step %q", describeCopy(o, noun), displayStep(last))}
 	}
 	for step, count := range j.Prepared {
 		if count > 0 && !snapshotPreparedFor(step, j, o) {
-			return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("a temporary record %q was prepared for another state than %s", step, o)}
+			return "", &AmbiguityError{Op: j.Op, Reason: fmt.Sprintf("a temporary record %q was prepared for another state than %s", step, describeCopy(o, noun))}
 		}
 	}
 	if j.Attempts() >= MaxTemporaries || len(j.Records) >= MaxRecords {

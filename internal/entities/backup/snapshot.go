@@ -160,7 +160,7 @@ func (r Record) SnapshotValues() (StepValues, error) {
 // ADR 0006 §3 and the automaton of a first publication (§10). Every
 // deviation is an AmbiguityError.
 func ParseSnapshotJournal(gameID, op string, names []string, contents map[string][]byte) (Journal, error) {
-	return parseJournal(op, names, contents, true, gameID)
+	return parseJournal(op, names, contents, modeSnapshot, gameID)
 }
 
 // coherentSnapshot checks the values of the next record of a snapshot

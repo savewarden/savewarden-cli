@@ -6,7 +6,12 @@ amendé le même jour avant les premières écritures de B2b, puis pour le
 cadrage et les revues de B2c ; amendements de B2c postérieurs au cadrage
 ratifiés par le propriétaire le 30 octobre 2026 (voir Amendements). Le §10,
 snapshots de B3, est accepté par le propriétaire le 31 octobre 2026, avec le
-plan B3 v0.2 ; aucun code ne l'implémente encore.
+plan B3 v0.2, et implémenté par B3, fusionné en `08ec0c2`. Le §11, restauration
+isolée de B4, et ses renvois depuis les §1, §2, §3 et §8, rédigés le
+1er novembre 2026, sont acceptés par le propriétaire le 3 novembre 2026, avec
+le plan B4 v0.2, et implémentés par B4 sur la branche `feat/b4-restore`,
+livrés avec lui par la PR B4, non encore fusionnée ni qualifiée par le
+pilote.
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -33,9 +38,11 @@ celles du plan.
 ### 1. Portée
 
 ADR 0006 s'applique à **toute opération qui rend visible un ensemble de
-fichiers sous un nom stable** dans un coffre Savewarden et à **toute
+fichiers sous un nom stable** dans un coffre Savewarden, ou dans une zone de
+restauration (§11), et à **toute
 récupération** : `current` en B2, snapshots en B3, restauration vers un dossier
-isolé en B4 pour son staging et sa publication. Une future opération qui ne
+isolé en B4 pour son staging et sa publication, dans une zone de restauration
+hors du coffre (§11). Une future opération qui ne
 peut pas s'y conformer exige un amendement de l'ADR, revu, avant son code.
 
 ### 2. Invariants
@@ -49,7 +56,7 @@ peut pas s'y conformer exige un amendement de l'ADR, revu, avant son code.
 | I5 | Fail-closed : toute ambiguïté arrête tout, sans déplacement ni écriture, code 3, diagnostic |
 | I6 | Rollback par défaut avant publication achevée ; finalisation seulement après revérification intégrale du nouvel état contre le plan |
 | I7 | Une génération publiée ou conservée, un receipt, un enregistrement ne sont jamais rouverts en écriture |
-| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` ; précisé par domaine pour les snapshots au §10 (B3) |
+| I8 | Une seule opération par jeu à la fois ; une opération non terminale bloque toute nouvelle `--apply` ; précisé par domaine pour les snapshots au §10 (B3), et par zone pour les restaurations, qui n'écrivent pas le coffre, au §11 (B4) |
 | I9 | La publication est **transactionnelle par protocole, pas atomique** : la fenêtre où `current` est absent est reconnue et récupérable |
 | I10 | Seules les garanties documentées de Windows sont revendiquées ; le reste est une hypothèse couverte par une récupération fondée sur l'observation |
 | I11 | L'initialisation du coffre, qui précède tout journal, n'est faite que de créations exclusives et d'un marqueur validé par renommage ; chaque état partiel est reconnu par le tableau du §4 ou refusé sans mutation, jamais adopté implicitement |
@@ -201,7 +208,7 @@ l'observation et les temporaires du numéro suivant.
 | Neuf temporaires du numéro suivant quand la reprise doit l'écrire | Enveloppe E1 épuisée |
 | Second `rollback-failed` pour la même intention | Enveloppe E3 dépassée |
 | Enregistrement d'une autre opération dans le dossier | Mélange d'opérations |
-| Deux opérations non terminales pour un jeu ; par domaine selon le §10 (B3) | Exclusivité violée |
+| Deux opérations non terminales pour un jeu ; par domaine selon le §10 (B3) ; par zone selon le §11 (B4) | Exclusivité violée |
 | Enregistrement après un état terminal | Opération close modifiée |
 | Observation contraire au dernier enregistrement, dans un sens ou dans l'autre : `published` sans `current` de l'identité attendue, ou `current` publié alors que `publish-intent` manque | Durabilité ou intervention extérieure non prouvées |
 | Identité de fichier indisponible, dossier du journal illisible | Observation impossible |
@@ -584,7 +591,8 @@ Supprimer ; remplacer ; copier vers un nom publié ; déplacer entre volumes ;
 suivre un lien ; déplacer ou lire un objet dont l'identité n'est pas celle
 attendue ; agir sur un journal ambigu ; écrire dans un dossier non marqué,
 hormis l'initialisation I2 à I4 d'un dossier absent, vide ou ne contenant que
-des temporaires de marqueur ; supprimer un temporaire pour rouvrir
+des temporaires de marqueur, et celle, Z2 à Z4, d'une zone de restauration
+(§11) ; supprimer un temporaire pour rouvrir
 l'enveloppe ; toucher une génération `retained\` autre que celle retirée par
 la même opération, lors de son propre rollback.
 
@@ -618,9 +626,10 @@ relève de son propriétaire.
 ### 10. Snapshots (B3)
 
 **Statut : accepté** par le propriétaire le 31 octobre 2026, avec le plan B3
-v0.2, rédigé le 30 octobre 2026. Normatif pour tout code de snapshot ; aucun
-code ne l'implémente encore. Il ne change aucune règle des §1 à §9 pour le
-domaine de `current`.
+v0.2, rédigé le 30 octobre 2026. Normatif pour tout code de snapshot ;
+implémenté par B3, fusionné en `08ec0c2` (PR #11) et qualifié par le pilote
+du 1er novembre 2026. Il ne change aucune règle des §1 à §9 pour le domaine
+de `current`.
 
 Un snapshot est la copie vérifiée d'une génération `current` publiée, rangée
 sous `games\<game-id>\snapshots\`, approuvée à sa publication, puis jamais
@@ -892,6 +901,405 @@ Immutabilité protocolaire, non matérielle : rien n'empêche un autre programme
 de modifier un snapshot ; Savewarden ne le fait jamais et le signale dans les
 limites d'ADR 0008.
 
+### 11. Restauration isolée (B4)
+
+**Statut : accepté** par le propriétaire le 3 novembre 2026, avec le plan B4
+v0.2, rédigé le 1er novembre 2026. Normatif pour tout code de restauration ;
+implémenté par B4 sur la branche `feat/b4-restore`, livré avec lui par la
+PR B4, non encore fusionnée ni qualifiée par le pilote. Il ne change aucune
+règle des §1 à §10 :
+une restauration n'écrit pas le coffre. Il ajoute un invariant, plus bas, qui
+contraint toute opération future du coffre.
+
+Une restauration copie un snapshot approuvé (§10) dans une **zone de
+restauration**, dossier hors du coffre que `restore` crée et marque, la
+vérifie et l'y publie par renommage. Les invariants I1 à I12 s'appliquent à
+la zone avec les précisions et les écarts de ce paragraphe, qui prévalent
+pour elle. Le contrat de la commande, le receipt de restauration et le
+marqueur de zone sont fixés par ADR 0009.
+
+#### Zone et disposition
+
+```text
+<dest>\
+  savewarden-restore.json            marqueur de zone (ADR 0009), et ses temporaires .tmp-<k>
+  restore.lock                       verrou de la zone
+  receipts\<op>.json                 receipt de restauration, et ses temporaires .tmp-<k>
+  journal\<op>\NNN-<étape>.rec       journal de l'opération de restauration
+  <op>.incomplete\<source-id>\...    I : copie en cours, échouée ou abandonnée
+  <op>\<source-id>\...               P : restauration publiée, remise à l'utilisateur
+```
+
+- `<op>` est l'identifiant de l'opération, de la forme du §3, distinct de
+  tout identifiant employé dans la zone et de celui du snapshot restauré ;
+  le contrôle a lieu avant tout journal.
+- La zone est marquée par `savewarden-restore.json`, validé par temporaire et
+  renommage comme le marqueur du coffre ; elle sert à un seul jeu.
+- **Une session d'écriture** de `platform/vault` s'ouvre sur la zone comme
+  sur un coffre, avec les mêmes primitives et le même garde (ADR 0005) ; elle
+  ne s'ouvre jamais sur le coffre pour une restauration.
+- **Grammaire**, chaque entrée observée sans suivi, en deux classes :
+  - **structure**, jamais remise : le marqueur, ses temporaires et
+    `restore.lock`, fichiers ordinaires ; `receipts` et `journal`, dossiers
+    ordinaires ; dans `receipts\`, des fichiers `<op>.json` et leurs
+    temporaires `<op>.json.tmp-<k>`, `k` de 1 à 9 ; dans `journal\`, des
+    dossiers `<op>` au contenu du §3. Toute autre entrée, un lien, un point
+    d'analyse, un fichier à la place d'un dossier ou l'inverse : ambiguïté,
+    code 3 ;
+  - **objets d'opération**, `<op>` et `<op>.incomplete` à la racine, noms
+    comparés sans égard à la casse comme Windows les résout : un nom
+    qu'aucune opération journalisée de la zone n'explique est une ambiguïté,
+    code 3, quel que soit son type. Pour une opération non terminale, `P` et
+    `I` sont des dossiers ordinaires sans point d'analyse, l'identité de `I`
+    est exigée dès que `staged` l'a fixée, et un `I` antérieur à `staged`
+    est accepté sans être lu ni déplacé ; tout autre type ou identité est une
+    ambiguïté. Pour une opération close autrement qu'en `published`, un
+    `<op>` présent, de tout type, est une ambiguïté ; un `I` présent doit
+    être un dossier ordinaire sans point d'analyse, de l'identité `new` si
+    `staged` l'a fixée, sinon ambiguïté ; son absence ne l'est pas. Pour une
+    restauration **remise**, voir plus bas : aucun objet sous ses noms n'est
+    une ambiguïté, et une entrée de la racine qu'on ne peut décrire n'est
+    classée `not observable` que sous ses noms ; partout ailleurs, elle
+    arrête la lecture, code 1.
+- **Structure.** `receipts`, puis `journal`, sont créés sous verrou, après le
+  second contrôle d'espace et avant tout journal, par création exclusive et
+  seulement s'ils manquent ; suit `journal\<op>`. Une structure faite de
+  dossiers vides est complétée par la création suivante ; un dossier
+  d'opération vide, ou ne contenant que des temporaires `001-…`, est une
+  opération non commencée ; des opérations journalisées sans `receipts` sont
+  une ambiguïté.
+
+#### Destination et distinctions
+
+- `--apply` n'écrit que dans une destination absente dont le parent est un
+  dossier ordinaire sans point d'analyse, un dossier ordinaire vide, ou une
+  zone marquée du même jeu sans opération non terminale ni ambiguïté. Tout
+  autre dossier, dont un dossier non vide sans marqueur, n'est **jamais
+  adopté**.
+- Aucun ancêtre de la zone n'est un lien ou un point d'analyse, ni ne
+  contient `savewarden-vault.json` ou `savewarden-restore.json` ; volume NTFS
+  sur un lecteur local fixe ou amovible.
+- **Chemins de référence** : le coffre, à la création ; l'installation et
+  chaque source du manifeste ; et les chemins des `sources` du plan, recopiés
+  du receipt de snapshot, qui sont ceux réellement sauvegardés et se lisent
+  dans le journal de la zone sans le coffre. La zone n'est ni égale, ni
+  intérieure, ni ancêtre d'aucun d'eux. Ces contrôles sont faits à la
+  création et **refaits à chaque récupération** qui peut écrire, puisqu'une
+  zone déplacée sur son volume garde ses identités et ses noms relatifs ; le
+  type et le système de fichiers du volume de la zone sont recontrôlés de
+  même.
+- **Observabilité.** Une identité impossible à observer ne prouve jamais la
+  séparation. Les chaînes s'entendent **depuis la racine du volume, racine
+  comprise**, pour la zone comme pour `X`, et les identités se comparent dans
+  les deux sens. Pour chaque chemin de référence `X`, la première ligne qui
+  s'applique décide :
+
+  | # | Cas | Contrôle | Issue |
+  | --- | --- | --- | --- |
+  | 1 | Chaîne existante de `X` non observable, quelle que soit la lettre : accès refusé, erreur de lecture, identité illisible, lien ou point d'analyse | Aucune preuve | **Refus**, code 1 |
+  | 2 | Lettre de `X` sans volume : racine rapportée absente, lettre non attribuée, alias retiré ou lecteur sans média | Aucune preuve : la lettre a pu désigner un alias ou un volume monté aujourd'hui sous une autre lettre | **Refus**, code 1, « separation from `X` cannot be proven » |
+  | 3 | `X` présent | Identité de `X` cherchée dans la chaîne de la zone ; identité de la zone cherchée dans la chaîne de `X` ; si la zone est absente, seule la première recherche s'applique, sur la chaîne de son parent | Décisif |
+  | 4 | `X` absent, son volume lisible | Chaîne existante de `X` jusqu'à son ancêtre présent le plus profond : `X` ne peut contenir la zone ; il y serait si l'identité de la zone figure dans cette chaîne. En outre, chemins comparés sous la racine de leur lettre, segments sans égard à la casse, contre une permutation de lettres de lecteurs amovibles : égaux ou imbriqués, refus | Décisif pour `X` tel qu'il se résout aujourd'hui |
+
+  Sur une même lettre, la comparaison des segments sans égard à la casse
+  précède ces lignes et refuse tout recouvrement. **Limite** : les
+  distinctions portent sur les chemins de référence tels qu'ils se résolvent
+  aujourd'hui ; des données déplacées sans que ces chemins le reflètent ne
+  sont protégées que si un cas décisif les atteint. Une restauration dont un
+  chemin de référence est sur une lettre sans volume est refusée tant que
+  cette lettre ne désigne pas de nouveau un volume. Rattacher un volume à
+  cette lettre rend les identités observables, sans prouver qu'il s'agit du
+  volume d'origine : la décision porte alors sur le chemin tel qu'il se
+  résout, pas sur la provenance historique. **B4 ne garantit donc pas la
+  restauration lorsque le disque d'origine est indisponible** ; ce n'est pas
+  une capacité complète de reprise après sinistre, et un lot dédié réexaminera
+  la restauration avec des références hors ligne.
+
+**Amendement, 4 novembre 2026, ratifié par le propriétaire le même jour :
+fenêtre résiduelle des lettres de lecteur.** Relevé par la
+revue de sécurité de B4 (P1-02) et ses revues ciblées.
+
+- Les distinctions sont faites au plan, refaites une fois la session ouverte
+  et avant toute écriture, puis sous verrou (Z6) : une lettre réattribuée
+  entre le plan et l'ouverture de la session est refusée, code 1.
+- Une session crée et renomme **par chemin complet** (ADR 0005). Ses
+  épingles interdisent de renommer les dossiers ouverts ; elles n'empêchent
+  pas la réattribution d'une lettre de lecteur. Une lettre réattribuée
+  **pendant** qu'une session est ouverte, après un contrôle et avant une
+  écriture, peut faire porter cette écriture ailleurs que là où le contrôle
+  l'a vue. **Aucune garantie technique ne l'empêche** ; ce n'est pas une
+  protection démontrée.
+- La même fenêtre vaut pour les sessions de `sync` et de `snapshot` (§4, §5,
+  §10), qui partagent ces primitives ; aucune de leurs règles ne change.
+- Elle est acceptée provisoirement pour la seule qualification interne de
+  B4 : volumes NTFS locaux stables, sans lettre ni alias créé, retiré ou
+  réattribué pendant une opération ; un pilote interne contrôlé n'a lieu
+  qu'après ses autorisations propres. Savewarden n'est pas présenté comme
+  protégeant contre une réattribution concurrente.
+- **Avant toute diffusion publique**, un durcissement séparé est
+  obligatoire : amendement d'ADR 0005 et primitives d'écriture indépendantes
+  des lettres de lecteur modifiables, puis un nouveau gate de sécurité.
+  Suivi : chantier S-01 du modèle de sécurité.
+
+#### Initialisation de la zone
+
+Comme I11, faite uniquement de créations exclusives ; Z2 à Z4 ne concernent
+qu'une zone nouvelle, une zone marquée commençant en Z5 :
+
+| # | Étape | État laissé par un arrêt juste après | Traitement au lancement suivant |
+| --- | --- | --- | --- |
+| Z1 | Préflight : destination acceptée, distinctions, espace | Rien | — |
+| Z2 | Session ouverte sur `<dest>`, son parent épinglé ; `CreateDirectory(<dest>)` s'il manque ; s'il apparaît entre-temps, retour au préflight | `<dest>` vide | Destination vide, acceptée |
+| Z3 | `<dest>` épinglé et **relu** : vide exigé ; temporaire du marqueur en `CREATE_NEW`, écrit, flushé, fermé | `<dest>` ne contient que des temporaires du marqueur | Initialisation interrompue : refusée par `--apply`, code 3 ; seul `--recover --apply`, distinctions refaites, **sans verrou**, `<dest>` épinglé et relu, valide un nouveau marqueur au `k` libre suivant ; aucun verrou n'est jamais créé dans un dossier non marqué |
+| Z4 | `MoveFileEx(temporaire, savewarden-restore.json, 0)` | Zone marquée | Normal |
+| Z5 | `restore.lock` par `Lock`, créé vide s'il manque, jamais écrit | Verrou vide | Normal |
+| Z6 | Sous verrou : zone relue et comparée au plan, hors des observations des restaurations remises, qui ne la changent pas ; espace recontrôlé | Métadonnées seules | Zone changée depuis le plan, ou espace insuffisant : code 1 ou 2, rien écrit de plus |
+| Z7 | `receipts`, puis `journal`, s'ils manquent | Structure | Ci-dessus |
+| Z8 | `journal\<op>`, exclusif | Opération non commencée | Bloque `--apply` ; `--recover --apply` valide `001-abandoned` |
+| Z9 | Validation de `001-planned` | Opération commencée | Automate ci-dessous |
+
+Refus sans mutation : temporaires du marqueur et toute autre entrée ;
+marqueur illisible, de schéma inconnu ou d'un autre jeu ; neuf temporaires du
+marqueur, enveloppe E1 épuisée, code 3. La relecture de Z3 réduit sans la
+fermer la fenêtre où un autre programme remplirait `<dest>` juste avant le
+marqueur ; un ajout dans cette fenêtre est vu par Z6, code 1, rien écrit de
+plus, puis, aux exécutions suivantes, comme une entrée imprévue de la zone,
+code 3.
+
+**Concurrence de la validation du marqueur.** La reprise de Z3 ne prend pas de
+verrou : deux `--recover --apply`, ou une reprise et une création qui écrit
+son propre temporaire, peuvent viser la même `<dest>`. L'exclusivité vient
+des primitives :
+
+- chaque processus prend le plus petit `k` libre par `CREATE_NEW`, qui échoue
+  si l'autre l'a déjà pris ; il prend alors le suivant, dans l'enveloppe E1 ;
+- `MoveFileEx(temporaire, savewarden-restore.json, 0)` ne remplace jamais :
+  **un seul renommage réussit**, et aucun second marqueur ne peut être
+  validé ;
+- le **perdant**, dont le renommage échoue parce que le marqueur existe, ne
+  réessaie pas et n'écrit plus rien : il relit `<dest>` et sort en code 1,
+  `destination-changed`, avec la ligne d'état `metadata only; nothing staged
+  or published`, puisqu'il a écrit son temporaire ; ce temporaire reste en
+  place, essai abandonné accepté à côté du marqueur validé (§3) ;
+- un processus qui ne relit `<dest>` qu'après la validation par l'autre y
+  trouve une zone marquée sans objet d'opération : rien à récupérer, code 0,
+  ou destination acceptée pour une création ;
+- neuf temporaires du marqueur épuisent E1 : code 3, sans écriture.
+
+L'état laissé est toujours l'un de ceux que reconnaît le tableau : temporaires
+seuls, ou zone marquée avec des temporaires abandonnés.
+
+#### Verrous, I8 et invariant des snapshots publiés
+
+- **I8 par zone.** `restore.lock` garantit qu'une seule opération s'exécute
+  à la fois dans une zone. Deux opérations non terminales dans une zone sont
+  une ambiguïté, code 3 ; une opération non terminale bloque toute nouvelle
+  restauration dans cette zone. Avant de déclarer une opération en attente,
+  le plan sonde `restore.lock` en lecture seule ; tenu, c'est une opération
+  en cours, code 1.
+- **Aucun verrou du coffre.** Une restauration n'ouvre, ne sonde ni ne crée
+  `sync.lock`, n'exclut ni `sync` ni `snapshot`, et n'en est pas exclue.
+- **Invariant, prémisse de cette absence** : aucune opération de Savewarden ne
+  renomme un snapshot publié ni l'un de ses ancêtres, ni ne les ouvre sans
+  partage en lecture. Une opération qui le lèverait exige un amendement de
+  ce paragraphe avant son code.
+
+#### Authentification du snapshot
+
+Avant tout journal, puis de nouveau sous le verrou de la zone, sans relire
+le contenu la seconde fois, par une lecture **ciblée** du coffre : son
+marqueur, la chaîne `<vault>` à `snapshots\journal\<snap-id>`, le journal du
+snapshot, `snapshots\receipts` et son receipt, `S` = `snapshots\<snap-id>` et
+l'absence de `snapshots\<snap-id>.incomplete`. Le journal est terminal en
+`published` ; le receipt de snapshot est relu strictement (ADR 0008) et ses
+octets ont pour SHA-256 le `receipt_sha256` de `published` ; `S` a l'identité
+`staging_identity` ; son contenu est relu en entier contre les `sources` du
+receipt, identité relue après. Rien d'autre n'est lu dans le coffre : ni
+`games\<game-id>` n'est listé, ni `sync.lock` n'est observé, même par
+`Lstat`. Le classement des refus est celui d'ADR 0009 ; un objet d'une
+identité inattendue n'est jamais lu.
+
+#### Automate et contrat des champs
+
+Même format d'enregistrement qu'au §3, mêmes noms d'étapes que la première
+publication, mode **restauration** propre : le lecteur l'applique au seul
+dossier `journal\<op>` d'une zone, et un journal de snapshot ou de `current`
+n'y est jamais admis, ni l'inverse. Tous les champs sont obligatoires, aucun
+autre n'est accepté.
+
+| # | Enregistrement validé | Champs | Cohérence vérifiée à la lecture | Action qui suit |
+| --- | --- | --- | --- | --- |
+| 1 | `planned` | `snapshot` ; `snapshot_receipt_sha256` ; `snapshot_identity`, identité de `S` ; `plan` : objet strict, version de l'outil, jeu, `started_at`, `source` recopiée du receipt de snapshot (`operation`, `receipt_sha256`), `sources` au format du receipt v1 ; `plan_sha256` | `plan_sha256` est le SHA-256 de `plan` ; `snapshot` et `plan.source.operation` au format du §3, distincts entre eux et de l'opération ; jeu du plan égal à celui du marqueur | — |
+| 2 | `staging-intent` | `staging` : `<op>.incomplete` | Nom fixé par l'opération | Créer `I`, copier, flusher |
+| 3 | `staged` | `staging_identity` ; `copied_sha256` | `copied_sha256` est l'empreinte de contenu de `plan.sources` | Relecture de `I` |
+| 4 | `verified` | `verified_sha256` | Idem | — |
+| 5 | `publish-intent` | `staging_identity` | Égale à celle de `staged` ; `P` absent attendu | Bascule `I` → `P`, receipt de restauration |
+| 6 | `published` | `receipt_sha256` | — | Terminal |
+
+Rollback : `unpublish-intent`, de champ `staging_identity` égal à celui de
+`staged`, précède le seul déplacement `P` → `I` ; puis `rolled-back`.
+`rollback-failed` (`error`) : au plus un par intention. `failed` et
+`abandoned` (`reason`), `published` et `rolled-back` sont terminaux. Les
+étapes de rotation, et les champs `previous`, `current_identity`,
+`source_operation`, `source_receipt_sha256` et `source_identity`, sont
+interdits dans ce mode.
+
+#### Création
+
+Sous le verrou de la zone, préconditions d'ADR 0009 remplies :
+
+1. Identifiant contrôlé ; Z7, Z8 ; `planned`.
+2. `staging-intent` ; création exclusive de `I` ; copie hachée de chaque
+   fichier de `S` contre le plan, date conservée, chaque fichier flushé avant
+   sa fermeture ; identité de `S` relue après la copie ; portée de lecture du
+   coffre fermée. Contenu différent, ou `S` remplacé : `failed`, code 2, `I`
+   conservé (écart X2). Fichier de `S` absent : racine et marqueur du coffre
+   contrôlés de nouveau ; coffre disparu ou illisible : `failed`, code 1 ;
+   coffre présent : `failed`, code 2. Toute autre erreur de lecture :
+   `failed`, code 1.
+3. `staged` ; relecture de `I` depuis le disque contre `plan.sources`, puis
+   identité de `I` relue. Contenu différent : `failed`, code 2, `I` conservé.
+   Identité changée : code 3, rien enregistré de plus. Conforme : `verified`.
+4. `publish-intent` ; bascule `I` → `P` dans l'ordre du §4 : fermer toute
+   portée sur `I` et `P` ; ne garder épinglés que les ancêtres de `<dest>`,
+   `<dest>` et `journal\<op>` ; pré-contrôle de `I`, nom `P` absent ;
+   `MoveFileEx(I, P, 0)` avec les retries du §7 ; post-contrôle : `P` de
+   l'identité `staging_identity`, `I` absent. Échec confirmé par la source et
+   la cible : `rolled-back`, code 1 ; toute autre observation, récupération.
+5. Receipt de restauration validé par temporaire et renommage (§3, E1), puis
+   `published`.
+
+Aucune porte de provenance n'est rejouée sur le coffre après `planned` : la
+copie et sa relecture sont comparées au plan, issu du snapshot authentifié.
+
+#### Points d'arrêt
+
+Ceux de la première publication, A1 à A8 (§4), avec `P` à la place de
+`current` et `I` à la place de `staging\<op>`. En A3 et A4, `P` est revérifié
+en entier contre le plan, sans lire le coffre. En A5 et A6, le receipt de
+restauration validé interdit tout retour en arrière : relu strictement, égal
+au plan, `P` conforme, il donne `published` ; toute autre observation,
+code 3.
+
+#### Récupération
+
+`--recover` ne s'appuie que sur la zone et le manifeste : il est
+**indépendant du coffre**, jamais ouvert, lu ni nommé, et **dépendant du
+manifeste** et des contrôles de sûreté de la destination. Dans cet ordre :
+
+1. `<dest>` est classé par le tableau ci-dessous ; un état sans rien à
+   récupérer conclut aussitôt, **sans ouvrir de session ni rien écrire**, pas
+   même un `restore.lock` absent ;
+2. pour tout état où la récupération peut écrire : manifeste strict, marqueur
+   du même jeu, distinctions refaites selon la règle d'observabilité, volume
+   recontrôlé ; un échec donne code 1 avant toute écriture ;
+3. grammaire de la zone, journaux et receipts relus strictement ; avec
+   `--apply`, le verrou de la zone, pris seulement dans une zone marquée ;
+   puis la ligne du tableau de récupération.
+
+Le contenu de l'installation et des sources n'est jamais lu ; seules leurs
+identités servent.
+
+**Destination sans opération journalisée** : seule une zone sans aucun objet
+d'opération n'a rien à récupérer.
+
+| Observation | Issue |
+| --- | --- |
+| `<dest>` absent, son parent présent ou non, ou dossier ordinaire vide | Rien à récupérer, code 0 |
+| `<dest>` fichier, lien, jonction ou autre point d'analyse | Pas une zone : code 1 |
+| Temporaires du marqueur seulement | Reprise de Z3 par `--recover --apply`, sans verrou |
+| Dossier non vide sans marqueur, hors du cas précédent | Pas une zone : code 1, jamais adopté |
+| Zone marquée dont les seules entrées sont le marqueur, ses temporaires, `restore.lock`, et `receipts` et `journal` vides ou absents | Rien à récupérer, code 0 |
+| `<op>`, `<op>.incomplete`, receipt ou temporaire de receipt qu'aucun `journal\<op>` n'explique | Ambiguïté, code 3, rien écrit |
+| Zone marquée portant toute autre entrée hors de la grammaire | `unexpected-entry`, code 3, rien écrit |
+
+**Amendement, 4 novembre 2026, ratifié par le propriétaire le même jour.**
+Relevé par la revue de sécurité de B4 au SHA `0318dfb`
+(P1-01) ; ADR 0009, « Récupération », est précisé de même. À l'étape 1, seuls
+`<dest>` absent, son parent présent ou non, et un dossier ordinaire vide
+concluent aussitôt. La ligne « Zone marquée dont les seules entrées… » ne
+conclut « rien à récupérer », code 0, qu'après le manifeste strict et la
+relecture stricte de la zone, marqueur reconnu du même jeu, grammaire,
+journaux et receipts compris, toujours sans ouvrir de session ni rien
+écrire ; un manifeste invalide, un marqueur illisible, de schéma inconnu ou
+d'un autre jeu donnent code 1. Les distinctions et le volume ne sont refaits
+que pour un état où la récupération peut écrire (étape 2). Aucune autre
+règle ne change.
+
+Pendant A3 à A6, le plan annonce « operation `<op>` pending recovery: copy
+published, receipt missing; do not use `<dest>\<op>` yet ».
+
+Un receipt de restauration validé n'admet que deux lignes, A5 ou A6 et
+`published` ; toute autre combinaison, et tout receipt sans journal ou d'une
+opération close autrement qu'en `published`, est une ambiguïté, code 3.
+
+| Dernier validé | Observation (`P`, `I`) | Action |
+| --- | --- | --- |
+| Aucun : dossier d'opération vide ou temporaires `001` seuls | (—, —) | `001-abandoned` ; sinon code 3, rien écrit |
+| `planned` | (—, —) | `abandoned` |
+| `staging-intent` | (—, —), ou (—, dossier ordinaire sans point d'analyse) | `abandoned` ; `I` laissé en place, ni lu ni déplacé |
+| `staged`, `verified` | (—, `new`) | `abandoned` ; `I` conservé |
+| `publish-intent`, aucun receipt | (—, `new`) | Renommage non effectué : `rolled-back` |
+| `publish-intent`, aucun receipt | (`new`, —) | Renommage effectué : revérification intégrale de `P` contre le plan ; égal : receipt, puis `published` ; différent : `unpublish-intent`, puis `P` → `I`, `rolled-back`, code 2, `verification-mismatch` |
+| `publish-intent`, receipt validé | (`new`, —) | Receipt relu strictement, égal au plan, `P` revérifié en entier : `published` ; sinon code 3, rien écrit ni déplacé |
+| `unpublish-intent`, aucun receipt | (`new`, —) | Déplacement non effectué : l'exécuter, puis `rolled-back` ; échec : `rollback-failed`, code 3 |
+| `unpublish-intent` ou `rollback-failed`, aucun receipt | (—, `new`) | Déplacement effectué : `rolled-back` |
+| `rollback-failed`, aucun receipt | (`new`, —) | Nouvel essai ; succès : `rolled-back` ; échec : code 3, sans nouvel enregistrement (E3) |
+| `published` | Tout objet, de tout type, sous `P` et sous `I` | Restauration remise, plus bas : rien écrit ni déplacé ; receipt absent, invalide ou d'un SHA-256 différent de `receipt_sha256` : ambiguïté, code 3 |
+| `failed`, `abandoned`, `rolled-back` | `P` absent ; `I` absent, ou dossier ordinaire sans point d'analyse, de l'identité `new` si `staged` l'a fixée | Rien |
+| `failed`, `abandoned`, `rolled-back` | `P` présent, de tout type ; ou `I` d'un autre type ou d'une autre identité | Ambiguïté, code 3, rien écrit |
+| Tout autre cas, dont `P` et `I` présents ensemble avant `published`, une identité `other`, un receipt validé sans bascule observée | — | Fail-closed, code 3, rien écrit |
+
+`new` est l'identité de `I` relevée dans `staged` ; `other`, toute autre
+identité. Chaque revérification relit l'identité après le contenu. Les
+propriétés du §9 s'appliquent : explicite, idempotente, interruptible,
+convergente et bornée dans l'enveloppe, monotone, non aggravante.
+
+#### Restaurations remises : exception au §3
+
+Une opération de restauration dont le journal, valide, se termine par
+`published` est **remise** : sa copie appartient à l'utilisateur, qui peut la
+modifier, la déplacer ou la supprimer. Aucune observation de ses noms `P` et
+`I` n'est une ambiguïté, quel que soit le type de l'objet : dossier, fichier,
+lien, jonction ou autre point d'analyse. Ils ne sont observés que par `Lstat`
+et, pour un dossier ordinaire sans point d'analyse, par leur identité, lue
+par un handle sans suivi aussitôt refermé ; ils ne sont jamais ouverts pour
+leur contenu, listés, épinglés, lus, suivis, déplacés, réutilisés ni
+réparés, et Savewarden n'y écrit jamais. Le classement, informatif et jamais
+bloquant, est celui d'ADR 0009. Son receipt et son journal ne sont pas
+remis : ils restent soumis au §3. Un receipt absent après `published`, même
+perdu par une coupure qui aurait réordonné les métadonnées (§6), est donc une
+ambiguïté, code 3, qui ferme la zone à de nouvelles restaurations ; la copie
+remise reste en place et une nouvelle zone reste possible.
+
+#### Écarts nommés
+
+| # | Écart | Raison |
+| --- | --- | --- |
+| X1 | Ni verrou du coffre ni I8 du coffre pour une restauration, qui ne sonde pas `sync.lock` | Invariant des snapshots publiés ci-dessus ; sonder `sync.lock` l'ouvrirait un instant et ferait échouer le `Lock` d'un `sync` concurrent |
+| X2 | `S` remplacé pendant la copie : `failed`, code 2, et non une ambiguïté | `S` est dans le coffre, qu'une restauration n'écrit pas ; la zone reste cohérente, rien n'est publié ; le diagnostic nomme le remplacement sans le prendre pour un changement de contenu |
+| X3 | Lecture ciblée : les anomalies du coffre hors du snapshot désigné sont ignorées | L'authenticité de `S` repose sur sa propre chaîne de preuve, relue en entier |
+| X4 | Opération du snapshot non terminale ou journal ambigu côté coffre : code 1, et non 3 | Une restauration ne peut ni distinguer une opération vivante sans sonder `sync.lock`, ni intervenir sur le coffre ; le code 3 reste réservé à la zone |
+
+#### Enveloppe
+
+E1, E3 et E4 inchangées ; E1 vaut pour chaque numéro d'enregistrement, chaque
+`receipts\<op>.json` et le marqueur de zone. E2 : au plus 11 enregistrements ;
+le plus long chemin d'une restauration en compte 8, `planned` à
+`publish-intent`, puis `unpublish-intent`, `rollback-failed` et
+`rolled-back`.
+
+#### Ce qu'une restauration ne fait jamais
+
+Écrire, renommer, verrouiller, sonder ou supprimer quoi que ce soit dans le
+coffre ; y lire autre chose que le snapshot désigné ; lire le coffre pendant
+une récupération ; écrire hors de la zone, hormis la création de `<dest>`
+absent ; écrire dans un dossier non marqué, hormis Z2 à Z4 ; adopter un
+dossier ; remplacer une cible ; copier vers un nom publié ; déplacer `P` après
+`published` ; ouvrir, lire, suivre ou déplacer un objet remis ; supprimer un
+temporaire ou un `I` ; restaurer un snapshot non publié, dégradé ou non
+vérifiable ; tenir une identité inobservable pour une séparation ; restaurer
+dans l'installation, une source, un coffre ou une autre zone.
 
 ## Alternatives
 
@@ -934,7 +1342,7 @@ limites d'ADR 0008.
   enfant par un parent épinglé, sont confrontées à des tests réels avant le
   code qui en dépend ; un écart amende cet ADR d'abord.
 - B3 et B4 publieront snapshots et restaurations selon ce protocole, ou
-  l'amenderont.
+  l'amenderont : B3 par le §10, B4 par le §11.
 
 ## Amendements
 
@@ -1032,3 +1440,38 @@ limites d'ADR 0008.
   au §3 pour une opération de snapshot terminale en `published`, dont le
   snapshot dégradé est signalé sans blocage. Aucune règle des §1 à §9 ne
   change pour le domaine de `current`.
+- **1er novembre 2026, cadrage de B4**, accepté par le propriétaire le
+  3 novembre 2026 (plan B4 v0.2) :
+  §11, restauration isolée dans une zone marquée hors du coffre, que la
+  restauration n'écrit jamais ; journal, receipt et verrou dans la zone ;
+  récupération sans le coffre, distinctions refaites selon une règle
+  d'observabilité ; restaurations remises classées sans suivi ni blocage,
+  exception au §3 ; écarts X1 à X4 nommés ; invariant des snapshots publiés.
+  Renvois ajoutés aux §1, §2 (I8), §3 et §8 et dans les Conséquences. Aucune
+  règle des §1 à §10 ne change pour le coffre.
+- **2 novembre 2026, correction documentaire**, séparée des changements
+  normatifs : l'en-tête et le statut du §10 disaient qu'aucun code ne
+  l'implémentait ; B3 l'implémente depuis `08ec0c2` (PR #11), qualifié par le
+  pilote du 1er novembre 2026. Aucune règle ne change.
+- **4 novembre 2026, amendement du §11, ratifié par le propriétaire le même
+  jour**, relevé par la revue de sécurité de B4 (P1-01) : à
+  l'étape 1 de la récupération, seuls `<dest>` absent ou vide concluent avant
+  le manifeste ; une zone marquée sans objet d'opération n'est sans objet
+  qu'après le manifeste strict et la relecture stricte de son marqueur, du
+  même jeu, sans session ni écriture. Différence observable : avec un
+  manifeste invalide, code 1 au lieu de 0. ADR 0009 est précisé de même.
+  Aucune autre règle ne change.
+- **4 novembre 2026, correction documentaire**, séparée des changements
+  normatifs, demandée par la revue de sécurité de B4 : l'en-tête et le
+  statut du §11 disaient qu'aucun code ne l'implémentait ; B4 l'implémente
+  sur `feat/b4-restore`, livré par la PR B4, non encore fusionnée ni
+  qualifiée par le pilote. Aucune règle ne change.
+- **4 novembre 2026, amendement du §11, ratifié par le propriétaire le même
+  jour** : fenêtre résiduelle des lettres de lecteur nommée,
+  relevée par la revue de sécurité de B4 (P1-02) et ses revues ciblées. Une
+  lettre réattribuée pendant une session ouverte n'est empêchée par aucune
+  garantie technique, pour `sync`, `snapshot` et `restore`. Acceptation
+  provisoire limitée à la qualification interne de B4 sur volumes stables ;
+  durcissement d'ADR 0005 et des primitives d'écriture obligatoire avant
+  toute diffusion publique, chantier S-01. Aucune règle des §1 à §10 ne
+  change.
