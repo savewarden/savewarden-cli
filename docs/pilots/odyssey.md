@@ -186,9 +186,13 @@ versionné.
 
 ### Protocole B4
 
-Exécuté par le propriétaire après la fusion de B4, avec un binaire du commit
-de fusion, depuis le coffre du pilote B3, **lu seulement**, vers une zone
-neuve hors du jeu, du coffre et de toute source. L'agent n'y accède pas.
+Exécuté par le propriétaire après la fusion de B4, avec un binaire compilé
+depuis un worktree détaché au commit de fusion `4197317`, depuis le coffre du
+pilote B3, **lu seulement**, vers une zone neuve hors du jeu, du coffre et de
+toute source. L'agent n'y accède pas. Conditions du chantier S-01 du
+[modèle de sécurité](../safety-model.md#chantiers-de-sécurité-ouverts) :
+volumes NTFS locaux stables ; aucune lettre ni alias `subst` créé, retiré ou
+réattribué pendant le pilote.
 
 1. Empreinte complète du coffre : inventaire et contenu.
 2. `snapshot`, plan seul : le snapshot du pilote B3 est intact.
