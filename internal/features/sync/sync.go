@@ -1,14 +1,16 @@
-// Package sync plans and performs every publication into the vault of a
-// game: the copy of a manifest's sources into current, and the snapshots
-// of current. A plan reads the manifest, the vault and, for current, the
-// sources, and writes nothing; --apply and --recover --apply write only
-// into the vault, through the Vaults port, by exclusive creations and
-// renames that replace nothing. Publication and recovery follow ADR 0006;
-// the contracts of the commands are ADR 0007 and ADR 0008.
+// Package sync plans and performs every publication of ADR 0006: into the
+// vault of a game, the copy of a manifest's sources into current and the
+// snapshots of current; into a restore area, the restore of a snapshot. A
+// plan reads the manifest, the vault and, for current, the sources, or for
+// a restore the designated snapshot only and the area, and writes nothing;
+// --apply and --recover --apply write, through the Vaults port, by
+// exclusive creations and renames that replace nothing, only into the
+// vault, or for a restore only into its area, never into the vault. The
+// contracts of the commands are ADR 0007, ADR 0008 and ADR 0009.
 //
 // The plan never follows links: sources are inventoried by the no-follow
-// walk of inspect, received through the Inventories port, and the vault is
-// read through a no-follow Scope.
+// walk of inspect, received through the Inventories port, and the vault and
+// the area are read through a no-follow Scope.
 package sync
 
 import (

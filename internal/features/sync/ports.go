@@ -50,16 +50,19 @@ type Volumes interface {
 	Describe(path string) (backup.Volume, error)
 }
 
-// Vaults opens create-only sessions on a vault path. Only --apply and
-// --recover receive it: the plan never does (ADR 0007).
+// Vaults opens create-only sessions on a vault path, or on a restore area,
+// which a session serves as it serves a vault; a restore never opens one on
+// the vault (ADR 0006 §11). Only --apply and --recover receive it: the plan
+// never does (ADR 0007, ADR 0009).
 type Vaults interface {
 	Open(path string) (Vault, error)
 }
 
-// Vault creates below one vault directory, with slash-separated names
-// relative to it, "." being the vault itself (ADR 0005). It never replaces,
-// truncates, deletes or follows anything. A creation, rename or identity
-// check needs its parent directory held; the vault's own parent always is.
+// Vault creates below one vault directory or restore area, with
+// slash-separated names relative to it, "." being that directory itself
+// (ADR 0005). It never replaces, truncates, deletes or follows anything. A
+// creation, rename or identity check needs its parent directory held; the
+// directory's own parent always is.
 type Vault interface {
 	// CreateDir creates a directory and holds it; fs.ErrExist if the name
 	// is taken.
@@ -76,8 +79,9 @@ type Vault interface {
 	Move(from, to string) error
 	// Identity returns the volume serial number and file index of name.
 	Identity(name string) (backup.FileID, error)
-	// Lock takes sync.lock exclusively until Close; a second holder gets a
-	// busy error.
+	// Lock takes a lock file exclusively until Close, sync.lock in a vault,
+	// restore.lock in a restore area, created empty if missing; a second
+	// holder gets a busy error.
 	Lock(name string) error
 	Close() error
 }
