@@ -1015,6 +1015,32 @@ marqueur de zone sont fixés par ADR 0009.
   une capacité complète de reprise après sinistre, et un lot dédié réexaminera
   la restauration avec des références hors ligne.
 
+**Amendement proposé, 4 novembre 2026, en attente de ratification par le
+propriétaire : fenêtre résiduelle des lettres de lecteur.** Relevé par la
+revue de sécurité de B4 (P1-02) et ses revues ciblées.
+
+- Les distinctions sont faites au plan, refaites une fois la session ouverte
+  et avant toute écriture, puis sous verrou (Z6) : une lettre réattribuée
+  entre le plan et l'ouverture de la session est refusée, code 1.
+- Une session crée et renomme **par chemin complet** (ADR 0005). Ses
+  épingles interdisent de renommer les dossiers ouverts ; elles n'empêchent
+  pas la réattribution d'une lettre de lecteur. Une lettre réattribuée
+  **pendant** qu'une session est ouverte, après un contrôle et avant une
+  écriture, peut faire porter cette écriture ailleurs que là où le contrôle
+  l'a vue. **Aucune garantie technique ne l'empêche** ; ce n'est pas une
+  protection démontrée.
+- La même fenêtre vaut pour les sessions de `sync` et de `snapshot` (§4, §5,
+  §10), qui partagent ces primitives ; aucune de leurs règles ne change.
+- Elle est acceptée provisoirement pour la seule qualification interne de
+  B4 : volumes NTFS locaux stables, sans lettre ni alias créé, retiré ou
+  réattribué pendant une opération ; un pilote interne contrôlé n'a lieu
+  qu'après ses autorisations propres. Savewarden n'est pas présenté comme
+  protégeant contre une réattribution concurrente.
+- **Avant toute diffusion publique**, un durcissement séparé est
+  obligatoire : amendement d'ADR 0005 et primitives d'écriture indépendantes
+  des lettres de lecteur modifiables, puis un nouveau gate de sécurité.
+  Suivi : chantier S-01 du modèle de sécurité.
+
 #### Initialisation de la zone
 
 Comme I11, faite uniquement de créations exclusives ; Z2 à Z4 ne concernent
@@ -1440,3 +1466,12 @@ dans l'installation, une source, un coffre ou une autre zone.
   statut du §11 disaient qu'aucun code ne l'implémentait ; B4 l'implémente
   sur `feat/b4-restore`, livré par la PR B4, non encore fusionnée ni
   qualifiée par le pilote. Aucune règle ne change.
+- **4 novembre 2026, amendement proposé du §11, en attente de ratification
+  par le propriétaire** : fenêtre résiduelle des lettres de lecteur nommée,
+  relevée par la revue de sécurité de B4 (P1-02) et ses revues ciblées. Une
+  lettre réattribuée pendant une session ouverte n'est empêchée par aucune
+  garantie technique, pour `sync`, `snapshot` et `restore`. Acceptation
+  provisoire limitée à la qualification interne de B4 sur volumes stables ;
+  durcissement d'ADR 0005 et des primitives d'écriture obligatoire avant
+  toute diffusion publique, chantier S-01. Aucune règle des §1 à §10 ne
+  change.
