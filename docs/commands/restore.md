@@ -97,7 +97,9 @@ findings: 0 blocking, 2 info
 
 1. Préflight : snapshot authentifié en entier, destination acceptée,
    distinctions, volume, espace.
-2. Zone nouvelle ou vide : dossier créé s'il manque, relu, il doit être
+2. Session ouverte sur la zone, puis distinctions refaites avant toute
+   écriture : une lettre de lecteur réattribuée depuis le plan est refusée.
+   Zone nouvelle ou vide : dossier créé s'il manque, relu, il doit être
    vide ; marqueur écrit dans un temporaire puis validé par un renommage qui
    ne remplace jamais.
 3. Verrou `restore.lock` de la zone ; zone et snapshot relus sous verrou, sans
@@ -129,9 +131,13 @@ l'utilisateur sur le volume de la zone, au plan puis sous verrou.
 refuse `--vault` et `--snapshot`. Il s'appuie sur la zone et sur le manifeste,
 qui donne l'installation et les sources dont la zone doit rester distincte.
 
-Une destination absente, vide, ou marquée avec seulement sa structure n'a rien
-à récupérer : code 0, sans rien ouvrir ni écrire, avant même la lecture du
-manifeste. Sinon, la destination est contrôlée comme à la création, puis :
+Une destination absente ou vide n'a rien à récupérer : code 0, sans rien
+ouvrir ni écrire, avant même la lecture du manifeste. Une zone marquée avec
+seulement sa structure n'a rien à récupérer non plus, code 0, sans session ni
+écriture, mais seulement après la lecture du manifeste, exigé, une fois son
+marqueur relu strictement et reconnu du jeu du manifeste : un manifeste
+invalide, ou un marqueur illisible, de schéma inconnu ou d'un autre jeu,
+donne code 1. Sinon, la destination est contrôlée comme à la création, puis :
 
 | Situation | Action de `--recover --apply` |
 | --- | --- |
@@ -192,6 +198,11 @@ jamais sur le coffre.
   sinistre complète.
 - **Tenez le manifeste à jour** avant de restaurer : les distinctions portent
   sur les chemins tels qu'ils se résolvent aujourd'hui.
+- **Lettres de lecteur.** Les distinctions sont faites au plan, refaites une
+  fois la session ouverte, avant toute écriture, puis sous verrou. La session
+  écrit par chemin : une lettre réattribuée, par `subst` par exemple, pendant
+  qu'une restauration s'exécute n'est pas exclue. Ne modifiez pas les lettres
+  de lecteur pendant une restauration.
 - **Coffre copié vers un autre volume** : les identités NTFS changent, chaque
   snapshot est `snapshot-modified`, la restauration est refusée, sans
   présumer une corruption. Un disque externe déplacé vers un autre ordinateur

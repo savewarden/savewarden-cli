@@ -44,6 +44,8 @@ type RestoreRecovery struct {
 	journal      backup.Journal
 	destVolume   string
 	destSegments []string
+	// refs are the paths the area was found distinct from.
+	refs []reference
 }
 
 // Warning is the notice of a restore renamed but not yet published, steps
@@ -85,9 +87,11 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 	}
 	defer func() { _ = scope.Close() }()
 	name := strings.Join(segments, "/")
-	// Step 1: a destination with nothing to recover concludes at once,
-	// before the manifest is even read (ADR 0006 §11). A refusal there
-	// reports nothing: no recovery was planned.
+	// Step 1: a destination absent or empty has nothing to recover and
+	// concludes at once, before the manifest is even read (ADR 0006 §11). A
+	// refusal there reports nothing: no recovery was planned. A marked area
+	// goes on: it has nothing to recover only once its marker is read
+	// strictly and found of the manifest's game (ADR 0009).
 	state, nothing, err := nothingToRecover(scope, path, name)
 	if err != nil {
 		return RestoreRecovery{}, err
@@ -97,7 +101,8 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 	if nothing {
 		return rec, nil
 	}
-	// Step 2: the recovery may write; the manifest is required.
+	// Step 2: the manifest is required, to judge the marker of the area and,
+	// should the recovery write, the separation of the area.
 	manifest, err := s.manifests.Read(request.ManifestPath)
 	if err != nil {
 		return rec, err
@@ -156,22 +161,22 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 	if err := qualifyVolume(rec.Volume, func(format string, args ...any) error { return errDestination(path, format, args...) }); err != nil {
 		return rec, err
 	}
-	refs := manifestReferences(manifest)
+	rec.refs = manifestReferences(manifest)
 	for _, j := range a.journals {
 		if j.RestorePlan != nil {
-			refs = append(refs, backedUpReferences(j.RestorePlan.Sources)...)
+			rec.refs = append(rec.refs, backedUpReferences(j.RestorePlan.Sources)...)
 		}
 	}
-	return rec, s.distinctDestination(path, volume, segments, refs)
+	return rec, s.distinctDestination(path, volume, segments, rec.refs)
 }
 
 // nothingToRecover applies the first step of a recovery, the table of the
 // destination without journaled operation (ADR 0006 §11), on names alone:
-// a destination absent, empty, or marked with only its marker, marker
-// temporaries, restore.lock and empty or absent receipts and journal has
-// nothing to recover; a file, a link or a directory that is not an area is
-// refused. Anything else needs the manifest and the full reading of the
-// area: nothing is concluded from an entry that cannot be read.
+// a destination absent or empty has nothing to recover; a file, a link or a
+// directory that is not an area is refused. A marked area, even with its
+// structure alone, needs the manifest and the full, strict reading of the
+// area, its marker included (security review P1-01): nothing is concluded
+// from a marker that was not read.
 func nothingToRecover(scope Scope, path, name string) (state string, nothing bool, err error) {
 	info, err := scope.Lstat(name)
 	switch {
@@ -192,22 +197,8 @@ func nothingToRecover(scope Scope, path, name string) (state string, nothing boo
 		return DestinationEmpty, true, nil
 	case backup.RestoreRootForeign:
 		return "", false, errDestination(path, "is not empty and not a restore area; choose a new or empty directory, an existing directory is never adopted")
-	case backup.RestoreRootInterrupted:
-		return DestinationArea, false, nil
 	}
-	if len(root.Published) > 0 || len(root.Incomplete) > 0 || len(root.Unexpected) > 0 {
-		return DestinationArea, false, nil
-	}
-	for dir, present := range map[string]bool{backup.RestoreReceiptsDir: root.Receipts, backup.RestoreJournalDir: root.Journal} {
-		if !present {
-			continue
-		}
-		children, err := scope.ReadDir(join(name, dir))
-		if err != nil || len(children) > 0 {
-			return DestinationArea, false, nil
-		}
-	}
-	return DestinationArea, true, nil
+	return DestinationArea, false, nil
 }
 
 // classify decides the recovery of the pending operation of the area from
@@ -292,6 +283,10 @@ func (s *Service) RestoreRecover(ctx context.Context, request RestoreRequest, w 
 }
 
 func (o *operation) recoverRestore(rec *RestoreRecovery, request RestoreRequest) error {
+	// Before its first write, the session open: the separation again.
+	if err := o.separatedUnderSession(rec.refs); err != nil {
+		return err
+	}
 	if rec.Action == RecoverAreaMarker {
 		return o.resumeAreaMarker(rec)
 	}

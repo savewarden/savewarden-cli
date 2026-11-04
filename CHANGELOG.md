@@ -24,7 +24,13 @@ Aucun tag ni release n'est publié par le bootstrap.
   chemins sauvegardés par le snapshot, par nom puis par identité NTFS depuis
   la racine de chaque volume, quelle que soit la lettre de lecteur ; une
   identité inobservable ou une lettre sans volume ne prouvent jamais la
-  séparation. Aucun ancêtre coffre ou zone.
+  séparation. Aucun ancêtre coffre ou zone. Ces distinctions sont refaites
+  une fois la session d'écriture ouverte, avant sa première écriture, pour
+  `--apply` comme pour `--recover --apply`.
+- Récupération : seule une destination absente ou vide est sans objet avant
+  la lecture du manifeste ; une zone marquée sans opération en attente n'est
+  déclarée sans objet qu'après la relecture stricte de son marqueur, du jeu
+  du manifeste, sinon code 1.
 - Restaurations successives : chaque `--apply` publie une nouvelle
   restauration ; une restauration publiée est remise à l'utilisateur,
   observée sans être ouverte ni suivie, et signalée en information :
@@ -41,7 +47,8 @@ Aucun tag ni release n'est publié par le bootstrap.
 - Tests Windows réels de la restauration : bout en bout, coffre sous refus
   d'écriture, plans sous refus d'écriture, fichier ouvert dans la copie,
   processus tué pendant la copie, alias `subst` vers une source puis vers le
-  coffre, validation concurrente du marqueur, jonction à la place d'une
+  coffre, lettre `subst` réattribuée vers une source entre le plan et
+  l'ouverture de la session, validation concurrente du marqueur, jonction à la place d'une
   restauration remise, restauration pendant une rotation et un snapshot ; et
   sorties de `sync`, `snapshot` et `inspect` comparées octet pour octet à
   celles de B3 sur le scénario différentiel.
@@ -194,7 +201,11 @@ Aucun tag ni release n'est publié par le bootstrap.
 - ReFS n'est pas encore qualifié ; la durabilité d'un renommage après une
   coupure de courant n'est pas garantie par Windows, la récupération repose
   sur l'observation.
-- restore et doctor restent à implémenter ; pas de sortie JSON de la CLI.
+- Une session d'écriture crée et renomme par chemin complet : une lettre de
+  lecteur réattribuée pendant qu'elle est ouverte n'est pas exclue, pour
+  `sync`, `snapshot` et `restore`. `restore` refait ses distinctions une fois
+  la session ouverte, ce qui refuse une réattribution antérieure.
+- doctor reste à implémenter ; pas de sortie JSON de la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et
   autres placeholders cloud sont refusés ; `subst` n'est pas détecté.
 - Schéma de manifeste v1 provisoire jusqu'à `v0.1.0`.

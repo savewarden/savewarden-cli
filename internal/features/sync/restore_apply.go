@@ -154,6 +154,10 @@ func (o *operation) restoreSnapshot(request RestoreRequest, plan RestorePlan) er
 // again under it (Z6), then creates the structure and the operation
 // directory (Z7, Z8) and commits the planned record (Z9).
 func (o *operation) restoreUnderLock(request RestoreRequest, before RestorePlan) error {
+	// Before its first write, the session open: the separation again.
+	if err := o.separatedUnderSession(before.refs); err != nil {
+		return err
+	}
 	if before.State != DestinationArea {
 		if err := o.initializeArea(before); err != nil {
 			return err
@@ -223,6 +227,17 @@ func (o *operation) restoreUnderLock(request RestoreRequest, before RestorePlan)
 	o.restored = backup.SnapshotSource{Operation: before.Snapshot, ReceiptSHA256: src.receiptSum}
 	o.snapshotIdentity = src.identity
 	return o.record(backup.StepPlanned, backup.StepValues{RestoredSnapshot: o.restored, SnapshotIdentity: o.snapshotIdentity, RestorePlan: o.restorePlan})
+}
+
+// separatedUnderSession checks the distinctions of the area again once the
+// session is open, the destination or its parent pinned, and before the
+// session writes anything: Z2, Z3, the lock of a marked area, a resumed
+// marker (security review P1-02). The path of the destination, a drive
+// letter among others, may resolve elsewhere than at the plan. The session
+// writes by path: a letter remapped while it is open is not excluded by
+// this check, a limit shared with sync and snapshot (docs/safety-model.md).
+func (o *operation) separatedUnderSession(refs []reference) error {
+	return o.s.distinctDestination(o.target.path, o.target.volume, o.target.segments, refs)
 }
 
 // sameArea requires the area under lock to be the one the plan read, the

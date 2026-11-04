@@ -71,6 +71,8 @@ type RestorePlan struct {
 	vaultSegments []string
 	destVolume    string
 	destSegments  []string
+	// refs are the paths the area was found distinct from.
+	refs []reference
 }
 
 // restoreSource is the snapshot a restore copies, as its authentication
@@ -401,7 +403,8 @@ func (s *Service) planDestination(plan *RestorePlan, manifest game.Manifest, pro
 	if err := qualifyVolume(plan.Volume, func(format string, args ...any) error { return errDestination(path, format, args...) }); err != nil {
 		return err
 	}
-	return s.distinctDestination(path, plan.destVolume, plan.destSegments, plan.references(manifest))
+	plan.refs = plan.references(manifest)
+	return s.distinctDestination(path, plan.destVolume, plan.destSegments, plan.refs)
 }
 
 // references lists the paths the area must stay apart from: the vault, the

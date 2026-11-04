@@ -335,9 +335,11 @@ func TestNothingToRecoverOpensNoSession(t *testing.T) {
 			}
 		})
 	}
-	// P2-01 of the protocol review, the order of ADR 0006 §11: nothing to
-	// recover is concluded before the manifest is read, even an invalid
-	// one; a recovery that may write requires it.
+	// P2-01 of the protocol review, the order of ADR 0006 §11: a
+	// destination absent or empty has nothing to recover before the
+	// manifest is read, even an invalid one. A marked area, its structure
+	// alone included, requires it (security review P1-01), as does a
+	// recovery that may write.
 	invalid := manifest()
 	invalid.Game.ID = ""
 	recoverWithInvalid := func(f *fakeFS) (sync.RestoreResult, error) {
@@ -345,14 +347,24 @@ func TestNothingToRecoverOpensNoSession(t *testing.T) {
 			restoreWriter(newFakeVaults(f), restoreAt.Add(timeLater), "\x00\x00\x00\x00"))
 	}
 	for name, change := range map[string]func(t *testing.T, f *fakeFS){
-		"absent":    func(*testing.T, *fakeFS) {},
-		"empty":     func(_ *testing.T, f *fakeFS) { f.mkdir(restoreDir) },
-		"structure": func(t *testing.T, f *fakeFS) { markArea(t, f, restoreDir, "synthetic-game") },
+		"absent": func(*testing.T, *fakeFS) {},
+		"empty":  func(_ *testing.T, f *fakeFS) { f.mkdir(restoreDir) },
 	} {
 		f := restorable(t)
 		change(t, f)
 		if result, err := recoverWithInvalid(f); err != nil || result.Recovery.Action != sync.RecoverNothing || result.Recovery.Game.ID != "" {
 			t.Fatalf("%s with an invalid manifest: %+v, %v", name, result, err)
+		}
+	}
+	for name, change := range map[string]func(t *testing.T, f *fakeFS){
+		"structure":   func(t *testing.T, f *fakeFS) { markArea(t, f, restoreDir, "synthetic-game") },
+		"interrupted": func(t *testing.T, f *fakeFS) { f.put(restoreDir+`\savewarden-restore.json.tmp-1`, f.file("{")) },
+	} {
+		f := restorable(t)
+		change(t, f)
+		before := everything(f)
+		if _, err := recoverWithInvalid(f); err == nil || everything(f) != before {
+			t.Fatalf("%s with an invalid manifest: %v", name, err)
 		}
 	}
 	f := interruptedRestoreAt(t, restoreMove, true)
@@ -371,6 +383,104 @@ func TestNothingToRecoverOpensNoSession(t *testing.T) {
 		_, err := restoreRecoverWith(f, newFakeVaults(f))
 		expectRestoreRefused(t, err, "destination "+restoreDir)
 		_ = name
+	}
+}
+
+// Security review P1-02: a drive letter remapped between the plan and the
+// opening of the session, here onto a source, must not let the session
+// write there. The separation is checked again once the session is open,
+// before its first write: Z2, Z3, the lock of a marked area, a resumed
+// marker. The source stays identical, and the session writes nothing.
+func TestSeparationIsCheckedUnderTheSession(t *testing.T) {
+	saves := installPath + `\saves`
+	for _, tt := range []struct {
+		name    string
+		prepare func(t *testing.T, f *fakeFS, dir string)
+		recover bool
+	}{
+		{"new area, Z2", func(*testing.T, *fakeFS, string) {}, false},
+		{"empty directory, Z3", func(_ *testing.T, f *fakeFS, dir string) { f.mkdir(dir + `\Restauration`) }, false},
+		{"marked area, the lock", func(t *testing.T, f *fakeFS, dir string) { markArea(t, f, dir+`\Restauration`, "synthetic-game") }, false},
+		{"resumed marker", func(_ *testing.T, f *fakeFS, dir string) {
+			f.put(dir+`\Restauration\savewarden-restore.json.tmp-1`, f.file("{"))
+		}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := restorable(t)
+			neutral := f.mkdir(`G:\Neutre`)
+			f.volumes[`H:\`] = neutral
+			tt.prepare(t, f, `G:\Neutre`)
+			tt.prepare(t, f, saves)
+			source := snapshot(f, saves)
+			hooks := hookedRestore(f)
+			hooks.before["Open"] = func() { f.volumes[`H:\`] = f.get(saves) }
+			request := sync.RestoreRequest{ManifestPath: "m.yaml", VaultPath: vaultPath, Snapshot: snapApplied, Destination: `H:\Restauration`}
+			writer := restoreWriter(hooks, restoreAt, "\x9a\x8b\x7c\x6d")
+			var err error
+			if tt.recover {
+				request.VaultPath, request.Snapshot = "", ""
+				_, err = service(f, manifest()).RestoreRecover(context.Background(), request, writer)
+			} else {
+				_, err = service(f, manifest()).RestoreApply(context.Background(), request, writer)
+			}
+			expectRestoreRefused(t, err, `destination H:\Restauration`, "overlaps the source saves")
+			if len(hooks.calls) != 0 || snapshot(f, saves) != source {
+				t.Fatalf("the session wrote after the remapping: calls %q", hooks.calls)
+			}
+		})
+	}
+}
+
+// Security review P1-01: a marked area without any operation has nothing
+// to recover only under a marker read strictly and of the manifest's game.
+// A marker invalid, of an unknown schema, of another game or unreadable is
+// refused, code 1, never rewritten; no session is opened, nothing written.
+func TestNothingToRecoverReadsTheMarker(t *testing.T) {
+	marker := restoreDir + `\savewarden-restore.json`
+	otherGame := func(t *testing.T) string {
+		data, err := backup.EncodeRestoreAreaMarker(backup.RestoreAreaMarker{CreatedAt: restoreAt, ToolVersion: "dev", GameID: "other-game"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	for _, tt := range []struct {
+		name    string
+		change  func(t *testing.T, f *fakeFS)
+		mention string
+	}{
+		{"empty object", func(_ *testing.T, f *fakeFS) { f.get(marker).data = []byte("{}") }, "a marker is never rewritten"},
+		{"not JSON", func(_ *testing.T, f *fakeFS) { f.get(marker).data = []byte("savewarden") }, "a marker is never rewritten"},
+		{"vault marker", func(t *testing.T, f *fakeFS) {
+			data, err := backup.EncodeMarker(backup.Marker{CreatedAt: restoreAt, ToolVersion: "dev"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.get(marker).data = data
+		}, "a marker is never rewritten"},
+		{"other game", func(t *testing.T, f *fakeFS) { f.get(marker).data = []byte(otherGame(t)) }, `is a restore area of game "other-game"`},
+		{"unreadable", func(_ *testing.T, f *fakeFS) { f.get(marker).busy = true }, "marker:"},
+		{"marker only, other game", func(t *testing.T, f *fakeFS) {
+			f.get(marker).data = []byte(otherGame(t))
+			delete(f.get(restoreDir).children, "receipts")
+			delete(f.get(restoreDir).children, "journal")
+		}, `is a restore area of game "other-game"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := restorable(t)
+			markArea(t, f, restoreDir, "synthetic-game")
+			tt.change(t, f)
+			before := everything(f)
+			vaults := newFakeVaults(f)
+			_, err := restoreRecoverWith(f, vaults)
+			expectRestoreRefused(t, err, "destination "+restoreDir, tt.mention)
+			if len(vaults.sessions) != 0 || everything(f) != before {
+				t.Fatalf("sessions %q, or the area changed", vaults.sessions)
+			}
+			if _, err := restoreRecoverPlan(f); err == nil {
+				t.Fatal("the recovery plan accepted the marker")
+			}
+		})
 	}
 }
 

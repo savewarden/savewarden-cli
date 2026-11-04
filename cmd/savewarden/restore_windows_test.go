@@ -99,6 +99,17 @@ func exitCode(t *testing.T, err error) int {
 	return -1
 }
 
+// notExercised ends a test whose race could not be staged, the copy ending
+// too early: a skip on a developer's machine, a failure on CI, where the
+// proof must have run (security review, P2).
+func notExercised(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatalf("not exercised on CI: "+format, args...)
+	}
+	t.Skipf(format, args...)
+}
+
 // incompleteFiles matches the bulk files of an incomplete restore in dest.
 func incompleteFiles(dest string) string {
 	return filepath.Join(dest, "*.incomplete", "saves", "bulk", "*.save")
@@ -231,7 +242,7 @@ func killedDuringRestore(t *testing.T, s synthetic, snap, dest string) {
 		}
 	}, "restore", "--manifest", s.manifest, "--vault", s.vault, "--snapshot", snap, "--to", dest, "--apply")
 	if !ran {
-		t.Skipf("the copy ended before it could be interrupted: %s", stderr)
+		notExercised(t, "the copy ended before it could be interrupted: %s", stderr)
 	}
 }
 
@@ -279,7 +290,7 @@ func TestRestoreRenameRefusedByAnOpenFile(t *testing.T) {
 	close(stop)
 	file := <-held
 	if file == nil {
-		t.Skip("the copy ended before a file of it could be held")
+		notExercised(t, "the copy ended before a file of it could be held")
 	}
 	_ = file.Close()
 	if code != 1 || !regexp.MustCompile(`savewarden: destination: rolled back restore [0-9T]+-[0-9a-f]{8}\n$`).MatchString(stderr) {
@@ -571,7 +582,7 @@ func TestRestoreBesideRealSyncAndSnapshot(t *testing.T) {
 		}
 	}, "restore", "--manifest", s.manifest, "--vault", s.vault, "--snapshot", snap, "--to", dest, "--apply")
 	if !ran {
-		t.Skipf("the restore ended before the others could run: %s", stderr)
+		notExercised(t, "the restore ended before the others could run: %s", stderr)
 	}
 	if code != 0 || publishedRestoreLine.FindStringSubmatch(stderr) == nil {
 		t.Fatalf("restore beside sync and snapshot: exit %d, stderr %q", code, stderr)
@@ -583,7 +594,7 @@ func TestRestoreBesideRealSyncAndSnapshot(t *testing.T) {
 	code, stderr, ran = whileCopying(t, s, staging, func(*exec.Cmd) { s.restored(t, snap, other) },
 		"sync", "--manifest", s.manifest, "--vault", s.vault, "--apply")
 	if !ran {
-		t.Skipf("the rotation ended before the restore could run: %s", stderr)
+		notExercised(t, "the rotation ended before the restore could run: %s", stderr)
 	}
 	if code != 0 || publishedLine.FindStringSubmatch(stderr) == nil {
 		t.Fatalf("rotation beside the restore: exit %d, stderr %q", code, stderr)
