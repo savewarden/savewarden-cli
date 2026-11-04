@@ -7,6 +7,44 @@ Aucun tag ni release n'est publié par le bootstrap.
 
 ### Added
 
+- Commande `restore` (B4, ADR 0006 §11, ADR 0009) : restauration d'un
+  snapshot approuvé vers une **zone de restauration** isolée, désignée par
+  `--to`, hors du jeu, du coffre et des sources. Plan sans écriture par
+  défaut ; `--apply` marque la zone, copie le snapshot dans
+  `<op>.incomplete`, relit la copie et la publie sous `<op>` avec un receipt
+  de restauration ; `--recover` et `--recover --apply` reprennent une zone
+  interrompue sans jamais lire le coffre, et refusent `--vault` et
+  `--snapshot`. Dernière ligne de stderr : `savewarden: destination: <état>`.
+- Le coffre n'est jamais écrit par `restore`, ni verrouillé : `sync.lock`
+  n'est ni ouvert ni observé. Seul le snapshot désigné est lu, journal
+  publié, receipt, identité et contenu relu en entier ; un snapshot dégradé
+  est bloquant pour `restore`, code 2 ; un snapshot non publié, en cours,
+  ambigu ou illisible est refusé, code 1.
+- Distinctions de la zone avec le coffre, l'installation, les sources et les
+  chemins sauvegardés par le snapshot, par nom puis par identité NTFS depuis
+  la racine de chaque volume, quelle que soit la lettre de lecteur ; une
+  identité inobservable ou une lettre sans volume ne prouvent jamais la
+  séparation. Aucun ancêtre coffre ou zone.
+- Restaurations successives : chaque `--apply` publie une nouvelle
+  restauration ; une restauration publiée est remise à l'utilisateur,
+  observée sans être ouverte ni suivie, et signalée en information :
+  `snapshot-already-restored`, `restore-missing`, `restore-rename-lost`,
+  `restore-replaced`. Codes `changed-during-restore` et
+  `verification-mismatch` pour une copie qui ne correspond pas au plan.
+- [Receipt de restauration v1 et marqueur de zone v1](docs/restore-receipt-v1.md),
+  schémas `savewarden.restore` et `savewarden.restore-area`, relus
+  strictement ; journal de restauration et son automate dans
+  `entities/backup`.
+- Moteur de publication de `features/sync` avec une source de lecture et une
+  cible d'écriture distinctes, sans changement de comportement ni de sortie
+  pour `sync` et `snapshot`.
+- Tests Windows réels de la restauration : bout en bout, coffre sous refus
+  d'écriture, plans sous refus d'écriture, fichier ouvert dans la copie,
+  processus tué pendant la copie, alias `subst` vers une source puis vers le
+  coffre, validation concurrente du marqueur, jonction à la place d'une
+  restauration remise, restauration pendant une rotation et un snapshot ; et
+  sorties de `sync`, `snapshot` et `inspect` comparées octet pour octet à
+  celles de B3 sur le scénario différentiel.
 - Commande `snapshot --manifest <chemin> --vault <dossier>` (B3, ADR 0006 §10,
   ADR 0008) : plan sans écriture, `--apply` qui copie la génération `current`
   reconnue dans `snapshots\<opération>.incomplete`, relit la copie, recoupe

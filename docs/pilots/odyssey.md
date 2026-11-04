@@ -184,13 +184,38 @@ sortie brute, aucune empreinte individuelle, aucun receipt réel, aucun
 identifiant d'opération, aucun nom de profil ni aucun chemin personnel n'est
 versionné.
 
+### Protocole B4
+
+Exécuté par le propriétaire après la fusion de B4, avec un binaire du commit
+de fusion, depuis le coffre du pilote B3, **lu seulement**, vers une zone
+neuve hors du jeu, du coffre et de toute source. L'agent n'y accède pas.
+
+1. Empreinte complète du coffre : inventaire et contenu.
+2. `snapshot`, plan seul : le snapshot du pilote B3 est intact.
+3. `restore`, plan seul : code `0`, snapshot `verified`, 14 fichiers attendus,
+   aucune anomalie ; destination inchangée.
+4. `restore --apply` : code `0`, `destination: published restore <op>`.
+5. `inspect` d'un manifeste écrit hors du dépôt qui pointe sur la
+   restauration : fichiers, tailles et SHA-256 égaux au receipt du snapshot.
+6. `restore --recover` : rien à récupérer, code `0` ; nouveau plan : la
+   restauration précédente est signalée en information.
+7. Empreinte du coffre identique à l'étape 1 ; plans de `sync` et de
+   `snapshot` inchangés.
+
+Consigner codes, nombres et verdicts dans le rapport B4, sans hash
+individuel, identifiant d'opération, receipt réel, nom de profil ni chemin
+personnel. La reprise manuelle des fichiers dans le jeu reste hors du pilote ;
+crashs, récupération, distinctions et concurrence restent prouvés par les
+tests synthétiques, les tests Windows réels et la CI.
+
 B2 copie seulement après plan, choix explicite de destination et
 autorisation ; pas de suppression de la source. L'ancien coffre du pilote,
 non vide et sans marqueur, est refusé par la règle générique du coffre,
 jamais adopté, et son snapshot `20261009T183208-cacd3cae` n'est ni lu ni
 importé. B3 ajoute des snapshots neufs et immuables, qualifiés sur ce pilote
-le 1er novembre 2026. B4 restaurera un
-snapshot dans un dossier **isolé**. B5 contrôlera manifestes/receipts/hash et
+le 1er novembre 2026. B4 restaure un
+snapshot dans une zone **isolée**, sans écrire le coffre ; son pilote reste à
+exécuter. B5 contrôlera manifestes/receipts/hash et
 validera le pilote complet avant une RC.
 
 Les autorisations d'un lot ne valent pas consentement pour relocation,

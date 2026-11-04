@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,7 +79,8 @@ func newRestorePlan() sync.RestorePlan {
 		Findings: []backup.Finding{
 			{Severity: backup.Info, Code: sync.CodeSnapshotAlreadyRestored, Path: "20261103T100000-9a8b7c6d",
 				Detail: "this snapshot was already restored in this area; a new restore is still possible"},
-			{Severity: backup.Info, Code: sync.CodeRestoreRenameLost, Path: "20261103T110000-0a1b2c3d", Detail: "still under .incomplete"},
+			{Severity: backup.Info, Code: sync.CodeRestoreRenameLost, Path: "20261103T110000-0a1b2c3d",
+				Detail: "the handed-over restore is still under .incomplete with its published identity, as after a power cut; it is never renamed"},
 		},
 	}
 }
@@ -106,10 +109,18 @@ files: 2  bytes: 6  space needed: 67108870 bytes
 
 findings: 0 blocking, 2 info
   info  snapshot-already-restored  -  20261103T100000-9a8b7c6d  this snapshot was already restored in this area; a new restore is still possible
-  info  restore-rename-lost  -  20261103T110000-0a1b2c3d  still under .incomplete
+  info  restore-rename-lost  -  20261103T110000-0a1b2c3d  the handed-over restore is still under .incomplete with its published identity, as after a power cut; it is never renamed
 `
 	if stdout != want {
 		t.Fatalf("stdout:\n%s\nwant\n%s", stdout, want)
+	}
+	// docs/commands/restore.md shows this exact rendering.
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "commands", "restore.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), "```text\n"+want+"```") {
+		t.Fatalf("docs/commands/restore.md does not show the rendering of the plan:\n%s", want)
 	}
 	if restorer.request != (sync.RestoreRequest{ManifestPath: `D:\Manifests\synthetic-game.yaml`, VaultPath: `F:\Vault`,
 		Snapshot: "20261102T090000-4e5f6a7b", Destination: `G:\Restores\synthetic`}) {

@@ -1,0 +1,375 @@
+== sync plan, no vault: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (will be created)
+destination: <BASE>\Vault\games\synthetic-game\current
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: none
+pending: none
+mode: plan only, nothing written
+plan: changes
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: planned
+  files: 2  bytes: 6  added: 2  modified: 0  removed: 0  unchanged: 0
+  + 7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed  3  2026-11-01T10:00:00Z  1.save
+  + 3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: 0 blocking, 1 info
+  info  same-volume  saves  <VOLUME>\  vault and source share a volume; not an off-disk backup
+-- stderr
+== snapshot plan, no vault: exit 1
+-- stdout
+-- stderr
+savewarden: vault <BASE>\Vault: does not exist; sync --apply creates a vault, snapshot never does
+== sync apply, first publication: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (will be created)
+destination: <BASE>\Vault\games\synthetic-game\current
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: none
+pending: none
+mode: apply: copy, verify and publish
+plan: changes
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: planned
+  files: 2  bytes: 6  added: 2  modified: 0  removed: 0  unchanged: 0
+  + 7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed  3  2026-11-01T10:00:00Z  1.save
+  + 3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: 0 blocking, 1 info
+  info  same-volume  saves  <VOLUME>\  vault and source share a volume; not an off-disk backup
+
+operation: <OP>
+verification: 2 files, 6 bytes, SHA-256 verified
+published: <BASE>\Vault\games\synthetic-game\current
+receipt: <BASE>\Vault\games\synthetic-game\receipts\<OP>.json
+-- stderr
+savewarden: vault: published <OP>
+== sync plan, up to date: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+destination: <BASE>\Vault\games\synthetic-game\current
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>
+pending: none
+mode: plan only, nothing written
+plan: up to date
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: planned
+  files: 2  bytes: 6  added: 0  modified: 0  removed: 0  unchanged: 2
+  = 7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed  3  2026-11-01T10:00:00Z  1.save
+  = 3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: 0 blocking, 1 info
+  info  same-volume  saves  <VOLUME>\  vault and source share a volume; not an off-disk backup
+-- stderr
+== sync apply, up to date: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+destination: <BASE>\Vault\games\synthetic-game\current
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>
+pending: none
+mode: apply: copy, verify and publish
+plan: up to date
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: planned
+  files: 2  bytes: 6  added: 0  modified: 0  removed: 0  unchanged: 2
+  = 7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed  3  2026-11-01T10:00:00Z  1.save
+  = 3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: 0 blocking, 1 info
+  info  same-volume  saves  <VOLUME>\  vault and source share a volume; not an off-disk backup
+
+operation: none
+-- stderr
+savewarden: vault: not modified
+== sync recover, nothing: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive
+operation: none
+last committed step: none
+action: nothing to recover
+mode: recovery plan only, nothing written
+-- stderr
+savewarden: vault: not modified
+== snapshot plan: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>, recognized
+pending: none
+mode: plan only, nothing written
+plan: new snapshot
+
+snapshots: 0 published, 0 degraded, 0 incomplete
+snapshot: new, from <OP>
+files: 2  bytes: 6
+
+findings: none
+-- stderr
+== snapshot apply: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>, recognized
+pending: none
+mode: apply: copy, verify and publish
+plan: new snapshot
+
+snapshots: 0 published, 0 degraded, 0 incomplete
+snapshot: new, from <OP>
+files: 2  bytes: 6
+
+findings: none
+
+operation: <OP>
+verification: 2 files, 6 bytes, SHA-256 verified
+published: <BASE>\Vault\games\synthetic-game\snapshots\<OP>
+receipt: <BASE>\Vault\games\synthetic-game\snapshots\receipts\<OP>.json
+-- stderr
+savewarden: vault: published snapshot <OP>
+== snapshot plan, up to date: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive
+current: <OP>, recognized
+pending: none
+mode: plan only, nothing written
+plan: up to date
+
+snapshots: 1 published, 0 degraded, 0 incomplete
+  <OP>  from <OP>  2 files  6 bytes
+snapshot: up to date (<OP>)
+
+findings: none
+-- stderr
+== snapshot apply, up to date: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive
+current: <OP>, recognized
+pending: none
+mode: apply: copy, verify and publish
+plan: up to date
+
+snapshots: 1 published, 0 degraded, 0 incomplete
+  <OP>  from <OP>  2 files  6 bytes
+snapshot: up to date (<OP>)
+
+findings: none
+
+operation: none
+-- stderr
+savewarden: vault: not modified
+== snapshot recover: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault
+volume: NTFS, fixed drive
+snapshot operation: none
+last committed step: none
+action: nothing to recover
+mode: recovery plan only, nothing written
+-- stderr
+savewarden: vault: not modified
+== snapshot recover apply: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault
+volume: NTFS, fixed drive
+snapshot operation: none
+last committed step: none
+action: nothing to recover
+mode: recovery
+-- stderr
+savewarden: vault: not modified
+== modify 1.save
+== sync plan, modified: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+destination: <BASE>\Vault\games\synthetic-game\current
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>
+pending: none
+mode: plan only, nothing written
+plan: changes
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: planned
+  files: 2  bytes: 6  added: 0  modified: 1  removed: 0  unchanged: 1
+  ~ 2192e8955d5e1ad1651f2f0c637e6f1ac82855747a5f42f978db28669595dc21  3  2026-11-01T10:05:00Z  1.save
+  = 3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: 0 blocking, 1 info
+  info  same-volume  saves  <VOLUME>\  vault and source share a volume; not an off-disk backup
+-- stderr
+== sync apply, rotation: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+destination: <BASE>\Vault\games\synthetic-game\current
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>
+pending: none
+mode: apply: copy, verify and publish
+plan: changes
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: planned
+  files: 2  bytes: 6  added: 0  modified: 1  removed: 0  unchanged: 1
+  ~ 2192e8955d5e1ad1651f2f0c637e6f1ac82855747a5f42f978db28669595dc21  3  2026-11-01T10:05:00Z  1.save
+  = 3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: 0 blocking, 1 info
+  info  same-volume  saves  <VOLUME>\  vault and source share a volume; not an off-disk backup
+
+operation: <OP>
+verification: 2 files, 6 bytes, SHA-256 verified
+published: <BASE>\Vault\games\synthetic-game\current
+receipt: <BASE>\Vault\games\synthetic-game\receipts\<OP>.json
+retained: <BASE>\Vault\games\synthetic-game\retained\<OP>
+-- stderr
+savewarden: vault: published <OP>
+== sync plan after rotation: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+destination: <BASE>\Vault\games\synthetic-game\current
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>
+pending: none
+mode: plan only, nothing written
+plan: up to date
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: planned
+  files: 2  bytes: 6  added: 0  modified: 0  removed: 0  unchanged: 2
+  = 2192e8955d5e1ad1651f2f0c637e6f1ac82855747a5f42f978db28669595dc21  3  2026-11-01T10:05:00Z  1.save
+  = 3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: 0 blocking, 1 info
+  info  same-volume  saves  <VOLUME>\  vault and source share a volume; not an off-disk backup
+-- stderr
+== sync recover apply, nothing: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive
+operation: none
+last committed step: none
+action: nothing to recover
+mode: recovery
+-- stderr
+savewarden: vault: not modified
+== snapshot plan after rotation: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>, recognized
+pending: none
+mode: plan only, nothing written
+plan: new snapshot
+
+snapshots: 1 published, 0 degraded, 0 incomplete
+  <OP>  from <OP>  2 files  6 bytes
+snapshot: new, from <OP>
+files: 2  bytes: 6
+
+findings: none
+-- stderr
+== snapshot apply after rotation: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive, 67108870 bytes needed
+current: <OP>, recognized
+pending: none
+mode: apply: copy, verify and publish
+plan: new snapshot
+
+snapshots: 1 published, 0 degraded, 0 incomplete
+  <OP>  from <OP>  2 files  6 bytes
+snapshot: new, from <OP>
+files: 2  bytes: 6
+
+findings: none
+
+operation: <OP>
+verification: 2 files, 6 bytes, SHA-256 verified
+published: <BASE>\Vault\games\synthetic-game\snapshots\<OP>
+receipt: <BASE>\Vault\games\synthetic-game\snapshots\receipts\<OP>.json
+-- stderr
+savewarden: vault: published snapshot <OP>
+== snapshot plan, two snapshots: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+vault: <BASE>\Vault (initialized)
+volume: NTFS, fixed drive
+current: <OP>, recognized
+pending: none
+mode: plan only, nothing written
+plan: up to date
+
+snapshots: 2 published, 0 degraded, 0 incomplete
+  <OP>  from <OP>  2 files  6 bytes
+  <OP>  from <OP>  2 files  6 bytes
+snapshot: up to date (<OP>)
+
+findings: none
+-- stderr
+== sync vault inside installation: exit 1
+-- stdout
+-- stderr
+savewarden: vault <BASE>\Synthetic Game\Vault: overlaps the installation; the vault must be distinct from the installation and every source
+== snapshot vault inside installation: exit 1
+-- stdout
+-- stderr
+savewarden: vault <BASE>\Synthetic Game\Vault: overlaps the installation; the vault must be distinct from the installation and every source
+== inspect: exit 0
+-- stdout
+manifest: <BASE>\manifest.yaml
+game: synthetic-game (Synthetic Game)
+installation: <BASE>\Synthetic Game
+
+source saves (save, required): <BASE>\Synthetic Game\saves
+  status: inventoried
+  files: 2  bytes: 6
+  2192e8955d5e1ad1651f2f0c637e6f1ac82855747a5f42f978db28669595dc21  3  2026-11-01T10:05:00Z  1.save
+  3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3  3  2026-11-01T10:00:00Z  Slot 1/2.save
+
+findings: none
+-- stderr

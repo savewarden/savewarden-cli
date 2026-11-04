@@ -4,11 +4,12 @@
 
 - Lire le plan demandé intégralement et inspecter statut, branche, remote et
   fichiers existants avant toute écriture. Ne pas écraser du travail existant.
-- Lot courant : **B3**, snapshots immuables, selon
-  `.plans/Savewarden_Plan_B3_Snapshots_v0.2.md`, validé par le propriétaire,
-  et ADR 0004 à 0008, dont ADR 0006 §10. B2 est clos ; B3 est livré en une
-  PR, après un GO distinct ; puis Human GO et plan accepté avant chaque lot
-  suivant, B4 et B5. Les snapshots sont une opération de `features/sync`.
+- Lot courant : **B4**, restauration isolée, selon
+  `.plans/Savewarden_Plan_B4_Restauration_v0.2.md`, validé par le
+  propriétaire, et ADR 0004 à 0009, dont ADR 0006 §11. B3 est clos ; B4 est
+  livré en une PR, après un GO distinct ; puis Human GO et plan accepté avant
+  B5. Les snapshots et la restauration sont des opérations de
+  `features/sync` ; `restore` n'écrit jamais le coffre.
 - Ne jamais déclarer une CI verte sans run terminé sur le commit concerné.
   Une compilation croisée prouve seulement la compilation.
 - Tenir code, tests, docs et CHANGELOG.md cohérents. Rapport final : branche,

@@ -4,7 +4,7 @@ Décision propre à Savewarden : **FSD-inspired, Go-idiomatic**, documentée dan
 [ADR 0001](adr/0001-fsd-inspired-go.md). Mosaera est une inspiration de
 conception, pas une spécification à laquelle le produit prétend être conforme.
 
-## Existant B3
+## Existant B4
 
 ```text
 cmd/savewarden → app ─┬─► cli ─┬─► features/inspect ──► entities/game, entities/backup
@@ -22,14 +22,16 @@ d'[ADR 0007](adr/0007-sync-contract-receipt-v1.md). `cli` possède les flags,
 le rendu texte, l'`ExitError` et la ligne d'état du coffre. Aucune
 découverte de configuration. Seul `platform/vault` écrit, en création seule
 ([ADR 0005](adr/0005-write-allowed-package.md)) ; `app` ne donne son
-`Writer` qu'à `--apply` et `--recover --apply`, jamais au plan.
+`Writer` qu'à `--apply` et `--recover --apply`, jamais au plan. Pour
+`restore`, ses sessions s'ouvrent sur la zone de restauration, jamais sur le
+coffre ; la ligne d'état nomme alors la destination.
 
 | Package | Rôle |
 | --- | --- |
 | `entities/game` | Manifeste, jeu, installation, sources ; validation pure et grammaire des chemins et noms Windows, indépendante de l'hôte |
-| `entities/backup` | Types partagés : `Entry`, `Directory`, `Finding` ; différence pure ; receipt v1, receipt de snapshot v1 et marqueur du coffre stricts ; journaux d'opération et de snapshot, son automate et le classement des observations d'[ADR 0006](adr/0006-publication-recovery-protocol.md) ; aucune I/O |
+| `entities/backup` | Types partagés : `Entry`, `Directory`, `Finding` ; différence pure ; receipt v1, receipt de snapshot v1, receipt de restauration v1, marqueur du coffre et marqueur de zone stricts ; journaux d'opération, de snapshot et de restauration, leur automate et le classement des observations d'[ADR 0006](adr/0006-publication-recovery-protocol.md) ; aucune I/O |
 | `features/inspect` | Inventaire en lecture seule ; ports `ManifestReader`, `FileSystem` et `Scope` ; `Report` typé ; `Directory`, inventaire sans suivi d'un dossier quelconque |
-| `features/sync` | Plan, première publication, rotation de `current`, snapshots et récupération selon [ADR 0006](adr/0006-publication-recovery-protocol.md), moteur paramétré par le domaine ; politique des retraits et des sources absentes ; ports `ManifestReader`, `Inventories`, `Files`, `Volumes`, et pour écrire `Vaults` et `Clock` ; `Plan`, `Result` et `Recovery` typés |
+| `features/sync` | Plan, première publication, rotation de `current`, snapshots, restauration isolée et récupérations selon [ADR 0006](adr/0006-publication-recovery-protocol.md) ; moteur paramétré par le domaine, avec une source de lecture et une cible d'écriture distinctes ; politique des retraits et des sources absentes ; ports `ManifestReader`, `Inventories`, `Files`, `Volumes`, et pour écrire `Vaults` et `Clock` ; `Plan`, `Result`, `Recovery` et leurs pendants de snapshot et de restauration typés |
 | `platform/manifests` | Lecture stricte du YAML vers `game.Manifest`, [ADR 0002](adr/0002-manifest-v1-strict-yaml.md) |
 | `platform/filesystem` | Portée ancrée sans suivi de liens ; implémentation Windows supportée, Unix pour les tests du contrat ; fichiers EFS signalés ; identité de fichier ; un fichier tenu sans partage est décrit, jamais ouvert |
 | `platform/vault` | Session de coffre en création seule, Windows seulement : dossiers et fichiers `CREATE_NEW`, flush, date, `MoveFileEx` sans drapeau, identité, verrou, type de volume et espace disponible ; dossiers épinglés sans suivi de lien |
@@ -64,8 +66,10 @@ platform/* → entities/* si nécessaire
 entities/* → bibliothèque standard
 ```
 
-Chaque feature (`inspect`, `sync`, puis `restore` et `doctor`) possède son
-orchestration ; les snapshots sont une opération de `sync`. Les entités portent les types métier réellement communs.
+Chaque feature (`inspect`, `sync`, puis `doctor`) possède son orchestration ;
+les snapshots et la restauration isolée sont des opérations de `sync`
+([ADR 0004](adr/0004-sync-boundaries.md), amendements B3 et B4). Les entités
+portent les types métier réellement communs.
 Les ports sont des petites interfaces définies par leur consommateur ;
 `app` fournit les adaptateurs. Pas d'import feature → feature, feature →
 platform/cli/app/Cobra ou platform → feature. Un scénario composé passe par
@@ -92,9 +96,11 @@ création exclusive `CREATE_NEW`, dossiers créés un par un, flush, date,
 troncature et tout drapeau `MOVEFILE_*` restent refusés partout, `vault`
 compris.
 
-Ne créer `features/restore` et les autres packages que lorsqu'un fichier
-utile existe. Aucun `shared` n'est nécessaire. Les détails propres à un
-OS sont isolés par build tags.
+Ne créer un package que lorsqu'un fichier utile existe ; `features/restore`
+n'existe pas, la restauration étant une opération de `sync`, et l'extraction
+du moteur est réexaminée selon les critères de l'amendement B4 d'ADR 0004.
+Aucun `shared` n'est nécessaire. Les détails propres à un OS sont isolés par
+build tags.
 
 ## Contrats à stabiliser
 
@@ -118,8 +124,14 @@ OS sont isolés par build tags.
   publication est paramétré par le domaine de l'opération, `current` ou
   snapshots, sans changement de comportement pour `current`. Aucun port ni
   frontière nouvelle, aucune API d'écriture nouvelle.
-- B4 : restauration vers dossier séparé, préflight et `--dry-run`, aucun
-  écrasement ni restauration en place.
+- B4, en développement : restauration d'un snapshot approuvé vers une zone
+  de restauration isolée, [documentée](commands/restore.md),
+  [receipt de restauration et marqueur de zone](restore-receipt-v1.md),
+  protocole d'ADR 0006 §11 et contrat
+  d'[ADR 0009](adr/0009-restore-contract-receipt-v1.md). Le plan est le mode
+  par défaut, sans écriture ; aucun écrasement, aucune restauration en place,
+  aucune écriture dans le coffre. Opération de `features/sync`, sans port ni
+  frontière nouvelle ni API d'écriture nouvelle.
 - B5 : diagnostic read-only et campagne pilote.
 
 Les contrats encore futurs ne sont pas implémentés : aucune rétention des

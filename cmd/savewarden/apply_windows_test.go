@@ -62,7 +62,14 @@ func (s synthetic) run(t *testing.T, args ...string) (string, string, int) {
 // vault, and returns its stdout, stderr and exit code.
 func (s synthetic) command(t *testing.T, name string, args ...string) (string, string, int) {
 	t.Helper()
-	cmd := exec.Command(s.binary, append([]string{name, "--manifest", s.manifest, "--vault", s.vault}, args...)...)
+	return s.exec(t, append([]string{name, "--manifest", s.manifest, "--vault", s.vault}, args...)...)
+}
+
+// exec runs the binary with args as given, and returns its stdout, stderr
+// and exit code.
+func (s synthetic) exec(t *testing.T, args ...string) (string, string, int) {
+	t.Helper()
+	cmd := exec.Command(s.binary, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
