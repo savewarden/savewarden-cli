@@ -201,10 +201,14 @@ Aucun tag ni release n'est publié par le bootstrap.
 - ReFS n'est pas encore qualifié ; la durabilité d'un renommage après une
   coupure de courant n'est pas garantie par Windows, la récupération repose
   sur l'observation.
-- Une session d'écriture crée et renomme par chemin complet : une lettre de
-  lecteur réattribuée pendant qu'elle est ouverte n'est pas exclue, pour
-  `sync`, `snapshot` et `restore`. `restore` refait ses distinctions une fois
-  la session ouverte, ce qui refuse une réattribution antérieure.
+- Une session d'écriture crée et renomme par chemin complet ; ses épingles ne
+  neutralisent pas la réattribution d'une lettre de lecteur. Une lettre
+  réattribuée pendant qu'une session est ouverte reste un risque résiduel,
+  pour `sync`, `snapshot` et `restore`, en attente d'une décision :
+  acceptation provisoire, ou durcissement par un amendement d'ADR 0005.
+  `restore` refait ses distinctions une fois la session ouverte, ce qui
+  refuse une réattribution antérieure. Ne modifiez pas les lettres de lecteur
+  pendant une opération.
 - doctor reste à implémenter ; pas de sortie JSON de la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et
   autres placeholders cloud sont refusés ; `subst` n'est pas détecté.

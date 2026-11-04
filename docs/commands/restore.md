@@ -201,8 +201,10 @@ jamais sur le coffre.
 - **Lettres de lecteur.** Les distinctions sont faites au plan, refaites une
   fois la session ouverte, avant toute écriture, puis sous verrou. La session
   écrit par chemin : une lettre réattribuée, par `subst` par exemple, pendant
-  qu'une restauration s'exécute n'est pas exclue. Ne modifiez pas les lettres
-  de lecteur pendant une restauration.
+  qu'une restauration s'exécute n'est pas exclue, et ses épingles ne
+  l'empêchent pas. C'est un risque résiduel, qui vaut aussi pour `sync` et
+  `snapshot`. Ne modifiez pas les lettres de lecteur pendant une
+  restauration.
 - **Coffre copié vers un autre volume** : les identités NTFS changent, chaque
   snapshot est `snapshot-modified`, la restauration est refusée, sans
   présumer une corruption. Un disque externe déplacé vers un autre ordinateur

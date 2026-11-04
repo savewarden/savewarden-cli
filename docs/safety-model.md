@@ -51,15 +51,20 @@ Limites assumées :
   résolvent aujourd'hui ; une restauration est refusée tant qu'une lettre de
   référence n'a pas de volume. B4 n'est pas une reprise après sinistre
   complète.
-- Les sessions de `platform/vault` créent et renomment **par chemin**. Leurs
-  épingles interdisent de renommer les dossiers déjà ouverts, pas de
-  réattribuer une lettre de lecteur. `restore` refait les distinctions une
-  fois sa session ouverte, avant toute écriture : une lettre réattribuée
-  entre le plan et l'ouverture est refusée, ce que prouve un test Windows
-  réel avec `subst`. Une lettre réattribuée **pendant** qu'une session est
-  ouverte n'est pas exclue, pour `restore` comme pour `sync` et `snapshot` ;
-  la fermer demanderait des créations relatives aux dossiers épinglés, donc
-  un amendement d'ADR 0005.
+- **Risque résiduel, en attente d'une décision du propriétaire.** Les
+  sessions de `platform/vault` créent et renomment **par chemin complet**.
+  Leurs épingles interdisent de renommer les dossiers déjà ouverts, mais ne
+  neutralisent pas la réattribution d'une lettre de lecteur. `restore` refait
+  les distinctions une fois sa session ouverte, avant toute écriture : une
+  lettre réattribuée entre le plan et l'ouverture est refusée, ce que prouve
+  un test Windows réel avec `subst`. Une lettre réattribuée **pendant**
+  qu'une session est ouverte, après ce contrôle et avant une écriture, n'est
+  pas exclue, pour `restore` comme pour `sync` et `snapshot` : ce n'est pas
+  une protection démontrée. Deux voies : l'accepter provisoirement, hors du
+  modèle de concurrence pris en charge, en interdisant de modifier les
+  lettres de lecteur pendant une opération ; ou la fermer par des créations
+  et des renommages relatifs aux dossiers épinglés, ce qui demande un
+  amendement d'ADR 0005.
 - Le garde statique ne prouve pas l'absence de tout effet indirect ; les
   tests dynamiques couvrent le comportement livré, sur leurs fixtures.
 - Sous Unix, l'adaptateur sert aux tests du contrat ; un échange suivi d'une
