@@ -9,7 +9,9 @@ snapshots de B3, est accepté par le propriétaire le 31 octobre 2026, avec le
 plan B3 v0.2, et implémenté par B3, fusionné en `08ec0c2`. Le §11, restauration
 isolée de B4, et ses renvois depuis les §1, §2, §3 et §8, rédigés le
 1er novembre 2026, sont acceptés par le propriétaire le 3 novembre 2026, avec
-le plan B4 v0.2 ; aucun code ne les implémente encore.
+le plan B4 v0.2, et implémentés par B4 sur la branche `feat/b4-restore`,
+livrés avec lui par la PR B4, non encore fusionnée ni qualifiée par le
+pilote.
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -903,7 +905,9 @@ limites d'ADR 0008.
 
 **Statut : accepté** par le propriétaire le 3 novembre 2026, avec le plan B4
 v0.2, rédigé le 1er novembre 2026. Normatif pour tout code de restauration ;
-aucun code ne l'implémente encore. Il ne change aucune règle des §1 à §10 :
+implémenté par B4 sur la branche `feat/b4-restore`, livré avec lui par la
+PR B4, non encore fusionnée ni qualifiée par le pilote. Il ne change aucune
+règle des §1 à §10 :
 une restauration n'écrit pas le coffre. Il ajoute un invariant, plus bas, qui
 contraint toute opération future du coffre.
 
@@ -1431,3 +1435,8 @@ dans l'installation, une source, un coffre ou une autre zone.
   même jeu, sans session ni écriture. Différence observable : avec un
   manifeste invalide, code 1 au lieu de 0. ADR 0009 est précisé de même.
   Aucune autre règle ne change.
+- **4 novembre 2026, correction documentaire**, séparée des changements
+  normatifs, demandée par la revue de sécurité de B4 : l'en-tête et le
+  statut du §11 disaient qu'aucun code ne l'implémentait ; B4 l'implémente
+  sur `feat/b4-restore`, livré par la PR B4, non encore fusionnée ni
+  qualifiée par le pilote. Aucune règle ne change.
