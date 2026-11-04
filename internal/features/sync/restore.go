@@ -367,7 +367,7 @@ func (s *Service) planDestination(plan *RestorePlan, manifest game.Manifest, pro
 	if info, err := scope.Lstat(parent); err != nil || isLink(info.Mode()) || !info.IsDir() {
 		return errDestination(path, "parent directory %s does not exist or is not a plain directory", windowsPath(plan.destVolume, plan.destSegments[:len(plan.destSegments)-1]))
 	}
-	a, err := readArea(scope, path, name, manifest.Game.ID)
+	a, err := readStableArea(scope, path, name, manifest.Game.ID)
 	if err != nil {
 		return err
 	}
@@ -383,8 +383,10 @@ func (s *Service) planDestination(plan *RestorePlan, manifest game.Manifest, pro
 	default:
 		plan.State = DestinationArea
 	}
+	// The lock is probed now, not as the listing of the root saw it: a
+	// restore that took it after that listing may have journaled since.
 	running := len(a.pending) > 0 || len(a.interventions) > 0
-	if probe && a.root.Lock && running && lockBusy(scope, join(name, backup.RestoreLockName)) {
+	if probe && running && lockBusy(scope, join(name, backup.RestoreLockName)) {
 		return errDestination(path, "another restore is running in this area; run it again once it ends")
 	}
 	plan.Restores, plan.Incomplete, plan.Pending = a.restores, a.incomplete(), a.pending

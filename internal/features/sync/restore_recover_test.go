@@ -638,6 +638,76 @@ func TestRestoreDiagnosticsNameTheRestore(t *testing.T) {
 	}
 }
 
+// Found by the real-Windows test of the marker race: a reading of the area
+// is not atomic. A restore that commits its receipt and published between
+// the listing of receipts and the reading of its journal, then releases
+// its lock, must not look like a published restore without receipt: the
+// area is read until two readings agree, for the plan as for the recovery.
+func TestAreaIsReadUntilStable(t *testing.T) {
+	for _, recovery := range []bool{false, true} {
+		f := restorable(t)
+		publishRestore(t, f, restoreDir, restored1, restoreAt)
+		receipts := f.get(restoreDir + `\receipts`)
+		receipt := receipts.children[restored1+".json"]
+		hidden, shown := false, false
+		f.onLstat = func(name string) {
+			switch {
+			case name == "Restores/synthetic/savewarden-restore.json" && !hidden:
+				// The receipt is not committed yet when receipts is listed.
+				hidden = true
+				delete(receipts.children, restored1+".json")
+			case name == "Restores/synthetic/journal/"+restored1 && hidden && !shown:
+				// It is, with published, when the journal is read.
+				shown = true
+				receipts.children[restored1+".json"] = receipt
+			}
+		}
+		if recovery {
+			if rec, err := restoreRecoverPlan(f); err != nil || rec.Action != sync.RecoverNothing {
+				t.Fatalf("recovery plan: %q, %v", rec.Action, err)
+			}
+		} else if p := restorePlanOf(t, f); len(p.Interventions) != 0 {
+			t.Fatalf("plan: %q", restoreCauses(p))
+		}
+		if !hidden || !shown {
+			t.Fatal("the window was not reproduced")
+		}
+	}
+	// An area that keeps changing is refused, code 1, never judged.
+	f := restorable(t)
+	publishRestore(t, f, restoreDir, restored1, restoreAt)
+	n := 0
+	f.onLstat = func(name string) {
+		if name == "Restores/synthetic/savewarden-restore.json" {
+			n++
+			f.mkdir(fmt.Sprintf(`%s\journal\%s`, restoreDir, fmt.Sprintf("20261108T0%05d-00000000", n)))
+		}
+	}
+	expectRestoreRefused(t, restoreError(f, restoreDir), "keeps changing while it is read")
+}
+
+// A restore that takes the lock after the root of the area is listed, then
+// journals before its journal is read, is still running, code 1, for the
+// plan as for the recovery.
+func TestLockTakenAfterTheListingIsProbed(t *testing.T) {
+	for _, recovery := range []bool{false, true} {
+		f := restorable(t)
+		startRestore(t, f, restoreDir, restored2, restoreAt, backup.StepPlanned)
+		f.onLstat = func(name string) {
+			if name == "Restores/synthetic/journal/"+restored2 && f.get(restoreDir+`\restore.lock`) == nil {
+				f.put(restoreDir+`\restore.lock`, f.file("")).busy = true
+			}
+		}
+		var err error
+		if recovery {
+			_, err = restoreRecoverPlan(f)
+		} else {
+			err = restoreError(f, restoreDir)
+		}
+		expectRestoreRefused(t, err, "another restore is running in this area")
+	}
+}
+
 // A restore running in the area holds its lock: its pending operation is
 // never taken for an interrupted one, code 1.
 func TestRunningRestoreIsNotInterrupted(t *testing.T) {

@@ -171,6 +171,67 @@ func readArea(scope Scope, path, name, gameID string) (*area, error) {
 	return a, nil
 }
 
+// areaReads bounds the readings of an area until two agree.
+const areaReads = 3
+
+// readStableArea reads the area until two readings in a row agree, at most
+// areaReads times. A reading is not atomic: a restore that commits its
+// receipt and its published record between the listing of receipts and the
+// reading of its journal would look like a published restore without its
+// receipt, and, its lock released since, like an ambiguity. An area that
+// still changes after the last reading is being written by another run:
+// refused, code 1, nothing concluded.
+func readStableArea(scope Scope, path, name, gameID string) (*area, error) {
+	previous := ""
+	var lastErr error
+	for range areaReads {
+		a, err := readArea(scope, path, name, gameID)
+		if err != nil {
+			// An error can come from an entry renamed between a listing and
+			// its description: read again.
+			lastErr, previous = err, ""
+			continue
+		}
+		state := a.state()
+		if state == previous {
+			return a, nil
+		}
+		previous, lastErr = state, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errDestination(path, "keeps changing while it is read; another restore may be running in this area, run it again once it ends")
+}
+
+// state describes everything a decision on the area depends on, for
+// readStableArea to compare two readings.
+func (a *area) state() string {
+	if !a.exists {
+		return "absent"
+	}
+	parts := []string{fmt.Sprintf("root %d lock=%v receipts=%v journal=%v marker=%v", a.root.State, a.root.Lock, a.root.Receipts, a.root.Journal, a.marker)}
+	for k := range a.root.Taken {
+		parts = append(parts, fmt.Sprintf("marker .tmp-%d", k))
+	}
+	for _, set := range []map[string]backup.RestoreObject{a.root.Published, a.root.Incomplete} {
+		for _, object := range set {
+			parts = append(parts, fmt.Sprintf("object %s %d unobservable=%v", object.Name, object.Kind, a.unobservable[object.Name]))
+		}
+	}
+	for op, j := range a.journals {
+		parts = append(parts, fmt.Sprintf("taken %s %v %v", op, j.Taken, j.Prepared))
+	}
+	for _, r := range a.restores {
+		parts = append(parts, fmt.Sprintf("restore %s %s %d", r.ID, r.Snapshot, r.Condition))
+	}
+	for _, p := range a.pending {
+		parts = append(parts, "pending "+p.Operation+" "+string(p.Last))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n") + "\n" + a.signature()
+}
+
 // listRoot lists the root of the destination without following anything.
 // An entry named after an operation whose type cannot be read is kept as
 // unobservable, for the handover to classify; any other is an error.

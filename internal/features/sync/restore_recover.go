@@ -73,25 +73,29 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 	if err != nil {
 		return RestoreRecovery{}, errDestination(path, "%v", err)
 	}
-	rec := RestoreRecovery{ManifestPath: request.ManifestPath, Destination: path, Action: RecoverNothing,
-		destVolume: volume, destSegments: segments}
 	if len(segments) == 0 {
-		return rec, errDestination(path, "is the root of a volume; choose a directory")
+		return RestoreRecovery{}, errDestination(path, "is the root of a volume; choose a directory")
 	}
 	scope, err := s.files.OpenScope(volume)
 	if errors.Is(err, fs.ErrNotExist) {
-		return rec, errDestination(path, "volume %s is not available", volume)
+		return RestoreRecovery{}, errDestination(path, "volume %s is not available", volume)
 	}
 	if err != nil {
-		return rec, errDestination(path, "open volume %s: %v", volume, err)
+		return RestoreRecovery{}, errDestination(path, "open volume %s: %v", volume, err)
 	}
 	defer func() { _ = scope.Close() }()
 	name := strings.Join(segments, "/")
 	// Step 1: a destination with nothing to recover concludes at once,
-	// before the manifest is even read (ADR 0006 §11).
-	if state, nothing, err := nothingToRecover(scope, path, name); err != nil || nothing {
-		rec.State = state
-		return rec, err
+	// before the manifest is even read (ADR 0006 §11). A refusal there
+	// reports nothing: no recovery was planned.
+	state, nothing, err := nothingToRecover(scope, path, name)
+	if err != nil {
+		return RestoreRecovery{}, err
+	}
+	rec := RestoreRecovery{ManifestPath: request.ManifestPath, Destination: path, State: state, Action: RecoverNothing,
+		destVolume: volume, destSegments: segments}
+	if nothing {
+		return rec, nil
 	}
 	// Step 2: the recovery may write; the manifest is required.
 	manifest, err := s.manifests.Read(request.ManifestPath)
@@ -99,7 +103,7 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 		return rec, err
 	}
 	rec.Game = manifest.Game
-	a, err := readArea(scope, path, name, manifest.Game.ID)
+	a, err := readStableArea(scope, path, name, manifest.Game.ID)
 	if err != nil {
 		return rec, err
 	}
@@ -123,9 +127,11 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 		rec.Action = RecoverAreaMarker
 	} else {
 		// While another process holds the lock, a restore is running: what it
-		// is writing is not judged.
+		// is writing is not judged. The lock is probed now, not as the listing
+		// of the root saw it: a restore that took it after that listing may
+		// have journaled since.
 		running := len(a.pending) > 0 || len(a.interventions) > 0
-		if !underLock && a.root.Lock && running && lockBusy(scope, join(name, backup.RestoreLockName)) {
+		if !underLock && running && lockBusy(scope, join(name, backup.RestoreLockName)) {
 			return rec, errDestination(path, "another restore is running in this area; run it again once it ends")
 		}
 		for _, intervention := range a.interventions {
@@ -461,7 +467,7 @@ func (o *operation) resumeAreaMarker(rec *RestoreRecovery) error {
 // destination-changed, code 1, nothing written. Only a marker of this game
 // over an area without any operation object leaves nothing to do, code 0.
 func (o *operation) markedMeanwhile(scope Scope, name, gameID string) error {
-	a, err := readArea(scope, o.target.path, name, gameID)
+	a, err := readStableArea(scope, o.target.path, name, gameID)
 	if err != nil {
 		return err
 	}
