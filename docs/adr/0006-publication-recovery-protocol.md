@@ -1183,6 +1183,19 @@ d'opération n'a rien à récupérer.
 | `<op>`, `<op>.incomplete`, receipt ou temporaire de receipt qu'aucun `journal\<op>` n'explique | Ambiguïté, code 3, rien écrit |
 | Zone marquée portant toute autre entrée hors de la grammaire | `unexpected-entry`, code 3, rien écrit |
 
+**Amendement proposé, 4 novembre 2026, en attente de ratification par le
+propriétaire.** Relevé par la revue de sécurité de B4 au SHA `0318dfb`
+(P1-01) ; ADR 0009, « Récupération », est précisé de même. À l'étape 1, seuls
+`<dest>` absent, son parent présent ou non, et un dossier ordinaire vide
+concluent aussitôt. La ligne « Zone marquée dont les seules entrées… » ne
+conclut « rien à récupérer », code 0, qu'après le manifeste strict et la
+relecture stricte de la zone, marqueur reconnu du même jeu, grammaire,
+journaux et receipts compris, toujours sans ouvrir de session ni rien
+écrire ; un manifeste invalide, un marqueur illisible, de schéma inconnu ou
+d'un autre jeu donnent code 1. Les distinctions et le volume ne sont refaits
+que pour un état où la récupération peut écrire (étape 2). Aucune autre
+règle ne change.
+
 Pendant A3 à A6, le plan annonce « operation `<op>` pending recovery: copy
 published, receipt missing; do not use `<dest>\<op>` yet ».
 
@@ -1410,3 +1423,11 @@ dans l'installation, une source, un coffre ou une autre zone.
   normatifs : l'en-tête et le statut du §10 disaient qu'aucun code ne
   l'implémentait ; B3 l'implémente depuis `08ec0c2` (PR #11), qualifié par le
   pilote du 1er novembre 2026. Aucune règle ne change.
+- **4 novembre 2026, amendement proposé du §11, en attente de ratification
+  par le propriétaire**, relevé par la revue de sécurité de B4 (P1-01) : à
+  l'étape 1 de la récupération, seuls `<dest>` absent ou vide concluent avant
+  le manifeste ; une zone marquée sans objet d'opération n'est sans objet
+  qu'après le manifeste strict et la relecture stricte de son marqueur, du
+  même jeu, sans session ni écriture. Différence observable : avec un
+  manifeste invalide, code 1 au lieu de 0. ADR 0009 est précisé de même.
+  Aucune autre règle ne change.

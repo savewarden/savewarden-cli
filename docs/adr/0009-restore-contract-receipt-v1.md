@@ -86,6 +86,31 @@ le coffre, puis grammaire, journaux et receipts de la zone relus
 strictement. Le coffre n'est jamais ouvert. La récupération est indépendante
 du coffre et dépendante du manifeste.
 
+**Amendement proposé, 4 novembre 2026, en attente de ratification par le
+propriétaire.** Relevé par la revue de sécurité de B4 au SHA `0318dfb`
+(P1-01). Le paragraphe précédent se lit ainsi :
+
+- seuls `<dest>` absent, son parent présent ou non, et un dossier ordinaire
+  vide concluent « rien à récupérer » avant la lecture du manifeste : code 0,
+  sans session ni écriture ;
+- une zone marquée sans objet d'opération, même réduite à son marqueur, à
+  ses temporaires, à `restore.lock` et à `receipts` et `journal` vides ou
+  absents, n'est sans objet qu'après le manifeste strict et la relecture
+  stricte de la zone : marqueur relu comme le fixe le « Marqueur de zone v1 »
+  et reconnu du jeu du manifeste, grammaire, journaux et receipts ; alors
+  seulement code 0, toujours sans session ni écriture ;
+- un manifeste invalide, un marqueur illisible, de schéma inconnu ou d'un
+  autre jeu donnent code 1, sans session ni écriture ; une ambiguïté de la
+  zone reste code 3.
+
+« Zone marquée » s'entend donc d'une zone dont le marqueur est relu
+strictement et reconnu du même jeu. Différence observable : une zone marquée
+sans objet d'opération, accompagnée d'un manifeste invalide, donne code 1 et
+non plus code 0. Les distinctions et le volume ne sont refaits que lorsque la
+récupération peut écrire, comme avant. ADR 0006 §11 est précisé de même.
+Aucune autre règle ne change ; le code de `5184d51` applique déjà cette
+lecture.
+
 **Verrou.** Avec `--apply`, `restore` prend `restore.lock` de la zone par la
 même primitive que `sync.lock`, qui le crée vide s'il manque ; il ne l'écrit
 ni ne le supprime jamais, et ne le prend que dans une zone marquée : la
