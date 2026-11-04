@@ -204,8 +204,10 @@ Aucun tag ni release n'est publié par le bootstrap.
 - Une session d'écriture crée et renomme par chemin complet ; ses épingles ne
   neutralisent pas la réattribution d'une lettre de lecteur. Une lettre
   réattribuée pendant qu'une session est ouverte reste un risque résiduel,
-  pour `sync`, `snapshot` et `restore`, en attente d'une décision :
-  acceptation provisoire, ou durcissement par un amendement d'ADR 0005.
+  pour `sync`, `snapshot` et `restore`, chantier de sécurité S-01 : aucune
+  garantie technique ne l'empêche ; acceptation provisoire proposée pour la
+  seule qualification interne, durcissement d'ADR 0005 obligatoire avant
+  toute diffusion publique.
   `restore` refait ses distinctions une fois la session ouverte, ce qui
   refuse une réattribution antérieure. Ne modifiez pas les lettres de lecteur
   pendant une opération.

@@ -203,8 +203,9 @@ jamais sur le coffre.
   écrit par chemin : une lettre réattribuée, par `subst` par exemple, pendant
   qu'une restauration s'exécute n'est pas exclue, et ses épingles ne
   l'empêchent pas. C'est un risque résiduel, qui vaut aussi pour `sync` et
-  `snapshot`. Ne modifiez pas les lettres de lecteur pendant une
-  restauration.
+  `snapshot`, suivi comme chantier S-01 du
+  [modèle de sécurité](../safety-model.md#chantiers-de-sécurité-ouverts).
+  Ne modifiez pas les lettres de lecteur pendant une restauration.
 - **Coffre copié vers un autre volume** : les identités NTFS changent, chaque
   snapshot est `snapshot-modified`, la restauration est refusée, sans
   présumer une corruption. Un disque externe déplacé vers un autre ordinateur

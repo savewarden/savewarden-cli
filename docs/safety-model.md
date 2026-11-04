@@ -51,7 +51,7 @@ Limites assumées :
   résolvent aujourd'hui ; une restauration est refusée tant qu'une lettre de
   référence n'a pas de volume. B4 n'est pas une reprise après sinistre
   complète.
-- **Risque résiduel, en attente d'une décision du propriétaire.** Les
+- **Risque résiduel, chantier [S-01](#chantiers-de-sécurité-ouverts).** Les
   sessions de `platform/vault` créent et renomment **par chemin complet**.
   Leurs épingles interdisent de renommer les dossiers déjà ouverts, mais ne
   neutralisent pas la réattribution d'une lettre de lecteur. `restore` refait
@@ -59,12 +59,11 @@ Limites assumées :
   lettre réattribuée entre le plan et l'ouverture est refusée, ce que prouve
   un test Windows réel avec `subst`. Une lettre réattribuée **pendant**
   qu'une session est ouverte, après ce contrôle et avant une écriture, n'est
-  pas exclue, pour `restore` comme pour `sync` et `snapshot` : ce n'est pas
-  une protection démontrée. Deux voies : l'accepter provisoirement, hors du
-  modèle de concurrence pris en charge, en interdisant de modifier les
-  lettres de lecteur pendant une opération ; ou la fermer par des créations
-  et des renommages relatifs aux dossiers épinglés, ce qui demande un
-  amendement d'ADR 0005.
+  pas exclue, pour `restore` comme pour `sync` et `snapshot` : aucune
+  garantie technique ne l'empêche. Acceptation provisoire proposée, limitée à
+  la qualification interne de B4 sur volumes stables, sans lettre ni alias
+  modifié pendant une opération ; durcissement obligatoire avant toute
+  diffusion publique (ADR 0006 §11, amendement proposé).
 - Le garde statique ne prouve pas l'absence de tout effet indirect ; les
   tests dynamiques couvrent le comportement livré, sur leurs fixtures.
 - Sous Unix, l'adaptateur sert aux tests du contrat ; un échange suivi d'une
@@ -146,6 +145,23 @@ vérifié sur un coffre synthétique avec un binaire construit depuis
 écrits ne sont jamais réécrits : une génération publiée ou conservée, un
 staging conservé ou un journal clos restent en place ; un nouveau coffre est
 toujours possible.
+
+## Chantiers de sécurité ouverts
+
+### S-01 — Écritures indépendantes des lettres de lecteur
+
+| Champ | Valeur |
+| --- | --- |
+| Statut | **Ouvert**. Ni défaut éditorial, ni résolu |
+| Ouvert le | 4 novembre 2026 : revue de sécurité de B4, P1-02, et revues ciblées de `5184d51` et `0b7bfcf` |
+| Risque | Une lettre de lecteur réattribuée pendant qu'une session d'écriture est ouverte peut faire porter une création ou un renommage ailleurs que là où le dernier contrôle l'a vue, une source par exemple. Les épingles ne l'empêchent pas |
+| Portée | Toutes les sessions de `platform/vault` : `sync`, `snapshot` et `restore` |
+| Déjà fermé | Pour `restore`, la réattribution entre le plan et l'ouverture de la session : `TestRestoreRefusesALetterRemappedBeforeTheSession`, sur Windows réel |
+| Acceptation provisoire, proposée | Qualification interne de B4 seulement : volumes NTFS locaux stables, aucune lettre ni alias `subst` créé, retiré ou réattribué pendant une opération ; pilote interne contrôlé après ses autorisations propres. Ratification du propriétaire attendue, avec l'amendement d'ADR 0006 §11 |
+| Interdit tant que S-01 est ouvert | Présenter Savewarden comme protégeant contre une réattribution concurrente ; diffuser une version publique |
+| Sortie attendue | Amendement d'ADR 0005 ; primitives d'écriture qui ne résolvent plus de lettre une fois la session ouverte ; requalification de B2, B3 et B4 ; test Windows réel qui réattribue une lettre pendant une session ouverte et montre qu'aucune écriture ne sort de la cible contrôlée ; nouveau gate de sécurité |
+| Pistes, à évaluer | Créations et renommages relatifs aux handles des dossiers épinglés plutôt qu'à un chemin complet ; aucune n'est vérifiée |
+| Gate | **Bloquant pour toute diffusion publique.** Non bloquant pour la qualification interne de B4, dans les conditions ci-dessus |
 
 ## Preuves et confidentialité
 
