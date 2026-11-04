@@ -60,10 +60,10 @@ Limites assumées :
   un test Windows réel avec `subst`. Une lettre réattribuée **pendant**
   qu'une session est ouverte, après ce contrôle et avant une écriture, n'est
   pas exclue, pour `restore` comme pour `sync` et `snapshot` : aucune
-  garantie technique ne l'empêche. Acceptation provisoire proposée, limitée à
-  la qualification interne de B4 sur volumes stables, sans lettre ni alias
-  modifié pendant une opération ; durcissement obligatoire avant toute
-  diffusion publique (ADR 0006 §11, amendement proposé).
+  garantie technique ne l'empêche. Acceptation provisoire, ratifiée par le
+  propriétaire le 4 novembre 2026, limitée à la qualification interne de B4
+  sur volumes stables, sans lettre ni alias modifié pendant une opération ;
+  durcissement obligatoire avant toute diffusion publique (ADR 0006 §11).
 - Le garde statique ne prouve pas l'absence de tout effet indirect ; les
   tests dynamiques couvrent le comportement livré, sur leurs fixtures.
 - Sous Unix, l'adaptateur sert aux tests du contrat ; un échange suivi d'une
@@ -157,7 +157,7 @@ toujours possible.
 | Risque | Une lettre de lecteur réattribuée pendant qu'une session d'écriture est ouverte peut faire porter une création ou un renommage ailleurs que là où le dernier contrôle l'a vue, une source par exemple. Les épingles ne l'empêchent pas |
 | Portée | Toutes les sessions de `platform/vault` : `sync`, `snapshot` et `restore` |
 | Déjà fermé | Pour `restore`, la réattribution entre le plan et l'ouverture de la session : `TestRestoreRefusesALetterRemappedBeforeTheSession`, sur Windows réel |
-| Acceptation provisoire, proposée | Qualification interne de B4 seulement : volumes NTFS locaux stables, aucune lettre ni alias `subst` créé, retiré ou réattribué pendant une opération ; pilote interne contrôlé après ses autorisations propres. Ratification du propriétaire attendue, avec l'amendement d'ADR 0006 §11 |
+| Acceptation provisoire | Qualification interne de B4 seulement : volumes NTFS locaux stables, aucune lettre ni alias `subst` créé, retiré ou réattribué pendant une opération ; pilote interne contrôlé après ses autorisations propres. Ratifiée par le propriétaire le 4 novembre 2026, avec l'amendement d'ADR 0006 §11. Elle ne prouve pas l'innocuité du risque : elle borne les conditions dans lesquelles B4 continue |
 | Interdit tant que S-01 est ouvert | Présenter Savewarden comme protégeant contre une réattribution concurrente ; diffuser une version publique |
 | Sortie attendue | Amendement d'ADR 0005 ; primitives d'écriture qui ne résolvent plus de lettre une fois la session ouverte ; requalification de B2, B3 et B4 ; test Windows réel qui réattribue une lettre pendant une session ouverte et montre qu'aucune écriture ne sort de la cible contrôlée ; nouveau gate de sécurité |
 | Pistes, à évaluer | Créations et renommages relatifs aux handles des dossiers épinglés plutôt qu'à un chemin complet ; aucune n'est vérifiée |

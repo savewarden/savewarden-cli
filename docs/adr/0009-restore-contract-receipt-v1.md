@@ -88,8 +88,8 @@ le coffre, puis grammaire, journaux et receipts de la zone relus
 strictement. Le coffre n'est jamais ouvert. La récupération est indépendante
 du coffre et dépendante du manifeste.
 
-**Amendement proposé, 4 novembre 2026, en attente de ratification par le
-propriétaire.** Relevé par la revue de sécurité de B4 au SHA `0318dfb`
+**Amendement, 4 novembre 2026, ratifié par le propriétaire le même jour.**
+Relevé par la revue de sécurité de B4 au SHA `0318dfb`
 (P1-01). Le paragraphe précédent se lit ainsi :
 
 - seuls `<dest>` absent, son parent présent ou non, et un dossier ordinaire

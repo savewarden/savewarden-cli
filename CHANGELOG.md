@@ -205,7 +205,7 @@ Aucun tag ni release n'est publié par le bootstrap.
   neutralisent pas la réattribution d'une lettre de lecteur. Une lettre
   réattribuée pendant qu'une session est ouverte reste un risque résiduel,
   pour `sync`, `snapshot` et `restore`, chantier de sécurité S-01 : aucune
-  garantie technique ne l'empêche ; acceptation provisoire proposée pour la
+  garantie technique ne l'empêche ; acceptation provisoire, ratifiée, pour la
   seule qualification interne, durcissement d'ADR 0005 obligatoire avant
   toute diffusion publique.
   `restore` refait ses distinctions une fois la session ouverte, ce qui

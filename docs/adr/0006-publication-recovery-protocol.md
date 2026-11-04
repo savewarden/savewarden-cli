@@ -1015,8 +1015,8 @@ marqueur de zone sont fixés par ADR 0009.
   une capacité complète de reprise après sinistre, et un lot dédié réexaminera
   la restauration avec des références hors ligne.
 
-**Amendement proposé, 4 novembre 2026, en attente de ratification par le
-propriétaire : fenêtre résiduelle des lettres de lecteur.** Relevé par la
+**Amendement, 4 novembre 2026, ratifié par le propriétaire le même jour :
+fenêtre résiduelle des lettres de lecteur.** Relevé par la
 revue de sécurité de B4 (P1-02) et ses revues ciblées.
 
 - Les distinctions sont faites au plan, refaites une fois la session ouverte
@@ -1213,8 +1213,8 @@ d'opération n'a rien à récupérer.
 | `<op>`, `<op>.incomplete`, receipt ou temporaire de receipt qu'aucun `journal\<op>` n'explique | Ambiguïté, code 3, rien écrit |
 | Zone marquée portant toute autre entrée hors de la grammaire | `unexpected-entry`, code 3, rien écrit |
 
-**Amendement proposé, 4 novembre 2026, en attente de ratification par le
-propriétaire.** Relevé par la revue de sécurité de B4 au SHA `0318dfb`
+**Amendement, 4 novembre 2026, ratifié par le propriétaire le même jour.**
+Relevé par la revue de sécurité de B4 au SHA `0318dfb`
 (P1-01) ; ADR 0009, « Récupération », est précisé de même. À l'étape 1, seuls
 `<dest>` absent, son parent présent ou non, et un dossier ordinaire vide
 concluent aussitôt. La ligne « Zone marquée dont les seules entrées… » ne
@@ -1453,8 +1453,8 @@ dans l'installation, une source, un coffre ou une autre zone.
   normatifs : l'en-tête et le statut du §10 disaient qu'aucun code ne
   l'implémentait ; B3 l'implémente depuis `08ec0c2` (PR #11), qualifié par le
   pilote du 1er novembre 2026. Aucune règle ne change.
-- **4 novembre 2026, amendement proposé du §11, en attente de ratification
-  par le propriétaire**, relevé par la revue de sécurité de B4 (P1-01) : à
+- **4 novembre 2026, amendement du §11, ratifié par le propriétaire le même
+  jour**, relevé par la revue de sécurité de B4 (P1-01) : à
   l'étape 1 de la récupération, seuls `<dest>` absent ou vide concluent avant
   le manifeste ; une zone marquée sans objet d'opération n'est sans objet
   qu'après le manifeste strict et la relecture stricte de son marqueur, du
@@ -1466,8 +1466,8 @@ dans l'installation, une source, un coffre ou une autre zone.
   statut du §11 disaient qu'aucun code ne l'implémentait ; B4 l'implémente
   sur `feat/b4-restore`, livré par la PR B4, non encore fusionnée ni
   qualifiée par le pilote. Aucune règle ne change.
-- **4 novembre 2026, amendement proposé du §11, en attente de ratification
-  par le propriétaire** : fenêtre résiduelle des lettres de lecteur nommée,
+- **4 novembre 2026, amendement du §11, ratifié par le propriétaire le même
+  jour** : fenêtre résiduelle des lettres de lecteur nommée,
   relevée par la revue de sécurité de B4 (P1-02) et ses revues ciblées. Une
   lettre réattribuée pendant une session ouverte n'est empêchée par aucune
   garantie technique, pour `sync`, `snapshot` et `restore`. Acceptation
