@@ -56,9 +56,11 @@ par [ADR 0006](../adr/0006-publication-recovery-protocol.md).
 - **Aucun lien suivi.** Les sources sont inventoriées par le parcours
   d'[`inspect`](inspect.md) ; le coffre est lu de la même façon. Liens,
   jonctions, points d'analyse et placeholders sont signalés, jamais traversés.
-- **Coffre distinct.** Le coffre ne peut ni être l'installation, ni la
-  contenir, ni s'y trouver, même sous un autre nom, par exemple un nom court
-  8.3.
+- **Coffre distinct, sur une même lettre.** Le coffre ne peut ni être
+  l'installation, ni la contenir, ni s'y trouver, même sous un autre nom, par
+  exemple un nom court 8.3. Ce contrôle n'a lieu que si le coffre et
+  l'installation portent la même lettre de lecteur : un alias de lettre le
+  contourne, voir les [limites](#limites).
 - **Aucune adoption.** Un dossier non vide qui n'est pas un coffre Savewarden
   est refusé, jamais adopté.
 - **Sortie stable.** Deux plans sur un état inchangé sont identiques, octet
@@ -278,6 +280,15 @@ d'état, au receipt ou au plan pour l'état du coffre.
   qualifié ; FAT32, exFAT et les lecteurs réseau sont refusés.
 - **Même disque physique** : deux volumes d'un même disque ne sont pas
   détectés ; un lecteur `subst` n'est pas reconnu comme redirection.
+- **Alias de lettre : n'en employez aucun.** Avec deux lettres différentes,
+  le coffre et l'installation ne sont pas comparés. Sur Windows réel, un
+  coffre désigné par l'alias `subst` d'un sous-dossier de l'installation, ou
+  sur la vraie lettre quand le manifeste nomme l'installation par l'alias de
+  son parent, est publié dans l'installation, code 0. Rien n'y est remplacé
+  ni supprimé. Tant que le chantier S-02 du
+  [modèle de sécurité](../safety-model.md#chantiers-de-sécurité-ouverts)
+  est ouvert, ne désignez ni le coffre ni les chemins du manifeste par un
+  alias de lettre. Cela vaut aussi pour `snapshot`.
 - **Confidentialité.** La sortie contient des chemins locaux, et les
   diagnostics des identités de fichiers NTFS, dont le numéro de série du
   volume ; anonymisez-la avant tout partage.

@@ -148,7 +148,8 @@ le jeu : copiez vous-même les fichiers voulus, jeu fermé. Détails :
 - `inspect` ne lit que les dossiers déclarés. Il ne suit aucun lien,
   jonction ni point d'analyse, et ne lit pas les placeholders cloud.
 - `sync` refuse tout dossier non vide qui n'est pas un coffre Savewarden et
-  tout coffre qui chevauche l'installation. Sans `--apply`, il n'écrit rien.
+  tout coffre qui chevauche l'installation sur la même lettre de lecteur.
+  Sans `--apply`, il n'écrit rien.
 - `--apply` n'écrit que dans le coffre, par créations exclusives et
   renommages qui ne remplacent rien ; chaque publication passe par un staging
   vérifié en SHA-256 et un journal, et toute ambiguïté arrête tout en code 3.
@@ -158,8 +159,14 @@ le jeu : copiez vous-même les fichiers voulus, jeu fermé. Détails :
 - Les sauvegardes sources et les snapshots approuvés ne sont jamais supprimés.
   Un snapshot absent ou altéré est signalé, jamais réparé.
 - `restore` n'écrit que dans une zone qu'il marque, jamais dans le coffre, le
-  jeu ou une source, y compris à travers un alias de lecteur ; une séparation
-  qui ne peut pas être prouvée est refusée.
+  jeu ou une source ; une séparation qui ne peut pas être prouvée est
+  refusée.
+- **N'employez aucun alias de lettre de lecteur**, `subst` par exemple, ni
+  pour `--vault` ou `--to`, ni dans le manifeste. Un alias qui désigne un
+  dossier contourne les distinctions de `sync`, `snapshot` et `restore` : un
+  coffre ou une zone peut alors être créé dans l'installation, une source ou
+  le coffre. Rien n'y est remplacé ni supprimé. Défaut ouvert, chantier
+  S-02 du [modèle de sécurité](docs/safety-model.md#chantiers-de-sécurité-ouverts).
 - Une copie sur le même disque physique ne protège pas contre la panne du disque.
 
 Windows est le pilote fonctionnel. La CI teste sur Windows, Linux et macOS ;
