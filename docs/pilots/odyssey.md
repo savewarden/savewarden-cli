@@ -186,9 +186,13 @@ versionné.
 
 ### Protocole B4
 
-Exécuté par le propriétaire après la fusion de B4, avec un binaire du commit
-de fusion, depuis le coffre du pilote B3, **lu seulement**, vers une zone
-neuve hors du jeu, du coffre et de toute source. L'agent n'y accède pas.
+Exécuté par le propriétaire après la fusion de B4, avec un binaire compilé
+depuis un worktree détaché au commit de fusion `4197317`, depuis le coffre du
+pilote B3, **lu seulement**, vers une zone neuve hors du jeu, du coffre et de
+toute source. L'agent n'y accède pas. Conditions du chantier S-01 du
+[modèle de sécurité](../safety-model.md#chantiers-de-sécurité-ouverts) :
+volumes NTFS locaux stables ; aucune lettre ni alias `subst` créé, retiré ou
+réattribué pendant le pilote.
 
 1. Empreinte complète du coffre : inventaire et contenu.
 2. `snapshot`, plan seul : le snapshot du pilote B3 est intact.
@@ -208,14 +212,54 @@ personnel. La reprise manuelle des fichiers dans le jeu reste hors du pilote ;
 crashs, récupération, distinctions et concurrence restent prouvés par les
 tests synthétiques, les tests Windows réels et la CI.
 
+### Résultat B4 — 5 novembre 2026
+
+Exécuté par le propriétaire sous Windows 11, après la fusion de B4, avec le
+kit du propriétaire en révision 2 : un script qui enchaîne les sept étapes, et
+le binaire compilé depuis un worktree détaché au commit de fusion `4197317`.
+Préflight conforme : empreintes du script et du binaire, worktree propre,
+mode d'essai désactivé, aucun alias `subst`, zone absente. Avant le
+lancement, le propriétaire a recoupé le snapshot avec l'attestation du pilote
+B3 : même coffre, même jeu, snapshot issu de la génération attestée, receipt
+de `current` attesté, manifeste inchangé depuis B3, 5 sur 5.
+
+- **101 contrôles sur 101**, `RestorePilotPassed = True`.
+- Plans de `sync` et de `snapshot` : code `0` ; le snapshot du pilote B3, seul
+  publié, ni dégradé ni incomplet ; coffre inchangé.
+- Plan de `restore`, deux fois : code `0`, identiques octet pour octet,
+  snapshot `verified`, nouvelle zone sur un volume NTFS fixe, **14 fichiers et
+  9 566 606 octets**, aucune anomalie ; zone toujours absente.
+- `restore --apply` : code `0`, `published restore`, 14 fichiers et
+  9 566 606 octets vérifiés par SHA-256 ; S-01 tenu juste avant et juste
+  après.
+- Relecture : zone réduite à sa structure et à la restauration ; receipt de
+  restauration chaîné au snapshot et à la génération qu'il copiait ;
+  `inspect` de la restauration : fichiers, tailles, dates et SHA-256 égaux au
+  receipt du snapshot.
+- `restore --recover` sans `--apply` : code `0`, rien à récupérer ; nouveau
+  plan : code `0`, la restauration signalée `snapshot-already-restored` en
+  information ; zone inchangée.
+- Coffre identique à l'étape 1, 66 entrées, autant qu'à la fin du pilote B3 ;
+  plans de `sync` et de `snapshot` identiques octet pour octet ; manifeste
+  inchangé ; aucun alias `subst`, lettres et volumes inchangés.
+
+La restauration publiée reste dans la zone dédiée, remise au propriétaire.
+Qualification fonctionnelle du parcours nominal prononcée par le propriétaire
+le 6 novembre 2026, après examen du résumé, par sa décision explicite ; le
+CTO a rendu le même jour un avis favorable, distinct. Détail dans
+[le rapport B4](../validation/b4.md#pilote-b4).
+Aucune sortie brute, aucune empreinte de sauvegarde, aucun receipt réel,
+aucun identifiant d'opération, aucun nom de profil ni aucun chemin personnel
+n'est versionné.
+
 B2 copie seulement après plan, choix explicite de destination et
 autorisation ; pas de suppression de la source. L'ancien coffre du pilote,
 non vide et sans marqueur, est refusé par la règle générique du coffre,
 jamais adopté, et son snapshot `20261009T183208-cacd3cae` n'est ni lu ni
 importé. B3 ajoute des snapshots neufs et immuables, qualifiés sur ce pilote
 le 1er novembre 2026. B4 restaure un
-snapshot dans une zone **isolée**, sans écrire le coffre ; son pilote reste à
-exécuter. B5 contrôlera manifestes/receipts/hash et
+snapshot dans une zone **isolée**, sans écrire le coffre ; son pilote nominal
+a réussi le 5 novembre 2026. B5 contrôlera manifestes/receipts/hash et
 validera le pilote complet avant une RC.
 
 Les autorisations d'un lot ne valent pas consentement pour relocation,

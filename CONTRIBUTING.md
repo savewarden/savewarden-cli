@@ -56,9 +56,9 @@ package concerné, ou s'appuyer sur la CI, sans désactiver cette protection. Un
 Windows ne remplace jamais l'exécution des tests Linux/macOS.
 La CI exécute les mêmes gates sur `ubuntu-24.04`, `windows-2025` et `macos-15`.
 Les tests Windows réels de `cmd/savewarden` durent plusieurs minutes : de 5 à
-6 minutes sur un poste récent, environ 8 minutes sur `windows-2025`. Par
-marge, le délai de `go test` est porté à 30 minutes, au-delà des 10 minutes
-par défaut, en local comme en CI.
+6 minutes sur un poste récent, de 8 à 11 minutes sur `windows-2025` selon le
+run, parfois au-delà des 10 minutes par défaut de `go test`. Leur délai est
+porté à 30 minutes, en local comme en CI.
 
 Au premier commit, `git diff --exit-code` ne peut pas constater des fichiers
 non suivis. Comparer aussi les empreintes de `go.mod`/`go.sum` avant et après un
