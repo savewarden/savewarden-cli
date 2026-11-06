@@ -1,7 +1,7 @@
 # Savewarden — Plan B5 : durcissement S-01 et S-02, diagnostic `doctor` et release candidate
 
-> **Statut : v0.2 — CADRAGE RÉVISÉ, soumis à une revue ciblée puis à l'acceptation du propriétaire : arbitrages Q1 à Q9 du 6 novembre 2026 intégrés ; revue indépendante r2 et revue CTO intégrées ; S-02 intégré à B5a ; aucun ADR rédigé ni accepté ; aucun GO de développement**
-> Version du plan : `0.2` — 6 novembre 2026
+> **Statut : v0.3 — CADRAGE RÉVISÉ, soumis à l'acceptation explicite du propriétaire : corrections ciblées C1 à C4 de la revue CTO de `1bdeb01` (§0.5) ; décisions du propriétaire postérieures à `1bdeb01` intégrées (§0.3) ; v0.2 non acceptée ; plan local, sans push ; aucun ADR rédigé ni accepté ; aucun GO de développement**
+> Version du plan : `0.3` — 6 novembre 2026
 > Lot : **B5**, cible `release/v0.1.0-a1`
 > Cadre : [plan directeur v0.1](Savewarden_Plan_Bootstrap_Architecture_GitOps_v0.1.md) §7 B5,
 > [plan B4 v0.2](Savewarden_Plan_B4_Restauration_v0.2.md), [AGENTS.md](../AGENTS.md),
@@ -36,6 +36,10 @@ Le propriétaire a fixé les points de cadrage suivants.
   - Il est consigné comme chantier ouvert, avec une interdiction
     opérationnelle et les garanties écrites corrigées, par la PR #15.
   - **Les questions Q1 à Q9 sont arbitrées** (§0.3).
+  - **La revue CTO ciblée de `1bdeb01`** confirme le P0 S-02 et demande une
+    v0.3 ciblée : quatre P1, C1 à C4, et deux formulations trop fortes. Le
+    propriétaire tranche C2 et C4 et confirme trois décisions prises après
+    `1bdeb01` (§0.3, §0.5).
 
 B5 vise la release candidate. Ce plan prépare cette candidate sans la
 publier : aucun tag, aucune release, aucune publication de package. La
@@ -62,26 +66,26 @@ de lecteur une fois ouverte, et aucune lettre ne doit masquer un dossier.
 | # | Décision | Raison principale | Statut | Où |
 | --- | --- | --- | --- | --- |
 | T1 | **Quatre PR successives** vers `release/v0.1.0-a1` : **B5a** S-01 et S-02 ; **B5b** lecteurs durcis et points ouverts ; **B5c** `doctor` ; **B5d** campagne pilote et préparation de la RC. Chacune a sa revue, sa CI et son GO de fusion | `platform/vault` est le package le plus sensible : il se relit seul. `doctor` repose sur les lecteurs durcis par B5b. Précédent : B2 en trois PR. Découpage retenu par la revue CTO | Proposée | §8 |
-| T2 | **S-01, option A, sous conditions : la session écrit par un chemin de volume tiré de ses épingles.** Elle ouvre en deux branches, cible existante ou absente. Elle contrôle la cohérence de sa chaîne, relit le chemin final de chaque nouveau handle et s'invalide au premier défaut de périphérique. Ses erreurs ne nomment jamais sa base. Aucune API d'écriture nouvelle | Les épingles empêchent déjà de renommer les dossiers du chemin ; seule la lettre restait résolue à chaque appel. L'option B demanderait `NtCreateFile`, `SetFileInformationByHandle` et `unsafe`, interdits partout par ADR 0005 ; elle serait un nouvel arbitrage, jamais un repli | Arbitrée (Q1) | §3.1, §4.1 |
+| T2 | **S-01, option A, sous conditions : la session écrit par un chemin de volume tiré de ses épingles.** Elle ouvre en deux branches, cible existante ou absente. Elle contrôle la cohérence de sa chaîne, relit le chemin final de chaque nouveau handle, et de la source et de la destination de chaque `Move`, et s'invalide au premier défaut de périphérique. Ses erreurs ne nomment jamais sa base. Aucune API d'écriture nouvelle | Les épingles empêchent déjà de renommer les dossiers du chemin ; seule la lettre restait résolue à chaque appel. L'option B demanderait `NtCreateFile`, `SetFileInformationByHandle` et `unsafe`, interdits partout par ADR 0005 ; elle serait un nouvel arbitrage, jamais un repli | Arbitrée (Q1) | §3.1, §4.1 |
 | T3 | **Hypothèses Windows confrontées à des tests réels avant le code** : HW1 à HW12 pour B5a, HD1 et HD2 pour B5c (§5), chacune dans un commit de tests seuls. Si une hypothèse tombe : arrêt, compte rendu, arbitrage du propriétaire. Aucun repli silencieux | Même discipline qu'ADR 0006 : les hypothèses Windows sont prouvées avant le code qui en dépend | Proposée | §5, §8 |
-| T4 | **Contrôles sous session sur les chaînes tenues.** `sync`, `snapshot`, `restore` et chacune de leurs récupérations comparent la chaîne tenue par la session aux chaînes de référence, dans les deux sens, **après `Open` et avant toute écriture, verrou compris**. L'ordre est fixe. Une observation impossible donne le code 1, sans rien écrire. La `Session` gagne des requêtes en lecture seule, changement d'interface déclaré | La comparaison de la seule racine ne prouve pas l'absence de recouvrement. La fenêtre de `sync` n'est pas fermée par la relecture du marqueur : des écritures la précèdent (`apply.go:350-388`) | Proposée | §4.3 |
+| T4 | **Contrôles sous session sur les chaînes tenues.** `sync`, `snapshot`, `restore` et chacune de leurs récupérations comparent la chaîne tenue par la session aux chaînes de référence, dans les deux sens, **après `Open` et avant toute écriture, verrou compris**. L'ordre est fixe : `Open`, contrôles, création d'une racine absente et contrôles repris, verrou, premières mutations. Le parent d'une cible absente n'ancre que la création ; il n'est jamais cherché dans une chaîne de référence (C1). Une observation impossible donne le code 1, sans rien écrire. La `Session` gagne des requêtes en lecture seule, changement d'interface déclaré | La comparaison de la seule racine ne prouve pas l'absence de recouvrement. La fenêtre de `sync` n'est pas fermée par la relecture du marqueur : des écritures la précèdent (`apply.go:350-388`) | Proposée | §4.3 |
 | T5 | **Requalification de B2, B3 et B4**, exigée par la sortie de S-01 et de S-02. Les suites complètes restent inchangées. Le différentiel binaire des sorties de `sync`, `snapshot`, `restore` et `inspect` se fait contre le binaire de `a59d787`. Il est normalisé (identifiants d'opération, dates), couvre les chemins de succès et d'erreur et exclut les seuls changements nommés au §7.2. Tests réels de réattribution pendant une session | Les primitives changent de chemin, pas de comportement, hors des refus nommés : la preuve doit le montrer | Proposée | §9, §12 |
 | T6 | **Commentaires de `platform/vault`** (point B4), écrits dans B5a : une session s'ouvre sur un coffre ou sur une zone, et écrit par le chemin de volume de ses épingles | Le package est rouvert par S-01 ; c'est le seul moment où le toucher ne coûte pas une revue de plus | Proposée | §7 |
 | T7 | **Lecture stable du coffre** (point B4). Reproduire sur faux la fenêtre de `readProbing` pour le domaine courant, le domaine des snapshots et les plans de récupération. Si elle est reproduite : lecture stable, puis sonde du verrou indépendante de la liste, comme pour la zone. Sinon, consigner la preuve et ne rien changer | Le défaut est probable, pas démontré. Il n'écrit rien et donne un faux code 3, sûr mais trompeur. `doctor` lira le coffre avec ce lecteur | Proposée | §4.4 |
-| T8 | **Budgets de lecture** (P2-3 de B3, point B4). Ils portent sur les métadonnées seulement, par lecture, jamais sur un contenu vérifié contre son receipt. Celui-ci est haché en flux, borné par les tailles et les nombres de son receipt. Les valeurs sont dérivées d'un dimensionnement écrit (§4.4) ; celle des octets est mesurée en M1. Un budget épuisé donne le code 1 et un message distinct dont l'issue est un coffre neuf | Un coffre forgé ne doit pas épuiser la mémoire. Un budget sur le contenu ou par exécution refuserait `--verify` et des coffres légitimes | Arbitrée (Q9) | §4.4 |
+| T8 | **Budgets de lecture** (P2-3 de B3, point B4). Ils portent sur les métadonnées seulement, par lecture, jamais sur un contenu vérifié contre son receipt. Celui-ci est haché en flux, borné par les tailles et les nombres de son receipt. Les valeurs de comptage sont des hypothèses de dimensionnement écrites (§4.4), confirmées par M1 ; celle des octets est mesurée en M1. Un budget épuisé donne le code 1 et un message distinct dont l'issue est un coffre neuf | Un coffre forgé ne doit pas épuiser la mémoire. Un budget sur le contenu ou par exécution refuserait `--verify` et des coffres légitimes | Arbitrée (Q9) | §4.4 |
 | T9 | **Points ouverts de B3** traités dans B5b selon le §0.2 : P2-4 avec un amendement d'ADR 0008 accepté avant son code ; N2 par une méthode marqueur ; plafond de profondeur JSON ; verrou de la récupération de `current` signalé ; `.gitignore`. Tolérance de B2 reportée | Décision du propriétaire du 5 novembre 2026. `doctor` dépend de P2-4 : il doit distinguer « illisible » de « modifié » | Proposée ; report arbitré (Q5) | §0.2 |
 | T10 | **Noms de la matrice B4** : les six noms du plan deviennent des tests nommés ou des sous-tests, sans changement d'assertion ; la correspondance est consignée | Décision du propriétaire du 5 novembre 2026 ; commit de tests seuls | Décidée le 5 novembre | §8 |
 | T11 | **`doctor` est une feature, `features/doctor`.** Elle possède son orchestration et son rapport et définit ses ports. `sync` lui fournit des **relevés** en lecture seule, rendus dans de nouveaux types d'observation de `entities/backup`. `app` passe un adaptateur étroit. Nouvelle frontière : **ADR 0010** et amendement d'ADR 0004 | Les trois options sont comparées avec leurs coûts au §3.4. La feature isole du code de lecture à côté des moteurs d'écriture, et les tests d'imports la contrôlent | Proposée | §3.4 |
-| T12 | **`doctor` n'écrit jamais et ne gêne aucune écriture.** `app` ne lui donne ni `Writer`, ni session, ni verrou. Il ne sonde aucun verrou et n'ouvre jamais `sync.lock` ni `restore.lock`, qu'il classe par l'entrée de répertoire. Il n'épingle rien et partage lecture, écriture et suppression à chaque ouverture | Sonder le verrou, ou seulement le lister par `Lstat`, l'ouvrirait : `os.Root.Lstat` ouvre l'entrée, et le `Lock` sans partage d'un `sync` concurrent échouerait (X1 de B4) | Proposée | §4.5 |
+| T12 | **`doctor` n'écrit jamais et ne gêne aucune écriture : gate de B5c.** Aucune écriture concurrente n'échoue de son fait, en `rolled back` ni autrement. `app` ne lui donne ni `Writer`, ni session, ni verrou. Il ne sonde aucun verrou et n'ouvre jamais `sync.lock` ni `restore.lock`, qu'il classe par l'entrée de répertoire. Il n'épingle rien et partage lecture, écriture et suppression à chaque ouverture. Une ouverture que HD2 ne prouve pas inoffensive n'est jamais faite (§4.5) | Sonder le verrou, ou seulement le lister par `Lstat`, l'ouvrirait : `os.Root.Lstat` ouvre l'entrée, et le `Lock` sans partage d'un `sync` concurrent échouerait (X1 de B4). Une exécution sans dommage ne prouve pas la non-interférence (C4) | Arbitrée (C4) | §4.5 |
 | T13 | **Portée de `doctor`** : manifeste strict ; lettres (S-02) ; chemins, distinctions et liens ; coffre (marqueur, `current`, générations conservées, journaux, receipts, snapshots, enveloppe) ; zones désignées par `--area`, répétable, **un constat par zone**. Le coffre ne connaît pas les zones : `doctor` ne les cherche pas | Le diagnostic porte sur ce que l'utilisateur désigne, comme toutes les commandes. Aucune découverte | Proposée | §4.5 |
-| T14 | **Deux niveaux.** Par défaut, un diagnostic **structurel**, sans lire le contenu. Avec `--verify`, `doctor` relit en flux `current`, chaque génération conservée et chaque snapshot publié, et les compare à leur receipt. **Les restaurations remises ne sont jamais ouvertes pour leur contenu, listées ni lues**, même avec `--verify` : présence, type et identité seulement | Le défaut reste rapide ; `--verify` comble la limite de B3. ADR 0006 §11 et ADR 0009 restent inchangés ; vérifier une copie remise passe par un `inspect` explicite | Arbitrée (Q3) | §4.5 |
-| T15 | **Codes de `doctor`** : `0`, `2`, `3`, `1`, avec une **table normative par domaine** fixée par ADR 0010 (§4.5). Règle : jamais moins sévère que la commande qui agirait. Les issues normales sont des informations. Une opération en attente non départagée est un constat distinct, code 3, avec pour action `--recover` sans `--apply`. Le code 1 est réservé à l'absence de rapport | Mêmes sens qu'ADR 0003, 0007 et 0009 : `0` fiable, `2` à examiner, `3` à récupérer, `1` à corriger. Une règle uniforme contredirait l'existant | Arbitrée (Q4) | §4.5 |
+| T14 | **Deux niveaux.** Par défaut, un diagnostic **structurel**, sans lire le contenu. Avec `--verify`, `doctor` relit en flux `current`, chaque génération conservée et chaque snapshot publié, et les compare à leur receipt ; si HD2 exclut la lecture de `current` ou des générations conservées, seuls les snapshots publiés sont relus (§4.5). **Les restaurations remises ne sont jamais ouvertes pour leur contenu, listées ni lues**, même avec `--verify` : présence, type et identité seulement | Le défaut reste rapide ; `--verify` comble la limite de B3. ADR 0006 §11 et ADR 0009 restent inchangés ; vérifier une copie remise passe par un `inspect` explicite | Arbitrée (Q3) | §4.5 |
+| T15 | **Codes de `doctor`** : `0`, `2`, `3`, `1`, avec une **matrice normative par domaine** fixée par ADR 0010 (§4.5). `1` : aucun rapport fiable. `3` : tout état qu'une commande de référence classe 3, et tout état indécidable. `2` : anomalie classée 2 par une commande de référence, refus persistant de celle-ci, ou domaine sur lequel rien n'est conclu. `0` : information. La commande de référence est nommée ligne par ligne ; le code du rapport est le plus haut de ses constats. Une opération en attente non départagée est un constat distinct, code 3, avec pour action `--recover` sans `--apply` | Mêmes sens qu'ADR 0003, 0007 et 0009 : `0` fiable, `2` à examiner, `3` à récupérer, `1` à corriger. Une règle uniforme contredirait l'existant ; un ordre global sur des commandes de sémantiques différentes aussi (C3) | Arbitrée (Q4) ; matrice précisée (C3) | §4.5 |
 | T16 | **Campagne pilote Odyssey obligatoire**, rotation comprise (jouer et sauvegarder entre deux `--apply`). Elle est exécutée par le propriétaire avec un binaire qu'il reconstruit par le GoReleaser épinglé, sur le commit candidat de B5d. `doctor` est passé, en lecture seule, sur les coffres B2c et B3 et sur la zone B4 ; le coffre historique est exclu | S-01 réécrit justement les créations et les renommages que la campagne doit qualifier. Aucune « absence déclarée » n'est admise pour clore B5 | Proposée | §11 |
-| T17 | **Préparation de la RC** (B5d) : build de contrôle en snapshot par `go run` de GoReleaser à version exacte, Windows amd64 seul, sans hook, sans artefact, `release: disable: true`. Le vérificateur de pins refuse `upload-artifact` et les permissions d'écriture. CONTRIBUTING et `gitops.md` distinguent ce build de contrôle du pipeline de release. Aucun changement du Go de production en B5d | Plan directeur §5.2 point 6 et §5.3. Sur un dépôt public, un artefact de workflow est un binaire distribué. `platform/vault` renvoie `ErrUnsupported` hors Windows | Arbitrée (Q8) | §4.6 |
+| T17 | **Préparation de la RC** (B5d) : build de contrôle en snapshot par `go run` de GoReleaser à version stable exacte, v2.20.0 au moins, Windows amd64 seul, sans hook, sans artefact, `release: disable: true`. Le vérificateur de pins refuse `upload-artifact` et les permissions d'écriture. CONTRIBUTING et `gitops.md` distinguent ce build de contrôle du pipeline de release. Aucun changement du Go de production en B5d | Plan directeur §5.2 point 6 et §5.3. Sur un dépôt public, un artefact de workflow est un binaire distribué. `platform/vault` renvoie `ErrUnsupported` hors Windows | Arbitrée (Q8) | §4.6 |
 | T18 | **Extension à Cyberpunk 2077 puis à Metal Gear Solid V : hors de B5**, dans un lot B6 cadré à part, consigné comme écart au plan directeur §7. La RC porte sur Odyssey seul, écrit dans le README, le CHANGELOG et le guide du pilote | Le manifeste v1 refuse les variables et dossiers connus, « prévus avec le pilote Cyberpunk 2077 » | Arbitrée (Q6) | §2.2, §13 |
 | T19 | **B5 reste sur `release/v0.1.0-a1`.** Le libellé de la première version publiée est fixé au gate de publication, après la fermeture de S-01 et de S-02 | AGENTS.md : toute suite part de `release/v0.1.0-a1`. Rien n'est publié en B5 | Proposée | §11 |
-| T20 | **S-02 : en B5, toute lettre qui n'est pas une racine de volume est refusée** pour le coffre, la zone et les chemins du manifeste, ainsi que pour les chemins sauvegardés que `restore` compare. Les chaînes sont construites de toute façon depuis la vraie racine du volume. Le raccourci « même lettre » est supprimé : `sync` et `snapshot` comparent par identité quelle que soit la lettre. L'acceptation des alias est reportée après preuves | Un alias vers un sous-dossier fait écrire Savewarden dans l'installation, une source ou le coffre (prouvé sur Windows réel). Refuser est fail-closed. Reconstruire depuis la vraie racine ferme la même classe de défaut pour les chaînes tenues | Arbitrée (Q2) | §3.2, §4.2 |
-| T21 | **Entrée du plan et gouvernance.** Le plan accepté rejoint la release branch par une PR documentaire depuis `docs/b5-framing`. La branche est mise à jour par un merge de `release/v0.1.0-a1`, sans rebase ni force-push, une fois connu le sort de la PR #15. La PR porte aussi `AGENTS.md` (lot courant B5), `docs/architecture.md` et `docs/validation/b4.md`. La fusion se fait par merge commit sur Human GO, puis la branche est supprimée sur le remote et en local. B5a part de ce merge commit | Le ruleset exige une branche à jour ; AGENTS.md doit nommer le lot courant avant tout code ; les GO de B4 doivent être consignés | Proposée | §8 |
+| T20 | **S-02 : en B5, toute lettre qui n'est pas une racine de volume est refusée** pour le coffre, la zone et les chemins du manifeste, ainsi que pour les chemins sauvegardés que `restore` compare, lus dans le receipt du snapshot ou, pour `restore --recover`, dans les plans journalisés de la zone, sans coffre. Les chaînes sont construites de toute façon depuis la vraie racine du volume. Le raccourci « même lettre » est supprimé : `sync` et `snapshot` comparent par identité quelle que soit la lettre. L'acceptation des alias est reportée après preuves. HW11 et HW12 sont des préconditions : si l'une tombe, arrêt et arbitrage (T3) | Un alias vers un sous-dossier fait écrire Savewarden dans l'installation, une source ou le coffre. Prouvé sur Windows réel pour `restore` et `sync` ; `snapshot` partage le raccourci, établi par la lecture du code et couvert par les tests de B5a. Refuser est fail-closed. Reconstruire depuis la vraie racine ferme la même classe de défaut pour les chaînes tenues | Arbitrée (Q2) ; chemins sauvegardés confirmés le 6 novembre | §3.2, §4.2 |
+| T21 | **Entrée du plan et gouvernance.** Jusqu'à son acceptation explicite, le plan reste local, sans push. Le plan accepté rejoint la release branch par une PR documentaire depuis `docs/b5-framing`, sur GO distinct. La branche est mise à jour par un merge de `release/v0.1.0-a1`, sans rebase ni force-push, une fois connu le sort de la PR #15. La PR porte aussi `AGENTS.md` (lot courant B5), `docs/architecture.md` et `docs/validation/b4.md`. La fusion se fait par merge commit sur Human GO, puis la branche est supprimée sur le remote et en local. B5a part de ce merge commit | Le ruleset exige une branche à jour ; AGENTS.md doit nommer le lot courant avant tout code ; les GO de B4 doivent être consignés | Proposée | §8 |
 | T22 | **Diffusion publique**, bloquée tant que S-01 ou S-02 est ouvert : tout tag, toute release ou brouillon de release, tout artefact de workflow, tout GitHub Package ou image, tout binaire joint ailleurs, tout canal de paquets, toute annonce. Un tag publie de façon irréversible sur `proxy.golang.org` : un ruleset de tag précède le premier. La visibilité du code en est exclue. Aucun binaire n'est présenté comme publiquement qualifié avant ces deux gates | Aligne le terme sur « diffuser une version publique » du modèle de sécurité ; complété par la revue r2 et la revue CTO | Arbitrée (Q7) | §11, §13 |
 
 Écartés d'emblée, hors de B5 : restauration en place, réparation par
@@ -91,7 +95,7 @@ acceptation des alias de lettre.
 
 ### 0.2 Points ouverts de B4 et de B3
 
-| Point | Origine | Décision v0.2 | Sous-lot |
+| Point | Origine | Décision | Sous-lot |
 | --- | --- | --- | --- |
 | Commentaires de `platform/vault` | B4, plan §7 | Écrits (T6) | B5a |
 | Lecture non atomique du coffre par `sync` et `snapshot` | B4 | Reproduire pour les deux domaines et les plans de récupération ; corriger ou consigner (T7) | B5b |
@@ -139,20 +143,46 @@ documentaire de T21 les consigne.
    levée dans B5d. SBOM et attestations sont décidés avant toute publication,
    donc avant le premier tag.
 9. **Q9, portée des budgets fixée avant les valeurs (T8).** Les valeurs de
-   comptage sont dérivées au §4.4. **Écart à signaler** : la valeur en octets
-   ne peut pas être mesurée sans code. Elle est mesurée par le commit M1 de
-   B5b, sur un coffre synthétique, puis consignée par un erratum de ce plan
-   et acceptée par le propriétaire. Cela se fait avant le code des budgets et
-   avant ADR 0010.
+   comptage sont dérivées au §4.4. **Écart accepté** (décision 10) : la
+   valeur en octets ne peut pas être mesurée sans code. Elle est mesurée par
+   le commit M1 de B5b, sur un coffre synthétique, puis consignée par un
+   erratum de ce plan et acceptée par le propriétaire. Cela se fait avant le
+   code des budgets et avant ADR 0010.
 
-Avis transmis à la revue CTO : le propriétaire lui adresse S-02 et la revue
-r2. La v0.2 avance en parallèle et intègre cet avis à sa revue ciblée.
+Décisions postérieures à `1bdeb01`, prises en session le 6 novembre 2026
+sur les questions de la v0.2, et absentes de ce commit :
+
+10. **M1 et erratum.** « Oui : mesure M1 en B5b, erratum accepté avant le
+    code des budgets et avant ADR 0010. »
+11. **Chemins sauvegardés.** « Oui, lecture fail-closed : refuser aussi ces
+    chemins. » Le refus S-02 porte sur les chemins sauvegardés que
+    `restore` compare. Pour `restore --recover`, qui n'ouvre jamais le
+    coffre, ce sont ceux des plans journalisés dans la zone (§3.2).
+12. **Plan local.** « Garder local : la revue ciblée passe par le paquet ;
+    push et PR documentaire (T21) après l'acceptation. »
+
+Choix du propriétaire sur la revue CTO ciblée, le 6 novembre 2026 :
+
+13. **C2 : HW7 obligatoire.** Il est prouvé par le propriétaire sur un vrai
+    volume amovible, et en CI par un VHD détaché puis rattaché si le runner
+    le permet. Sans HW7 prouvé, S-01 n'est pas fermé et B5a ne fusionne pas.
+    Aucun volume n'est exclu.
+14. **C4 : gate strict.** T12 reste absolu. HD2 est prouvé avant le code de
+    `doctor`. S'il échoue, `--verify` ne relit que les snapshots publiés,
+    ni `current` ni les générations conservées, dont la vérification est
+    reportée. Aucun `rolled back` n'est admis.
+
+Le propriétaire tient le rôle de CTO : les revues CTO du 5 et du 6 novembre
+2026 sont les siennes. Elles sont indépendantes de l'auteur du plan, mais non
+du propriétaire qui l'accepte, et sont consignées comme telles.
 
 ### 0.4 Revues intégrées et traçabilité
 
 Revue r2 du 6 novembre 2026 : rapport consolidé et deux rapports bruts,
 identifiants `S5-*` pour B5a et B5b, `D5-*` pour B5c, B5d et la gouvernance.
 Revue CTO du 5 novembre 2026 sur `646d11f` : `P1-01` à `P1-03`, P2 numérotés.
+Revue CTO ciblée du 6 novembre 2026 sur `1bdeb01` : C1 à C4 et six avis,
+traités au §0.5. Cette table garde le traitement fait en v0.2.
 
 | Constat | Traitement dans la v0.2 |
 | --- | --- |
@@ -189,6 +219,30 @@ Revue CTO du 5 novembre 2026 sur `646d11f` : `P1-01` à `P1-03`, P2 numérotés.
 | S5-P3-01 à S5-P3-05 | HW2 ; §0.2 ; T5 |
 | D5-P3-01 à D5-P3-04, D5-P3-07 | T12 ; §4.5 ; §0.2 ; §13 ; §2.3 |
 
+### 0.5 Levée des constats de la revue CTO ciblée (v0.3)
+
+Verdict de la revue : P0 S-02 confirmé, T20 et l'architecture favorables,
+quatre P1, v0.2 non acceptée. Les anciens P1 sont levés au niveau de
+l'intention ou du contrat : P1-01 sous réserve de HW9, P1-02 par C1, P1-03.
+
+| Constat | Correction v0.3 | Tests | Critères | Où |
+| --- | --- | --- | --- | --- |
+| **C1**, fausse collision d'une cible absente : le parent tenu figure dans la chaîne d'une référence sœur | Le parent d'une cible absente ne sert qu'à prouver la stabilité de l'ancrage et l'absence persistante de la cible. « Aucune référence dans la cible » ne porte que sur une cible existante. Après la création, la chaîne tenue est reconstruite avec la racine créée, et les règles sont reprises avant le verrou | `TestAbsentTargetBesideAReferenceIsAccepted` ; `TestAbsentTargetUnderAReferenceIsRefused` ; `TestExistingTargetContainingAReferenceIsRefused` ; `TestCreatedRootIsCheckedBeforeTheLock` | 2 | T4 ; §4.3 |
+| **C2**, HW7 facultatif alors que S-01 se ferme | HW7 obligatoire (décision 13). Il est prouvé par le propriétaire sur un vrai volume amovible, et par un VHD en CI si le runner le permet. Sans preuve, S-01 n'est pas fermé et B5a ne fusionne pas. HW11 devient obligatoire lui aussi, au titre des garanties non testées (ligne ci-dessous), à soumettre à l'acceptation | `TestVolumeDetachedDuringTheSession` ; `TestMountPointAmongAncestorsIsRefused` sans repli documentaire | 1 | §2.3 ; §5.1 ; §8 |
+| **C3**, codes de `doctor` contradictoires : 2 contre « récupération : 3 » | Matrice sémantique de 0, 1, 2 et 3. Commande de référence nommée ligne par ligne. Cas de `current` et des générations conservées rendus exhaustifs, avec et sans opération en attente. Erreur d'usage de `doctor` distincte d'un refus de la commande de référence. Code du rapport : le plus haut constat. Même correction pour un snapshot dégradé, que `restore` classe 2 et que la v0.2 donnait en 0 | `TestDoctorAgreesWithItsReferenceCommand` ; `TestDoctorUsageErrorIsNotAFinding` ; `TestDoctorReportCodeIsTheHighestFinding` | 8 | T15 ; §4.5 |
+| **C4**, non-interférence promise alors qu'un `rolled back` est admis | Gate strict (décision 14). HD2 couvre chaque classe d'ouverture d'un objet qu'une écriture renomme. Une classe non prouvée inoffensive n'est jamais ouverte, et l'erratum qui la retire est accepté avant le code de `doctor`. Pour `--verify`, le repli se limite aux snapshots publiés. La consigne « hors de toute écriture » est supprimée. La même règle s'applique aux identités ouvertes en mode structurel, sans quoi le gate ne serait pas strict : extension proposée, à accepter | `TestDoctorRunsBesideWriters` sans aucun `rolled back` ; `TestDoctorOpensOnlyWhatHD2Proved` | 7, 9 | T12 ; T14 ; §4.5 ; §5.2 |
+| **Formulation « objet vide »** | Supprimée. HW8 constate séparément les effets de `CreateDir`, `NewFile` et `Move`. Aucun effet maximal n'est promis avant HW8. `Move` reçoit une postcondition propre | `TestLocalVolumeNameShadowing`, HW8a à HW8c ; `TestMoveChecksItsSourceAndDestination` | 1 | §4.1 ; §5.1 ; §6 |
+| **Garanties non testées** | Plus aucune garantie n'est remplacée par une limite écrite. Cela vaut pour HW7 (C2) et le résidu de HD2 (C4). Cela vaut aussi pour HW11, précondition de T20 selon la revue, que la v0.2 laissait en « limite écrite » si le runner ne permettait pas le montage : proposé, à accepter | Ceux de C2 et C4 | 1, 7 | §5 ; §6 |
+
+| Avis | Intégration v0.3 | Où |
+| --- | --- | --- |
+| 1, modèle de menace | Accepté, HW8 gardé ; voir la ligne « objet vide » | §4.1 ; §6 |
+| 2, S-02 dans `platform/vault` | Une requête unique, composée dans `Volumes`, appliquée à toutes les références et à toutes les récupérations. `restore --recover` prend ses chemins sauvegardés dans les plans de la zone, jamais dans le coffre | §3.2 ; §4.2 ; §4.3 ; `TestRestoreRecoverChecksSavedPathsWithoutTheVault` |
+| 3, interface `Session` | Changement assumé, sans API d'écriture. La revue de sécurité de B5a relit le port `Vault` et les fausses sessions. L'ordre est imposé et testé | §4.1 ; §8 ; `TestSessionOrderIsOpenChecksLockWrites` ; critère 3 |
+| 4, codes | C3 | §4.5 |
+| 5, budgets et M1 | Les valeurs de comptage sont des hypothèses de dimensionnement. M1 mesure aussi les grands receipts, les noms nombreux et longs, et la profondeur | T8 ; §4.4 ; `BenchmarkVaultReadAtScale` |
+| 6, GoReleaser | Version stable exacte, v2.20.0 au moins. Le binaire épinglé est testé avec Go 1.27.3 sur Windows. L'absence d'artefact est vérifiée par l'API | T17 ; §4.6 ; critère 11 |
+
 ---
 
 ## 1. Contexte et preuves
@@ -199,9 +253,9 @@ Revue CTO du 5 novembre 2026 sur `646d11f` : `P1-01` à `P1-03`, P2 numérotés.
 | CI | Run 42155814194 sur `a59d787` : 7/7, `success` |
 | `main` | `25d1cc2`, bootstrap B0 seul |
 | B4 | **Clos.** Code : PR #13, `4197317`. Pilote réel exécuté par le propriétaire le 5 novembre 2026, 101 contrôles sur 101, qualifié le 6. Clôture : PR #14, `a59d787`. Human GO de clôture du 6 novembre 2026, donné en session ; `validation/b4.md` le liste encore comme restant, ce que corrige T21 |
-| S-02 | Trouvé par la revue r2 du 6 novembre 2026, prouvé sur Windows réel le même jour, hérité de B2 et de B4. Consigné comme chantier ouvert par la PR #15 (`docs/s02-letter-alias`, `e6bb4cf`, CI 7/7, run 42232254323), **ouverte, non fusionnée**. Interdiction opérationnelle : aucun alias de lettre, ni pour `--vault` ou `--to`, ni dans le manifeste |
-| Cadrage B5 | `docs/b5-framing` : v0.1 en `646d11f`, parent `4197317`, présente sur le remote. L'autorisation de ce push n'est consignée ni dans le dépôt ni dans les rapports : elle reste à citer par le propriétaire. v0.2 : commit local sur cette branche, sans push |
-| Revues | Revue r2 du 6 novembre 2026 : deux examinateurs, un P0, dix-huit P1, constats porteurs revérifiés. Revue CTO du 5 novembre 2026 : 0 P0, 3 P1, 6 P2. Elle est antérieure à S-02, qui dépasse son « 0 P0 » et la prémisse de son P1-02 (« règle déjà acquise en B4 ») |
+| S-02 | Trouvé par la revue r2 du 6 novembre 2026, prouvé sur Windows réel le même jour, hérité de B2 et de B4. Prouvé pour `restore` et `sync`, et pour une installation nommée par un alias dans le manifeste ; `snapshot` partage le raccourci, ce qu'établit la lecture du code, sans essai. Consigné comme chantier ouvert par la PR #15 (`docs/s02-letter-alias`, `e6bb4cf`, CI 7/7, run 42232254323), **ouverte, non fusionnée**. Interdiction opérationnelle : aucun alias de lettre, ni pour `--vault` ou `--to`, ni dans le manifeste |
+| Cadrage B5 | `docs/b5-framing` : v0.1 en `646d11f`, parent `4197317`, présente sur le remote. L'autorisation de ce push n'est consignée ni dans le dépôt ni dans les rapports : elle reste à citer par le propriétaire. v0.2 : commit local `1bdeb01`, non accepté. v0.3 : commit local, sans push, jusqu'à l'acceptation explicite (décision 12) |
+| Revues | Revue r2 du 6 novembre 2026 : deux examinateurs, un P0, dix-huit P1, constats porteurs revérifiés. Revue CTO du 5 novembre 2026 : 0 P0, 3 P1, 6 P2. Elle est antérieure à S-02, qui dépasse son « 0 P0 » et la prémisse de son P1-02 (« règle déjà acquise en B4 »). Revue CTO ciblée du 6 novembre 2026 sur `1bdeb01`, faite sur le paquet de revue, sans relancer les sondes : P0 S-02 confirmé, 4 P1 (C1 à C4), v0.2 non acceptée. Le rôle de CTO est tenu par le propriétaire (§0.3) |
 | Visibilité | Dépôt **public** |
 | Toolchain | Go 1.27.3, golangci-lint 2.14.0, `golang.org/x/sys` v0.49.0 |
 | Release | Aucune configuration GoReleaser ; un seul workflow, `ci.yml` ; aucun tag ; aucun ruleset de tag, selon la revue r2 |
@@ -286,6 +340,8 @@ Constats du code, relus à `a59d787` :
    - Le résidu de l'espace de noms local est écrit, avec la phrase de modèle
      de menace.
    - Des tests Windows réels réattribuent une lettre pendant une session.
+   - HW7 est prouvé : un volume retiré, ou retiré puis réinséré, pendant
+     une session.
 2. **S-02 fermé.**
    - Une lettre qui n'est pas une racine de volume est refusée pour le
      coffre, la zone, les chemins du manifeste et les chemins sauvegardés
@@ -335,9 +391,9 @@ Constats du code, relus à `a59d787` :
 
 | Acteur | Peut | Ne peut pas |
 | --- | --- | --- |
-| **Agent** | Lire et modifier le dépôt ; tests synthétiques en `t.TempDir()` ; lettres `subst` temporaires et noms DOS locaux de test, créés et retirés par les tests, vers des dossiers temporaires ; HW8 en CI seulement | Lire `D:\Ga`, `D:\Savewarden`, `E:\GMS`, un coffre ou une zone de pilote, ou des clés SSH ; lancer Savewarden sur des données réelles sans autorisation explicite et nominative pour cette exécution ; modifier une lettre ou un nom DOS qu'un test n'a pas créé ; exécuter HW7 |
+| **Agent** | Lire et modifier le dépôt ; tests synthétiques en `t.TempDir()` ; lettres `subst` temporaires et noms DOS locaux de test, créés et retirés par les tests, vers des dossiers temporaires ; HW8 en CI seulement ; VHD de test créés, attachés, détachés et retirés par les tests de HW7 et HW11, dans un dossier temporaire, en CI seulement | Lire `D:\Ga`, `D:\Savewarden`, `E:\GMS`, un coffre ou une zone de pilote, ou des clés SSH ; lancer Savewarden sur des données réelles sans autorisation explicite et nominative pour cette exécution ; modifier une lettre, un nom DOS ou un volume qu'un test n'a pas créé ; exécuter le protocole manuel de HW7 ou de HW11 |
 | **Savewarden**, lancé par le propriétaire | `doctor` : lire le manifeste, le coffre désigné, les zones désignées et les identités de l'installation et des sources, sans suivi de lien ; les autres commandes, comme en B4 | `doctor` : écrire, verrouiller, sonder ou ouvrir `sync.lock` et `restore.lock`, épingler, ouvrir une session, réparer, ouvrir une restauration remise pour son contenu |
-| **Propriétaire** | Exécuter la campagne et HW7 ; autoriser nominativement une exécution par l'agent ; ajouter un check requis au ruleset ; donner chaque GO | — |
+| **Propriétaire** | Exécuter la campagne, HW7 et, s'il n'est pas prouvé en CI, HW11 ; autoriser nominativement une exécution par l'agent ; ajouter un check requis au ruleset ; donner chaque GO | — |
 
 ---
 
@@ -382,6 +438,11 @@ n'apparaît dans une sortie ni dans un journal.
     avant toute distinction : la lettre du coffre, de la zone, de
     l'installation, de chaque source et, pour `restore`, de chaque chemin
     sauvegardé lu dans le receipt du snapshot.
+  - Pour `restore --recover`, qui n'ouvre jamais le coffre : la lettre de la
+    zone, de l'installation et des sources du manifeste, et de chaque chemin
+    sauvegardé des plans journalisés dans la zone (`RestorePlan.Sources`,
+    `restore_recover.go:164-170`). Le coffre n'y est ni lu ni nommé, et la
+    récupération ne gagne aucune dépendance au coffre.
   - Une lettre absente garde le comportement actuel.
 - **Sous session.** `Open` refait le contrôle sur sa première épingle, la
   racine de la lettre, avant toute autre. La fenêtre entre le plan et
@@ -449,7 +510,7 @@ cmd/savewarden → app ─┬─► cli ─┬─► features/inspect ──► 
 | 0005, amendement | **Paragraphe x/sys**, à côté de `GetVolumeInformation`, et non la table des API d'écriture permises. Il ajoute trois requêtes en lecture seule (`GetFinalPathNameByHandle`, `GetVolumeNameForVolumeMountPoint`, `GetVolumeInformationByHandle`) et une constante locale `0x1` (`VOLUME_NAME_GUID`, `FILE_NAME_NORMALIZED`). Règle : après `Open`, aucun chemin à lettre, vérifiée par une instrumentation interne au package. Une phrase de modèle de menace (§6) | B5a, accepté avant le code |
 | 0006 §11, amendement | **S-01** : fenêtre fermée pour les écritures face à une lettre ou un alias réattribué, pas face à un processus hostile du même compte ; ouverture en deux branches ; contrôles sous session sur les chaînes tenues, dans l'ordre du §4.3 ; invalidation au premier défaut de périphérique. **S-02** : lettres qui ne sont pas des racines de volume refusées ; chaînes depuis la vraie racine ; distinction du coffre de `sync` et `snapshot` écrite ici, par identité quelle que soit la lettre. Acceptation provisoire du 4 novembre 2026 levée | B5a, accepté avant le code |
 | 0008, amendement | P2-4 : « non vérifiable », portée `snapshot`, codes du plan et de `--apply`, issue | B5b, accepté avant son code |
-| 0010, nouveau | `doctor` : frontière, ports, ce qu'il ouvre, niveaux, sortie, table normative des codes par domaine, constats ; deux espaces de noms distincts, codes de constat et causes d'intervention | B5c, accepté avant le code |
+| 0010, nouveau | `doctor` : frontière, ports, ce qu'il ouvre et ce que HD2 en retire, niveaux, sortie, matrice normative des codes par domaine (C3), constats ; deux espaces de noms distincts, codes de constat et causes d'intervention | B5c, accepté avant le code |
 | 0004, amendement | Relevés en lecture seule exposés par `sync` ; comparaison D1, D2, D3 ; critère de réexamen inchangé (§13) | B5c, accepté avant le code |
 | 0009 | Inchangé (Q3) | — |
 
@@ -479,7 +540,8 @@ cmd/savewarden → app ─┬─► cli ─┬─► features/inspect ──► 
 **Création d'une racine absente.** Première écriture, après les contrôles
 du §4.3. Elle passe par la base, en création exclusive. La racine est aussitôt
 épinglée, son chemin final relu égal à la base, son identité lue par handle,
-puis ajoutée à la chaîne tenue.
+puis ajoutée à la chaîne tenue. Les contrôles du §4.3 sont repris sur cette
+chaîne avant le verrou (étape 4).
 
 **Écritures.**
 
@@ -490,11 +552,35 @@ puis ajoutée à la chaîne tenue.
 - **Chemin final de chaque nouveau handle** (défense en profondeur, HW8) :
   après `NewFile`, après l'épingle qui suit `CreateDir`, et après `Lock`, le
   chemin final GUID du handle doit égaler la base suivie du nom. Sinon la
-  session est invalidée et l'opération refusée. L'empreinte d'un masquage se
-  réduit alors à un objet vide à l'endroit masqué (§6).
+  session est invalidée et l'opération refusée.
+- **Postcondition de `Move`**, à prouver par HW8c. Avant le renommage, la
+  source est ouverte par la base, sans suivi et en partage complet, puis
+  refermée. Son chemin final doit égaler la base suivie du nom, et son
+  identité est lue. Après le renommage, la destination est contrôlée de même
+  et doit porter cette identité. Sinon la session est invalidée.
+  - Les basculements de `switchTo` comparent déjà les identités avant et
+    après (`publish.go`).
+  - Le renommage d'un temporaire vers son nom final n'en compare aucune
+    (`apply.go:574`, `restore_apply.go:350`).
+- **Effets d'un masquage.** Aucun effet maximal n'est promis avant HW8.
+  `CreateDir` écrit avant le contrôle de l'épingle qui le suit. `NewFile`
+  écrit avant celui de son handle. `Move` n'ouvre aucun nouveau handle.
+  HW8 constate séparément l'effet de chacune, et le résidu écrit au §6 est
+  celui qu'il observe.
 
 **Requêtes en lecture seule ajoutées à `Session`.** C'est un changement
-d'interface, déclaré, de `Session` et du port `Vault` de `sync`.
+d'interface, déclaré, de `Session` et du port `Vault` de `sync`. Il
+n'ajoute aucune API d'écriture.
+
+- La revue de sécurité de B5a relit explicitement le port `Vault` et les
+  fausses sessions de test (§8, commit 7).
+- L'ordre est imposé et testé pour chaque commande et chaque récupération :
+  1. `Open` ;
+  2. contrôles du §4.3 ;
+  3. création d'une racine absente, chaîne reconstruite et contrôles
+     repris ;
+  4. verrou ;
+  5. premières mutations.
 
 - **Chaîne tenue** : les identités des épingles, de la racine du volume à la
   cible ou à son parent, lues par handle.
@@ -539,6 +625,8 @@ l'utilisateur au plan.
   ou source sur deux lettres d'un même arbre.
 - **Récupérations.** `sync --recover`, `snapshot --recover` et
   `restore --recover` appliquent les mêmes refus, au plan et sous session.
+  Pour `restore --recover`, ces refus portent sur les chemins sauvegardés
+  des plans journalisés dans la zone, sans lire le coffre (§3.2).
 
 ### 4.3 Contrôles sous session (T4)
 
@@ -553,21 +641,36 @@ toute écriture, création du verrou comprise**, dans cet ordre.
    - Une cible absente au plan et présente sous session donne le code 1,
      sauf les reprises que les règles actuelles prévoient (Z3 de B4).
 3. **Chaînes de référence relues.** Installation, sources et, pour
-   `restore`, coffre et chemins sauvegardés. Elles sont relues après le
-   contrôle S-02 de leur lettre et doivent égaler celles du plan. Cela
-   détecte une lettre de référence réattribuée entre le plan et la session.
+   `restore`, coffre et chemins sauvegardés ; pour `restore --recover`,
+   chemins sauvegardés des plans de la zone, sans coffre. Elles sont relues
+   après le contrôle S-02 de leur lettre et doivent égaler celles du plan.
+   Cela détecte une lettre de référence réattribuée entre le plan et la
+   session.
 4. **Recouvrements, dans les deux sens.**
-   - Aucune identité de référence ne figure dans la chaîne tenue : la cible
-     n'est pas dans une référence.
-   - L'identité de la cible, ou celle du parent tenu si la cible est
-     absente, ne figure dans aucune chaîne de référence : aucune référence
-     n'est dans la cible.
+   - **La cible n'est dans aucune référence.** L'identité d'aucun objet de
+     référence ne figure dans la chaîne tenue. Cette chaîne va de la racine
+     du volume à la cible si elle existe, à son parent sinon.
+   - **Aucune référence n'est dans la cible**, pour une cible existante
+     seulement : son identité ne figure dans aucune chaîne de référence.
+   - **Parent d'une cible absente.** Il ne sert qu'à prouver la stabilité
+     de l'ancrage (étape 2) et l'absence persistante de la cible (étape 5).
+     Il n'est jamais cherché dans une chaîne de référence : il est l'ancêtre
+     commun de références sœurs, jusqu'à la racine du volume. Une cible
+     absente, dont l'absence est prouvée sous session, ne contient aucune
+     référence existante.
+   - **Après la création** d'une racine absente (§4.1), la chaîne tenue est
+     reconstruite avec la racine créée. Les chaînes de référence sont
+     relues, et les deux règles sont reprises sur la nouvelle identité, avant
+     le verrou et avant toute autre écriture. Un refus laisse la racine vide
+     créée, rien n'étant supprimé.
    - Références de `sync` et `snapshot` : installation et sources. Celles de
      `restore` : coffre, installation, sources actuelles et chemins
-     sauvegardés.
+     sauvegardés. Celles de `restore --recover` : installation, sources et
+     chemins sauvegardés des plans de la zone.
 5. **Lectures de décision sur les objets tenus**, par la base de la session
    et sans suivi :
    - marqueurs des ancêtres ;
+   - absence d'une cible absente, lue sur le parent tenu ;
    - Z3, « encore vide », lu sur l'objet tenu ;
    - relecture du marqueur du coffre ou de la zone.
 6. **Observation impossible** : code 1, rien écrit.
@@ -596,13 +699,18 @@ Les contrôles de Z2 à Z6 de `restore` passent sur les chaînes tenues.
   - **Dimensionnement.** Au moins dix fois une décennie d'usage quotidien,
     soit 36 500 opérations par domaine. Chacune laisse au plus un journal, un
     receipt, une génération conservée et un staging, plus des essais.
+    Les valeurs de comptage ci-dessous sont des **hypothèses de
+    dimensionnement**. Le volume d'opérations ne couvre pas tous les cas : M1
+    mesure aussi mémoire et temps sur de grands receipts, des noms nombreux et
+    longs et une arborescence profonde. M1 confirme ou corrige chaque valeur
+    dans le même erratum.
 
   | Budget | Valeur | Dérivation |
   | --- | --- | --- |
   | Entrées d'un dossier listé | 262 144 | Plus de sept fois les 36 500 entrées d'un dossier qui reçoit une entrée par opération ; les essais restent marginaux, un essai ne subsistant qu'après une interruption |
   | Enregistrements d'un journal | Inchangé | Déjà borné par l'enveloppe E2 : 11 enregistrements, huit essais au plus à côté de chacun |
   | Octets lus par fichier | Inchangé | 64 Mio par enregistrement ou receipt |
-  | Octets de métadonnées par lecture | **Mesurée en M1** | Coffre synthétique de 36 500 opérations, mémoire et temps mesurés ; valeur consignée par erratum et acceptée avant le code des budgets et avant ADR 0010 (écart du §0.3) |
+  | Octets de métadonnées par lecture | **Mesurée en M1** | Coffre synthétique de 36 500 opérations, mémoire et temps mesurés ; valeur consignée par erratum et acceptée avant le code des budgets et avant ADR 0010 (écart accepté, décision 10) |
 
   - **Épuisement.** Code 1 pour les commandes, message distinct : « vault
     too large to read within the budget; create a new vault ». Rien n'est
@@ -623,7 +731,7 @@ savewarden doctor --manifest <m> --vault <v> [--area <dest>]... [--verify]
 | Manifeste | Lecture stricte, ADR 0002 | — |
 | Lettres | Celles du coffre, des zones, de l'installation et des sources sont des racines de volume (S-02) | — |
 | Installation et sources | Existence, liens, distinctions par chaînes d'identités depuis la racine du volume, relevées par `sync` | — |
-| Coffre | Marqueur ; journaux et automate ; receipts stricts et leurs chaînes ; identités publiées ; `staging`, `.incomplete`, enveloppe | `current`, chaque génération conservée et chaque snapshot publié relus en flux et comparés à leur receipt |
+| Coffre | Marqueur ; journaux et automate ; receipts stricts et leurs chaînes ; identités publiées ; `staging`, `.incomplete`, enveloppe | `current`, chaque génération conservée et chaque snapshot publié relus en flux et comparés à leur receipt ; les seuls snapshots publiés si HD2 exclut les deux premiers (non-interférence, ci-dessous) |
 | Zone, par `--area` | Marqueur strict du même jeu ; journaux ; receipts ; `.incomplete` ; restaurations remises observées par nom et par identité, sans suivi, l'identité lue par un handle refermé aussitôt (ADR 0009) | Rien de plus : une restauration remise n'est jamais ouverte pour son contenu, listée ni lue (Q3) |
 
 **Ce que `doctor` ouvre** (ADR 0010) :
@@ -641,39 +749,82 @@ savewarden doctor --manifest <m> --vault <v> [--area <dest>]... [--verify]
 - **jamais** : une épingle tenue d'une lecture à l'autre, une session, un
   verrou, une sonde.
 
-Si HD2 montre qu'une ouverture en partage complet fait encore échouer le
-renommage de `current` par une rotation concurrente, le résidu est écrit. La
-documentation dit de lancer `doctor --verify` hors de toute écriture. La
-rotation échoue alors en `rolled back`, code 1, sans dommage.
+**Non-interférence, gate de B5c (T12, C4).** Aucune écriture concurrente
+n'échoue du fait de `doctor`, ni en `rolled back`, ni en `busy`, ni
+autrement.
 
-**Table normative des codes**, par domaine, fixée par ADR 0010.
+- **Ce que qualifie HD2.** HD2 qualifie, classe par classe, chaque ouverture
+  par `doctor` d'un objet qu'une écriture épingle ou renomme. Ce sont
+  `current`, les générations conservées, les dossiers de staging et les
+  `.incomplete`. Les classes sont l'identité, la liste et, sous `--verify`,
+  les fichiers lus en flux.
+- **Classe non prouvée.** Une classe que HD2 ne prouve pas inoffensive n'est
+  jamais ouverte, et le constat qui en dépend est retiré.
+  - Pour `--verify`, seuls les snapshots publiés sont relus, au sens d'un
+    journal terminal en `published` et d'un receipt validé. L'invariant des
+    snapshots publiés d'ADR 0006 interdit de les renommer. La vérification
+    de `current` et des générations conservées est reportée (§13).
+  - Pour une identité, le constat repose sur l'entrée de répertoire et le
+    receipt, et la comparaison d'identité est reportée.
+- **Erratum.** Chaque retrait est consigné par un erratum accepté par le
+  propriétaire avant le code de `doctor`. `commands/doctor.md` dit ce qui
+  n'est pas vérifié.
+- **Aucun résidu d'interférence** n'est admis ni remplacé par une consigne
+  d'usage.
 
-- **Ordre de sévérité** : `0` < `2` < `3`. `doctor` n'est jamais moins
-  sévère que la commande qui agirait sur le même état.
-- **Refus d'usage.** Un refus d'usage de cette commande (son code 1) devient
-  un constat de code 2.
-- **Code 1 de `doctor`.** Réservé à l'absence de rapport : erreur d'usage,
-  manifeste illisible, coffre absent, non marqué ou illisible à sa racine.
-- **Rapport.** stdout pour le rapport, stderr pour les erreurs, selon ADR
-  0003 : jamais de rapport partiel avec le code `0`.
+**Matrice normative des codes**, par domaine, fixée par ADR 0010 (C3).
 
-| Domaine | Constat | Code | Commande de référence |
+- **Sens des codes.**
+  - `1` : aucun rapport fiable. C'est une erreur d'usage de `doctor`, un
+    manifeste illisible, ou un coffre absent, non marqué ou illisible à sa
+    racine. Ce n'est jamais un constat, ni la traduction d'un refus d'une
+    autre commande.
+  - `3` : à récupérer ou indécidable. C'est tout état qu'une commande de
+    référence classe 3, sa récupération comprise quand une opération en
+    attente concerne l'objet, et tout état que `doctor` ne sait pas
+    départager.
+  - `2` : à examiner, rien à récupérer. C'est une anomalie qu'une commande
+    de référence classe 2, un état qu'elle refuse en code 1 et qui persiste
+    sans action de l'utilisateur, ou un domaine sur lequel rien n'a pu être
+    conclu.
+  - `0` : information seulement.
+- **Commande de référence.** C'est celle qui agirait ensuite sur l'objet dans
+  cet état, nommée ligne par ligne. Dès qu'une opération en attente concerne
+  l'objet, c'est sa récupération. Sinon, c'est la prochaine écriture ou la
+  restauration qui le lirait. Une ligne sans commande de référence le dit et
+  justifie son code.
+- **Cohérence, ligne par ligne.** Le code de `doctor` est au moins celui de
+  la commande de référence de la ligne, un refus en code 1 comptant pour 2.
+  Aucun ordre global entre commandes n'est employé.
+- **Code du rapport.** C'est le plus haut de ses constats, `0` < `2` < `3`.
+  `1` n'est rendu que sans rapport. stdout porte le rapport et stderr les
+  erreurs, selon ADR 0003 : jamais de rapport partiel avec le code `0`.
+- **Lignes liées à HD2.** Une ligne qui repose sur une ouverture retirée par
+  HD2 est retirée avec elle, par le même erratum.
+
+| Domaine | État | Code de `doctor` | Commande de référence, et son code |
 | --- | --- | --- | --- |
 | Coffre, `current` | Sain ; staging d'une opération close | 0, information | `sync` : 0 |
 | Coffre, `current` | Opération en attente, non départagée | 3 ; action : `sync --recover`, sans `--apply`, qui sonde le verrou. Un code 3 peut donc signifier « en cours » | `sync` : 3, ou 1 si le verrou est tenu |
-| Coffre, `current` | `unexpected-entry`, `journal-ambiguous`, enveloppe épuisée | 3 | `sync` : 3 |
-| Coffre, `current` | `current` ou génération conservée différents de leur receipt (`--verify`) | 2 ; 3 si une opération en attente la concerne | Récupération : 3 |
-| Coffre, `current` | Cas de la tolérance de B2 (Q5) | 2, limite nommée | — |
-| Snapshots | Snapshot sain ; dégradation déjà consignée | 0, information ; « non restaurable » dit pour un snapshot dégradé | `snapshot` : information |
-| Snapshots | Différence nouvelle au receipt (`--verify`) | 2 | `restore` de ce snapshot : refus |
-| Snapshots | `.incomplete` d'une opération close | 0, information | — |
-| Snapshots | `.incomplete` inexpliqué ; `snapshots\receipts` absent à côté d'opérations | 3 ; action : recréer le dossier vide, pour le second | `snapshot` : 3 |
-| Snapshots | « Non vérifiable » (P2-4) | 2 ; action : rendre le fichier lisible | `snapshot` : 1 |
-| Zone | Marqueur d'un autre jeu | 2, constat de cette zone ; le rapport continue | `restore` : 1 |
+| Coffre, `current` | Cause d'intervention relevée par `sync` (`unexpected-entry`, `journal-ambiguous`, enveloppe épuisée, autres causes de `sync.md`) | 3 | `sync` : 3 |
+| Coffre, `current` | `current` d'une autre identité que celle de son receipt, sans opération en attente | 3 | Prochaine rotation, `sync --apply` : 3, identité changée |
+| Coffre, `current` | Contenu de `current` différent de son receipt (`--verify`), sans opération en attente | 2, `current-modified` | Prochaine rotation : 2, `current-modified` |
+| Coffre, `current` | `current` différent de son receipt, en identité ou en contenu, quand une opération en attente le concerne | 3 | Récupération : 3 |
+| Coffre, générations conservées | Génération différente de son receipt, en identité ou en contenu, sans opération en attente | 2 | Aucune : hors récupération, aucune commande ne la relit. Anomalie à examiner, rien à récupérer |
+| Coffre, générations conservées | Génération différente de son receipt, quand une rotation en attente la relit | 3 | Récupération de la rotation : 3, au moindre écart |
+| Coffre, `current` | Cas de la tolérance de B2 (Q5) | 2, limite nommée | `sync` : toléré |
+| Snapshots | Snapshot sain ; `.incomplete` d'une opération close | 0, information | `snapshot` : 0 |
+| Snapshots | Snapshot dégradé : `snapshot-missing`, `snapshot-rename-lost`, `snapshot-modified`, ou différence au receipt sous `--verify` | 2 ; « non restaurable » | `restore` de ce snapshot : 2, ou 1 s'il est introuvable. `snapshot` avertit sans bloquer |
+| Snapshots | Opération de snapshot en attente, non départagée | 3 ; action : `snapshot --recover`, sans `--apply` | `snapshot` : 3, ou 1 si le verrou est tenu |
+| Snapshots | `.incomplete` inexpliqué ; `snapshots\receipts` absent à côté d'opérations | 3 ; action, pour le second : recréer le dossier vide | `snapshot` : 3 |
+| Snapshots | « Non vérifiable » (P2-4) | 2 ; action : rendre le fichier lisible | `snapshot` : 1, refus persistant |
+| Zone | Marqueur d'un autre jeu | 2, constat de cette zone ; le rapport continue | `restore` : 1, refus persistant |
+| Zone | Opération en attente, non départagée | 3 ; action : `restore --recover`, sans `--apply` | `restore` : 3, ou 1 si le verrou est tenu |
 | Zone | Receipt d'une restauration publiée absent ; journal invalide ; `.incomplete` inexpliqué | 3 | `restore` : 3 |
-| Zone | `.incomplete` d'une opération close ; restaurations remises présentes, absentes ou d'une autre identité | 0, information | — |
-| Chemins | Lettre refusée (S-02) ; recouvrement ; lien | 2 | Commandes d'écriture : 1 |
-| Tout domaine | Budget épuisé | 2 pour ce domaine, rien conclu sur lui | Commandes : 1 |
+| Zone | `.incomplete` d'une opération close ; restaurations remises présentes, absentes ou d'une autre identité | 0, information | `restore` : 0, les restaurations remises n'étant pas suivies (ADR 0006 §11) |
+| Chemins | Lettre refusée (S-02) ; recouvrement ; lien | 2 | Commandes d'écriture : 1, refus persistant |
+| Tout domaine | Budget épuisé | 2 pour ce domaine, rien conclu sur lui | Commandes : 1, refus persistant |
+| Tout domaine | Lecture instable : le domaine change encore | 2 pour ce domaine, rien conclu sur lui ; action : relancer `doctor` | Commandes : 1, « another run may be writing this vault » |
 
 - **Constats.** Chaque constat porte un code stable documenté, l'objet
   relatif au coffre ou à la zone, et l'action à mener ; jamais une
@@ -690,8 +841,13 @@ rotation échoue alors en `rolled back`, code 1, sans dommage.
   - `go run github.com/goreleaser/goreleaser/v2@vX.Y.Z`, à version exacte,
     vérifiée par la base de checksums de Go et déjà acceptée par le
     vérificateur de pins.
-  - La compatibilité avec Go 1.27.3 et `GOTOOLCHAIN=local` est prouvée dans
-    le commit.
+  - Version stable, **v2.20.0 au moins**. Selon la revue CTO, elle corrige
+    une fuite de clés SSH dans `dist/artifacts.json`, bien que ce pipeline
+    ne porte ni clé ni publication. Le proxy de modules la donne comme
+    dernière version, publiée le 4 novembre 2026, vérifié le 6.
+  - Le binaire réellement épinglé est construit et exécuté avec Go 1.27.3 et
+    `GOTOOLCHAIN=local`, sur Windows, dans le commit : `goreleaser check`,
+    snapshot et smoke.
   - À défaut : action épinglée par SHA complet, version exacte, vérification
     de checksum et extension du vérificateur, dans la même PR, sur arbitrage
     du propriétaire.
@@ -746,7 +902,10 @@ différentiel binaire le vérifie, dans les deux sens.
 Tests réels dans `platform/vault`, sur `windows-2025` en CI et sur le poste
 de développement, dans des dossiers temporaires. Lettres `subst` et noms DOS
 créés et retirés par le test seulement. Exceptions : HW8 tourne en CI
-seulement, HW7 est manuel.
+seulement. HW7 est prouvé par le propriétaire, et en CI par un VHD si le
+runner le permet. HW11 est prouvé en CI par un VHD, ou à défaut par le
+propriétaire. **Aucune hypothèse n'est remplacée par une limite écrite** :
+sans preuve, le chantier concerné n'est pas fermé.
 
 | # | Hypothèse | Preuve attendue |
 | --- | --- | --- |
@@ -756,11 +915,11 @@ seulement, HW7 est manuel.
 | HW4 | Une lettre `subst` retirée puis réattribuée vers un autre dossier pendant une session ouverte : les créations et renommages suivants restent dans la cible tenue | Empreinte du témoin identique ; objets créés dans la cible |
 | HW5 | Les épingles prises par chemin de volume interdisent toujours le renommage d'un dossier tenu ; un handle ouvert par lettre et un handle ouvert par chemin de volume portent sur le même objet, avec les mêmes conflits de partage | Renommage refusé ; conflits identiques |
 | HW6 | Chemins longs et noms Unicode derrière ce préfixe | Création au-delà de `MAX_PATH` |
-| HW7 | (a) Volume amovible retiré pendant une session : appels en échec, classés « volume indisponible », jamais redirigés. (b) Retiré puis réinséré : handles morts, session invalidée, rien écrit sur le nouveau montage. (c) Chemin GUID rouvert pendant l'indisponibilité : échec classé | Codes observés consignés. **Test manuel du propriétaire**, autorisé à part et nominativement, sur données synthétiques, sans coffre de pilote ; jamais présenté comme passé en CI. Un VHD sur runner élevé est étudié, non exigé |
-| HW8 | Un nom DOS local `Volume{GUID}`, défini par `DefineDosDevice` dans la session de connexion du test, masque-t-il le nom global pour `\\?\Volume{GUID}\…` ? | **CI seulement.** Masquage possible : résidu écrit (§6), et le contrôle du chemin final refuse. Impossible : consigné, contrôle gardé en défense |
+| HW7 | (a) Volume amovible retiré pendant une session : appels en échec, classés « volume indisponible », jamais redirigés. (b) Retiré puis réinséré : handles morts, session invalidée, rien écrit sur le nouveau montage. (c) Chemin GUID rouvert pendant l'indisponibilité : échec classé | **Obligatoire** (C2). Codes observés consignés. **Test manuel du propriétaire sur un vrai volume amovible**, autorisé à part et nominativement, sur données synthétiques, sans coffre de pilote. En CI, si le runner le permet, un VHD créé, attaché, détaché et rattaché par le test : il prouve le cas d'un volume fixe démonté, jamais celui d'un volume amovible. Le résultat manuel n'est jamais présenté comme passé en CI. Sans HW7 prouvé, S-01 n'est pas fermé et B5a ne fusionne pas |
+| HW8 | Un nom DOS local `Volume{GUID}`, défini par `DefineDosDevice` dans la session de connexion du test, masque-t-il le nom global pour `\\?\Volume{GUID}\…` ? Si oui, quel effet a chaque primitive : (a) `CreateDir`, (b) `NewFile`, (c) `Move`, masquage défini avant l'appel et, pour `Move`, entre son contrôle et le renommage, par un crochet de test interne au package | **CI seulement.** Masquage possible : effet de chaque primitive constaté et consigné à part, objet par objet ; refus et invalidation observés ; postcondition de `Move` prouvée ; résidu du §6 écrit d'après ces constats seuls. Impossible : consigné, contrôles gardés en défense |
 | HW9 | Cible absente : base égale au chemin du parent tenu suivi du segment ; racine créée en exclusif par cette base, épinglée, chemin final égal à la base, identité lue par handle | Première publication B2b, coffre sans `games`, Z2, reprise Z3, zone existante, récupérations |
 | HW10 | `GetVolumeInformationByHandle` sur l'épingle racine rend le système de fichiers ; `GetDriveType` et `GetDiskFreeSpaceEx` acceptent `\\?\Volume{GUID}\` | Mêmes valeurs que par la lettre |
-| HW11 | Un point de montage de volume parmi les ancêtres est refusé comme point d'analyse, par lettre et par chemin de volume | Refus `NotFollowedError` ; en CI si le runner permet de créer le montage, sinon limite écrite |
+| HW11 | Un point de montage de volume parmi les ancêtres est refusé comme point d'analyse, par lettre et par chemin de volume | Refus `NotFollowedError`. **Obligatoire**, précondition de T20 : en CI par un VHD monté dans un dossier temporaire si le runner le permet, sinon par le propriétaire sur un VHD de test ; aucune limite écrite n'en tient lieu |
 | HW12 | Détection S-02 : le chemin final GUID du handle de `X:\` est sans reste pour une vraie lettre de volume, et avec reste pour un alias `subst` et pour un alias `DefineDosDevice` créé par le test. `GetVolumeNameForVolumeMountPoint` échoue pour ces deux alias. L'identité de `X:\` égale celle de `\\?\Volume{GUID}\` pour une vraie lettre | Les trois cas ; contre-épreuve concordante |
 
 La réattribution d'une vraie lettre de volume (`mountvol`) demande des
@@ -774,7 +933,7 @@ une lettre ne tourne pendant la campagne (§11).
 | # | Hypothèse | Preuve attendue |
 | --- | --- | --- |
 | HD1 | `ReadDir` rend nom et type des entrées sans les ouvrir : un `Lock` sans partage pris en boucle par un tiers sur `sync.lock` réussit pendant que `doctor` liste `games\<id>` | Aucun échec de `Lock` sur mille itérations |
-| HD2 | Une ouverture en partage lecture, écriture et suppression, d'une identité ou d'un fichier de `current`, ne fait échouer ni `Hold`, ni le `Move` de `current` d'une rotation concurrente | Établi, ou résidu écrit (§4.5) |
+| HD2 | Chaque classe d'ouverture de `doctor`, en partage lecture, écriture et suppression, ne fait échouer aucune écriture concurrente : ni `Hold`, ni `Lock`, ni le `Move` d'un basculement, ni ses contrôles d'identité. Les classes sont l'identité, la liste et la lecture en flux. Les objets sont `current`, une génération conservée, un staging et un `.incomplete` | Établi classe par classe, sans aucun `rolled back` ni `busy` sur mille itérations. Sinon, la classe est retirée de `doctor` par erratum (§4.5). **Aucun résidu admis** (C4) |
 
 ---
 
@@ -793,8 +952,9 @@ Limites qui restent après B5 :
     réattribué par accident ou par un outil bénin, `subst` ne sachant
     définir qu'une lettre. Il ne protège pas contre un processus hostile du
     même compte, qui peut de toute façon écrire dans le coffre.
-  - Le contrôle du chemin final de chaque nouveau handle réduit l'effet d'un
-    masquage à un objet vide à l'endroit masqué.
+  - **Effet d'un masquage** : celui que HW8 constate, séparément pour
+    `CreateDir`, `NewFile` et `Move`. Il est écrit ici avec les résultats ;
+    aucun effet maximal n'est promis avant eux.
 - **Lectures.**
   - Les lectures de `platform/filesystem` résolvent encore des lettres :
     installation, sources, coffre et zone au plan, relectures sous verrou,
@@ -813,7 +973,8 @@ Limites qui restent après B5 :
   - Le chemin GUID suit le volume, pas la lettre.
   - Un volume retiré puis réinséré pendant une session laisse des handles
     morts : la session s'invalide, rien n'est écrit sur le nouveau montage
-    (§4.1, HW7).
+    (§4.1). Garanti seulement par HW7, obligatoire avant la fermeture de
+    S-01.
   - Entre deux exécutions, un volume remonté ailleurs est le même volume
     pour le plan suivant, qui refait tous ses contrôles.
 - **Alias.** Refusés en B5 ; leur acceptation est reportée (§13). Le
@@ -821,7 +982,8 @@ Limites qui restent après B5 :
   la lettre : les dossiers au-dessus de la cible d'un alias ne sont pas
   contrôlés.
 - **`doctor`** lit un état qui peut changer pendant sa lecture. La lecture
-  stable le borne sans le figer ; résidu de HD2 s'il est établi.
+  stable le borne sans le figer. Aucun résidu d'interférence n'est admis
+  (T12) ; une vérification retirée par HD2 est écrite comme non faite.
 - **Tolérance de B2** : limite datée (Q5).
 - Toutes les limites de B4 restent : restauration remise non suivie, coffre
   copié refusé, falsification coordonnée hors modèle.
@@ -864,7 +1026,8 @@ fait échouer T5.
   - Refus à l'ouverture : chaîne incohérente, racine de lettre devenue
     alias.
   - Nouveaux refus sous session de `sync` et `snapshot` (T4).
-  - Refus après un chemin final hors de la base.
+  - Refus après un chemin final hors de la base : nouveau handle, source ou
+    destination d'un `Move`.
   - Session invalidée après un défaut de périphérique.
   - Erreurs de `platform/vault` qui nomment un chemin relatif au lieu du
     chemin complet.
@@ -905,10 +1068,10 @@ fait échouer T5.
 
 Avant tout code :
 
-1. revue ciblée de cette v0.2 par le propriétaire et le CTO, avis sur S-02
-   compris, et acceptation, en v0.3 si des corrections le demandent ;
-2. PR documentaire de T21 ;
-3. GO de développement distinct.
+1. acceptation explicite de cette v0.3 par le propriétaire, après une revue
+   différentielle courte ;
+2. push et PR documentaire de T21, chacun sur GO distinct ;
+3. GO de développement distinct, propre à B5a.
 
 Les amendements d'ADR s'appuient sur les résultats HW : ils sont rédigés
 après eux et acceptés avant tout code de production. Chaque sous-lot part
@@ -923,24 +1086,24 @@ Bases des différentiels :
 
 | # | Sous-lot | Commit | Point de contrôle |
 | --- | --- | --- | --- |
-| 0a | — | v0.2 revue et acceptée | **Acceptation par le propriétaire** |
+| 0a | — | v0.3 acceptée | **Acceptation explicite par le propriétaire** |
 | 0b | — | PR documentaire (T21) | **Human GO de fusion**, puis GO de développement |
-| 1 | B5a | Tests réels HW1 à HW12, sans code de production ; protocole de HW7 pour le propriétaire | **Résultats HW revus** ; une hypothèse tombée arrête B5a |
+| 1 | B5a | Tests réels HW1 à HW12, sans code de production ; tests VHD de HW7 et HW11 ; protocoles de HW7, et de HW11 s'il n'est pas prouvé en CI, pour le propriétaire | **Résultats HW revus**, HW7 et HW11 compris, avant le commit 2 ; une hypothèse tombée ou non prouvée arrête B5a |
 | 2 | B5a | Amendements d'ADR 0005 et 0006 §11, rédigés avec les résultats HW | **Acceptation par le propriétaire** avant le commit 3 |
-| 3 | B5a | T4 seul : chaîne tenue et lectures de décision en lecture seule ; chaînes du plan en mémoire ; contrôles sous session avant toute écriture, pour `sync`, `snapshot`, `restore` et toutes les récupérations ; tests sur faux et réels | — |
+| 3 | B5a | T4 seul : chaîne tenue et lectures de décision en lecture seule ; chaînes du plan en mémoire ; contrôles sous session avant toute écriture, pour `sync`, `snapshot`, `restore` et toutes les récupérations, cible absente selon C1 et ordre imposé ; tests sur faux et réels | — |
 | 4 | B5a | S-02 : requête de racine de volume ; refus ; chaînes depuis la vraie racine ; raccourci « même lettre » supprimé ; tests sur faux et réels des deux côtés, pour les trois commandes et leurs récupérations | — |
-| 5 | B5a | Base de volume : ouverture en deux branches, contrôle de chaîne, chemin final des handles, invalidation, volume tenu, erreurs sans base ; commentaires (T6) | — |
+| 5 | B5a | Base de volume : ouverture en deux branches, contrôle de chaîne, chemin final des handles, postcondition de `Move`, invalidation, volume tenu, erreurs sans base ; commentaires (T6) | — |
 | 6 | B5a | Tests réels de réattribution pendant une session ; requalification de B2 à B4 ; différentiel contre `a59d787`, erreurs comprises | — |
-| 7 | B5a | Rapport `docs/validation/b5a.md` ; S-01 et S-02 fermés dans le modèle de sécurité ; documentation des commandes | **Revue de sécurité indépendante, obligatoire**, puis gate de S-01 et S-02 et GO de fusion |
+| 7 | B5a | Rapport `docs/validation/b5a.md` ; S-01 et S-02 fermés dans le modèle de sécurité ; documentation des commandes | **Revue de sécurité indépendante, obligatoire**, port `Vault`, fausses sessions et ordre des appels compris, puis gate de S-01 et S-02 et GO de fusion |
 | 8 | B5b | Noms de la matrice B4 (T10), tests seuls | — |
-| 9 | B5b | M1 : mesure sur un coffre synthétique, benchmark hors CI ; valeur consignée par erratum | **Valeur acceptée** par le propriétaire |
+| 9 | B5b | M1 : mesure sur un coffre synthétique, benchmark hors CI ; grands receipts, noms nombreux et longs, profondeur ; valeur en octets et valeurs de comptage consignées par erratum | **Valeurs acceptées** par le propriétaire |
 | 10 | B5b | Amendement d'ADR 0008 | **Acceptation** avant le commit 13 |
 | 11 | B5b | T7 : fenêtre reproduite sur faux pour les deux domaines et les plans de récupération ; correction ou preuve consignée | — |
 | 12 | B5b | Budgets (T8) | — |
 | 13 | B5b | P2-4 et N2 | — |
 | 14 | B5b | Profondeur JSON, verrou de récupération signalé, `.gitignore` ; rapport `b5b.md` | **Revue indépendante de non-régression**, avec un **regard de sécurité sur N2 et P2-4**, puis GO de fusion |
 | 15 | B5c | ADR 0010 et amendement d'ADR 0004 | **Acceptation par le propriétaire** |
-| 16 | B5c | Tests réels HD1 et HD2, sans code de production | **Résultats revus** |
+| 16 | B5c | Tests réels HD1 et HD2, classe par classe, sans code de production | **Résultats revus** ; toute classe non prouvée est retirée par un erratum accepté avant le commit 18 |
 | 17 | B5c | Types d'observation ; relevés en lecture seule de `sync` ; noms de verrou classés sans ouverture | **Revue de non-régression** et différentiel de `sync`, `snapshot`, `restore` et `inspect` contre la fusion de B5b |
 | 18 | B5c | Feature `doctor`, structurel | — |
 | 19 | B5c | `--verify` ; zones ; CLI et composition ; tests d'imports | — |
@@ -976,11 +1139,19 @@ de différentiel et de course échouent s'ils ne sont pas exercés
 | `TestLetterRemappedDuringTheSession` (Windows réel) | HW4 |
 | `TestPinsHoldThroughTheVolumePath` (Windows réel) | HW5 |
 | `TestVolumePathLongAndUnicodeNames` (Windows réel) | HW6 |
-| `TestLocalVolumeNameShadowing` (Windows réel, CI seulement) | HW8 |
+| `TestLocalVolumeNameShadowing` (Windows réel, CI seulement) | HW8a à HW8c : effet constaté séparément pour `CreateDir`, `NewFile` et `Move` |
 | `TestNewHandleOutsideTheBaseIsRefused` | Chemin final hors de la base : refus, session invalidée |
-| `TestSessionIsInvalidatedAfterADeviceError` | Invalidation et vivacité de l'épingle racine ; HW7 manuel |
+| `TestMoveChecksItsSourceAndDestination` (faux et Windows réel) | Postcondition de `Move` : source hors de la base, rien renommé ; destination hors de la base ou d'une autre identité, session invalidée ; renommage d'un temporaire compris |
+| `TestSessionIsInvalidatedAfterADeviceError` | Invalidation et vivacité de l'épingle racine, sur faux |
+| `TestVolumeDetachedDuringTheSession` (Windows réel, VHD, CI si le runner le permet) | HW7a à HW7c sur un volume fixe démonté ; complété par le protocole du propriétaire sur un vrai volume amovible, obligatoire |
 | `TestSessionVolumeIsDescribedByHandle` (Windows réel) | HW10 |
-| `TestMountPointAmongAncestorsIsRefused` (Windows réel) | HW11, si le runner le permet |
+| `TestMountPointAmongAncestorsIsRefused` (Windows réel, VHD) | HW11, obligatoire : en CI si le runner le permet, sinon protocole du propriétaire |
+| `TestAbsentTargetBesideAReferenceIsAccepted` (faux et Windows réel) | C1, cas positifs. Zone absente sœur d'une source, coffre neuf frère de l'installation, cible absente dont le parent est l'ancêtre commun des références ; racine du volume comme ancêtre commun, sur faux. Acceptés, publication normale |
+| `TestAbsentTargetUnderAReferenceIsRefused` (faux et Windows réel) | C1, cas négatifs. Zone absente sous une source, sous l'installation ou sous le coffre : code 1, rien écrit |
+| `TestExistingTargetContainingAReferenceIsRefused` (faux et Windows réel) | C1. Zone existante qui contient une source ou l'installation : code 1, rien écrit |
+| `TestCreatedRootIsCheckedBeforeTheLock` (faux) | C1. Une référence apparue sous la racine créée est refusée avant le verrou ; seule la racine vide reste |
+| `TestSessionOrderIsOpenChecksLockWrites` (faux) | Avis 3. La fausse session enregistre l'ordre des appels. Un verrou ou une écriture avant la fin des contrôles fait échouer le test, pour chaque commande et chaque récupération |
+| `TestRestoreRecoverChecksSavedPathsWithoutTheVault` (Windows réel, binaire) | Chemin sauvegardé alias dans un plan journalisé synthétique de la zone : refus, code 1, rien écrit. La trace ne montre aucune ouverture du coffre |
 | `TestSessionErrorsNameNoVolumePath` (Windows réel, binaire) | Erreur d'écriture forcée : ni stderr ni l'enregistrement `failed` ne contiennent `\\?\Volume{` ou la base |
 | `TestChecksUnderTheSessionUseTheHeldChain` | T4 : recouvrements parent et enfant dans les deux sens, références historiques, zone déplacée, observation impossible ; code 1, rien écrit ; pour `sync`, `snapshot`, `restore` et les récupérations |
 | `TestRestoreRefusesALetterRemappedAfterTheSession` (Windows réel, binaire) | Aucune écriture hors de la zone tenue |
@@ -1001,7 +1172,7 @@ de différentiel et de course échouent s'ils ne sont pas exercés
 | `TestVolumeNotReadyOnlyChangesTheGate` | N2 : la porte classe la preuve comme indisponible ; `inspect` et `restore` inchangés |
 | `TestJSONDepthIsCapped` | Plafond indépendant du décodeur ; message avec « depth » |
 | `TestCurrentRecoveryReportsItsLock` | Verrou créé par la récupération de `current`, signalé |
-| `BenchmarkVaultReadAtScale` (hors CI) | M1 : mémoire et temps sur 36 500 opérations |
+| `BenchmarkVaultReadAtScale` (hors CI) | M1 : mémoire et temps sur 36 500 opérations par domaine, grands receipts, noms nombreux et longs, arborescence profonde ; valeurs de comptage confirmées ou corrigées |
 | Six tests nommés selon la matrice B4 | T10 : mêmes assertions |
 
 **B5c, `doctor`**
@@ -1010,9 +1181,13 @@ de différentiel et de course échouent s'ils ne sont pas exercés
 | --- | --- |
 | `TestDoctorWritesNothing` (Windows réel, binaire) | Deux exécutions sous ACL de refus d'écriture sur tout l'arbre : sorties et empreintes identiques |
 | `TestDoctorNeverOpensLockFiles` (Windows réel) | HD1 ; aucune ouverture de `sync.lock` ni de `restore.lock` dans la trace des lectures |
-| `TestDoctorRunsBesideWriters` (Windows réel, binaire) | `sync --apply`, première publication et rotation, et `restore --apply` pendant que `doctor` tourne en boucle, structurel puis `--verify`. Les écritures réussissent, ou le résidu HD2 est observé en `rolled back`, sans dommage |
+| `TestDoctorRunsBesideWriters` (Windows réel, binaire) | `sync --apply`, première publication et rotation, `snapshot --apply` et `restore --apply`, pendant que `doctor` tourne en boucle, structurel puis `--verify`. **Toutes les écritures réussissent, code 0 : aucun `rolled back`, aucun `busy`** |
+| `TestDoctorOpensOnlyWhatHD2Proved` (Windows réel) | Trace des ouvertures : chacune relève d'une classe prouvée par HD2 ; aucune ouverture d'une classe retirée |
 | `TestDoctorHealthyVault` | Coffre synthétique sain, structurel et `--verify` : code 0 |
-| `TestDoctorCodesFollowTheTable` | Chaque ligne de la table du §4.5 : constat, code et action ; jamais moins sévère que la commande de référence |
+| `TestDoctorCodesFollowTheTable` | Chaque ligne de la matrice du §4.5 : constat, code et action |
+| `TestDoctorAgreesWithItsReferenceCommand` | C3, cas contradictoires, chacun construit deux fois à l'identique : `doctor` sur l'un, la commande de référence sur l'autre. Couvre `current` d'une autre identité ou d'un autre contenu, avec et sans opération en attente ; une génération conservée, avec et sans rotation en attente ; un snapshot dégradé. Le code de `doctor` est celui de la matrice et jamais sous celui de la référence, un refus comptant pour 2 |
+| `TestDoctorUsageErrorIsNotAFinding` | Erreur d'usage, manifeste illisible, coffre non marqué : code 1, aucun rapport. Refus d'une commande de référence : constat de code 2, rapport complet |
+| `TestDoctorReportCodeIsTheHighestFinding` | Constats 0, 2 et 3 mêlés : code 3 ; 0 et 2 : code 2 |
 | `TestDoctorPendingOperationIsUndecided` | Constat distinct, code 3, action `--recover` sans `--apply`, aucune sonde |
 | `TestDoctorOneFindingPerArea` | Zone d'un autre jeu : constat de cette zone, rapport complet |
 | `TestDoctorVerifyStreamsAgainstTheReceipt` | `--verify` hache en flux, borné par le receipt ; contenu plus grand : constat |
@@ -1028,7 +1203,7 @@ de différentiel et de course échouent s'ils ne sont pas exercés
 | Test | Preuve |
 | --- | --- |
 | `TestPinsRefuseArtifactsAndWritePermissions` | Fixtures négatives : `upload-artifact`, `contents: write`, `packages: write`, `id-token: write`, `attestations: write`, hooks GoReleaser |
-| Smoke d'archive | §4.6 |
+| Smoke d'archive | §4.6 ; binaire de GoReleaser épinglé, v2.20.0 au moins, exécuté avec Go 1.27.3 sur Windows |
 | Campagne | §11 |
 
 ---
@@ -1102,37 +1277,57 @@ L'agent n'accède à aucun coffre ni à aucune zone.
 
 ## 12. Critères d'acceptation
 
-1. **S-01.** HW1 à HW6 et HW8 à HW12 prouvés. HW7 est prouvé manuellement
-   par le propriétaire, ou son absence est déclarée et écrite comme limite.
-   Les tests réels de réattribution pendant une session ne montrent aucune
-   écriture hors de la cible tenue.
+1. **S-01.** HW1 à HW12 prouvés, **HW7 et HW11 compris, sans exception**.
+   HW7 est prouvé par le propriétaire sur un vrai volume amovible, et par
+   un VHD en CI si le runner le permet. HW11 est prouvé en CI par un VHD, ou
+   par le propriétaire. Aucune absence n'est admise : sans ces preuves,
+   S-01 n'est pas fermé et B5a ne fusionne pas. HW8 constate séparément les
+   effets de `CreateDir`, `NewFile` et `Move`, et le résidu écrit est celui
+   qu'il observe. Les tests réels de réattribution pendant une session ne
+   montrent aucune écriture hors de la cible tenue.
 2. **S-02.** Lettres qui ne sont pas des racines de volume refusées partout
-   où T20 le dit. Chaînes depuis la vraie racine ; raccourci « même lettre »
-   supprimé. Tests réels des deux côtés pour `sync`, `snapshot`, `restore`
-   et leurs récupérations.
+   où T20 le dit, chemins sauvegardés compris. Pour `restore --recover`,
+   ce sont ceux des plans de la zone, sans lire le coffre. Chaînes depuis la
+   vraie racine ; raccourci « même lettre » supprimé. Tests réels des deux
+   côtés pour `sync`, `snapshot`, `restore` et leurs récupérations. Une
+   cible absente sœur d'une référence est acceptée, et une cible sous une
+   référence ou qui en contient une est refusée (C1).
 3. Aucune API d'écriture nouvelle ; amendements d'ADR 0005 et 0006 acceptés
    avant le code ; instrumentation de la règle « aucune lettre après
-   `Open` ».
+   `Open` ». L'ordre `Open`, contrôles, verrou, premières mutations est
+   testé. Le port `Vault` et les fausses sessions sont relus par la revue de
+   sécurité.
 4. Suites B2, B3 et B4 inchangées. Sorties identiques au binaire de
    `a59d787` hors du §7.2, erreurs comprises. Tests de différentiel et de
    course exercés sur le SHA exact.
 5. S-01 et S-02 fermés par une revue de sécurité indépendante et un gate du
    propriétaire, consignés.
 6. Lecture du coffre stable, ou preuve d'absence de fenêtre consignée.
-   Budgets appliqués, valeur M1 acceptée. Points de B3 corrigés ou
-   arbitrés ; ADR 0008 accepté avant son code.
-7. `doctor` n'écrit rien, n'ouvre aucun verrou et ne tient aucune épingle :
-   test sous ACL de refus et test de concurrence.
-8. Chaque constat suit la table normative ; aucune action ne supprime.
+   Budgets appliqués. Valeurs M1 acceptées, octets et comptages, grands
+   receipts, noms et profondeur compris. Points de B3 corrigés ou arbitrés ;
+   ADR 0008 accepté avant son code.
+7. `doctor` n'écrit rien, n'ouvre aucun verrou, ne tient aucune épingle et
+   ne fait échouer aucune écriture concurrente. Preuves : test sous ACL de
+   refus, et test de concurrence **sans aucun `rolled back` ni `busy`**.
+   Chaque ouverture relève d'une classe prouvée par HD2.
+8. Chaque constat suit la matrice normative, cas contradictoires testés
+   contre leur commande de référence. Le code 1 est réservé à l'absence de
+   rapport. Aucune action ne supprime.
 9. `--verify` relit en flux `current`, les générations conservées et les
-   snapshots publiés. Les restaurations remises ne sont jamais ouvertes
-   pour leur contenu.
+   snapshots publiés. Si HD2 l'a exclu, il ne relit que les snapshots
+   publiés, par un erratum accepté avant le code de `doctor`. Les
+   restaurations remises ne sont jamais ouvertes pour leur contenu.
 10. Frontière de `doctor` contrôlée par les tests d'imports ; ADR 0010 et
     amendement d'ADR 0004 acceptés.
 11. Build de contrôle verte en CI : aucun secret, **aucun artefact sur le
     run**, vérifié par l'API ; aucun hook ; `release: disable: true`. Le
     vérificateur refuse les artefacts et les permissions d'écriture.
-12. Revues indépendantes consignées : sécurité de B5a ; non-régression et
+    GoReleaser est épinglé à une version stable exacte, v2.20.0 au moins,
+    et testé avec Go 1.27.3 sur Windows.
+12. Revues indépendantes de l'auteur consignées, chacune avec son auteur ou
+    son rôle. Une revue du propriétaire, rôle de CTO compris, n'est jamais
+    présentée comme une approbation indépendante de lui. Revues attendues :
+    sécurité de B5a, port `Vault` et fausses sessions compris ; non-régression et
     regard de sécurité sur N2 et P2-4 en B5b ; point de contrôle du commit
     17 ; lecture seule et non-interférence de B5c ; CI et chaîne
     d'approvisionnement de B5d.
@@ -1154,6 +1349,7 @@ L'agent n'accède à aucun coffre ni à aucune zone.
 | Cyberpunk 2077, Metal Gear Solid V | Lot B6 : dossiers connus, profils, manifeste et ADR 0002 ; écart au plan directeur §7 consigné |
 | Acceptation des alias de lettre | Refusés (T20) ; reconsidérée après preuves, chaînes de référence comprises |
 | Vérification du contenu d'une restauration remise par `doctor` | Exclue (Q3) ; demanderait un amendement coordonné d'ADR 0006 §11 et d'ADR 0009 |
+| Vérification de `current` et des générations conservées par `doctor`, si HD2 l'exclut | Reportée par erratum ; `--verify` ne relit alors que les snapshots publiés (T12, §4.5) |
 | Processus hostile du même compte | Hors du modèle de menace (§6) |
 | Lectures indépendantes des lettres | Limite écrite (§6) |
 | Contrôle de liens d'`inspect` au-dessus d'un alias | Limite écrite (§6) |
@@ -1173,16 +1369,18 @@ L'agent n'accède à aucun coffre ni à aucune zone.
 | Risque | Effet | Parade |
 | --- | --- | --- |
 | Hypothèse Windows fausse sur les chemins de volume | Primitives cassées ou garantie fausse | HW1 à HW12 prouvés avant le code ; arrêt et arbitrage, jamais de repli silencieux |
-| Masquage de `Volume{GUID}` par un nom local | Écriture ailleurs | Contrôle du chemin final de chaque handle ; HW8 ; résidu et modèle de menace écrits |
+| Masquage de `Volume{GUID}` par un nom local | Écriture ailleurs | Contrôle du chemin final de chaque handle ; postcondition de `Move` ; HW8a à HW8c ; résidu constaté et modèle de menace écrits |
+| Cible absente sœur d'une référence refusée à tort | Zone ou coffre neuf légitime bloqué | Parent jamais cherché dans une chaîne de référence ; tests positifs de frères (C1) |
 | Détection S-02 imparfaite | Alias accepté, ou vraie lettre refusée | HW12 et sa contre-épreuve ; témoins réels des deux côtés ; refus nommés |
 | Nouveaux refus pour une configuration légitime | Utilisateur bloqué | Messages qui nomment l'issue, désigner le volume par sa lettre ; documentés |
 | Régression de `sync`, `snapshot` ou `restore` | Perte d'une garantie qualifiée | Suites complètes ; différentiel normalisé, erreurs comprises ; revue de sécurité ; campagne obligatoire |
 | GUID affiché ou consigné | Sorties changées, données de machine exposées | Erreurs sans base ; test d'erreur forcée ; différentiel |
-| Volume réinséré pendant une session | Écriture sur un montage neuf | Invalidation, vivacité de l'épingle racine ; HW7b |
+| Volume réinséré pendant une session | Écriture sur un montage neuf | Invalidation, vivacité de l'épingle racine ; HW7 obligatoire, sur un vrai volume amovible |
 | Faux code 3 de la lecture du coffre | Doute injustifié | T7 : reproduction, puis lecture stable |
 | Budget trop bas | Coffre légitime refusé | Dimensionnement écrit ; M1 ; message distinct et issue documentée |
 | `doctor` pris pour un outil de réparation | Gestes manuels risqués | Actions nommées, jamais de suppression |
-| `doctor` qui gêne une écriture | `Lock` ou rotation refusés | Noms de verrou jamais ouverts ; partage complet ; HD1, HD2 ; test de concurrence |
+| `doctor` qui gêne une écriture | `Lock` ou rotation refusés | Gate strict de T12 ; noms de verrou jamais ouverts ; partage complet ; HD1, HD2 classe par classe ; classe non prouvée retirée ; test de concurrence sans aucun `rolled back` |
+| Codes de `doctor` contradictoires | Action mal choisie | Matrice sémantique ; commande de référence par ligne ; cas contradictoires testés (C3) |
 | Frontière `doctor` qui fuit vers `sync` | Couplage entre features | Ports définis par `doctor` ; types dans `entities/backup` ; adaptateur étroit ; point de contrôle du commit 17 ; ADR 0010 |
 | Artefact ou secret dans le job de release | Binaire distribué, publication involontaire | Aucun artefact, vérifié ; vérificateur étendu ; `release: disable: true` ; revue CI et chaîne d'approvisionnement |
 | Binaire de campagne différent de la RC | Qualification d'un autre binaire | Reconstruction par le GoReleaser épinglé ; checksums comparés à la CI ; aucun Go de production en B5d |
@@ -1211,4 +1409,5 @@ Pour chaque sous-lot :
 | Version | Date | Commit | Changements |
 | --- | --- | --- | --- |
 | 0.1 | 5 novembre 2026 | `646d11f`, branche `docs/b5-framing` | Brouillon de cadrage sur le GO du propriétaire du 5 novembre 2026, en documentation seule : S-01 en tête de B5, points ouverts de B4 intégrés. Décisions T1 à T19 proposées ; option A de S-01 et hypothèses HW1 à HW7 ; `doctor` en feature avec ADR 0010 ; points ouverts de B3 ; découpage en quatre PR ; campagne et build de release en snapshot. Aucune revue intégrée, aucun ADR rédigé, aucun GO de développement |
-| 0.2 | 6 novembre 2026 | local, branche `docs/b5-framing` | **Arbitrages du propriétaire du 6 novembre 2026 sur Q1 à Q9** (§0.3). Intégration de la revue indépendante r2 et de la revue CTO (§0.4). **S-02 intégré à B5a** (T20) : refus des lettres qui ne sont pas des racines de volume, chaînes depuis la vraie racine, raccourci « même lettre » supprimé. T2 précisé : ouverture en deux branches, cohérence de chaîne, chemin final des handles, invalidation, erreurs sans base, volume tenu. T4 réécrit sur les chaînes tenues, dans les deux sens, avant toute écriture. Hypothèses HW1 à HW12, HD1 et HD2. Budgets sur les métadonnées par lecture, valeurs dérivées, octets mesurés en M1 (écart signalé). `doctor` : ce qu'il ouvre, table normative des codes, présence seule des restaurations remises, un constat par zone, trois options de frontière comparées. Build de contrôle sans artefact ni hook, vérificateur étendu, aucun Go de production en B5d. Campagne et rotation obligatoires. Nouvelles décisions T20 à T22. Contexte mis à jour : B4 clos, release à `a59d787`, PR #15. Aucun ADR rédigé, aucun GO de développement |
+| 0.2 | 6 novembre 2026 | `1bdeb01`, local, branche `docs/b5-framing` | **Arbitrages du propriétaire du 6 novembre 2026 sur Q1 à Q9** (§0.3). Intégration de la revue indépendante r2 et de la revue CTO (§0.4). **S-02 intégré à B5a** (T20) : refus des lettres qui ne sont pas des racines de volume, chaînes depuis la vraie racine, raccourci « même lettre » supprimé. T2 précisé : ouverture en deux branches, cohérence de chaîne, chemin final des handles, invalidation, erreurs sans base, volume tenu. T4 réécrit sur les chaînes tenues, dans les deux sens, avant toute écriture. Hypothèses HW1 à HW12, HD1 et HD2. Budgets sur les métadonnées par lecture, valeurs dérivées, octets mesurés en M1 (écart signalé). `doctor` : ce qu'il ouvre, table normative des codes, présence seule des restaurations remises, un constat par zone, trois options de frontière comparées. Build de contrôle sans artefact ni hook, vérificateur étendu, aucun Go de production en B5d. Campagne et rotation obligatoires. Nouvelles décisions T20 à T22. Contexte mis à jour : B4 clos, release à `a59d787`, PR #15. Aucun ADR rédigé, aucun GO de développement |
+| 0.3 | 6 novembre 2026 | local, branche `docs/b5-framing` | **Révision ciblée sur la revue CTO de `1bdeb01`** (§0.5), sans réécriture. C1 : parent d'une cible absente réservé à l'ancrage, chaîne reconstruite après création, tests de frères. C2 : HW7 obligatoire (décision 13) ; HW11 obligatoire aussi, proposé au titre des garanties non testées. C3 : matrice sémantique des codes, commande de référence par ligne, cas de `current` et des générations conservées exhaustifs, snapshot dégradé en 2. C4 : gate strict de T12, HD2 classe par classe, repli de `--verify` sur les snapshots publiés (décision 14). « Objet vide » supprimé ; HW8 en trois constats ; postcondition de `Move`. Décisions 10 à 12 postérieures à `1bdeb01` ; `restore --recover` sans coffre ; ordre imposé et revue du port `Vault` ; M1 élargi ; GoReleaser v2.20.0 au moins. Rôle de CTO tenu par le propriétaire, consigné. Aucun ADR rédigé, aucun GO de push, de fusion ni de développement |
