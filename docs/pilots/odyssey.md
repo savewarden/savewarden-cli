@@ -245,7 +245,8 @@ de `current` attesté, manifeste inchangé depuis B3, 5 sur 5.
 
 La restauration publiée reste dans la zone dédiée, remise au propriétaire.
 Qualification fonctionnelle du parcours nominal prononcée par le propriétaire
-le 6 novembre 2026, après examen du résumé, sur avis favorable du CTO. Détail dans
+le 6 novembre 2026, après examen du résumé, par sa décision explicite ; le
+CTO a rendu le même jour un avis favorable, distinct. Détail dans
 [le rapport B4](../validation/b4.md#pilote-b4).
 Aucune sortie brute, aucune empreinte de sauvegarde, aucun receipt réel,
 aucun identifiant d'opération, aucun nom de profil ni aucun chemin personnel
