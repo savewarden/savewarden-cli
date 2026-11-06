@@ -28,12 +28,14 @@ de la commande par [ADR 0009](../adr/0009-restore-contract-receipt-v1.md).
   journal publié, son receipt et son identité, puis son contenu, relu contre
   son receipt. Rien d'autre du coffre n'est lu ; une anomalie ailleurs dans le
   coffre ne bloque pas la restauration d'un snapshot intact.
-- **Jamais dans le jeu, le coffre ou une source.** La zone est comparée à
-  l'installation, aux sources du manifeste, aux chemins que le snapshot a
-  sauvegardés et au coffre, par nom et par identité NTFS depuis la racine de
-  chaque volume, quelle que soit la lettre de lecteur : un alias `subst` ne
-  contourne pas le contrôle. Une séparation qui ne peut pas être prouvée est
-  refusée.
+- **Jamais dans le jeu, le coffre ou une source**, sauf alias de lettre. La
+  zone est comparée à l'installation, aux sources du manifeste, aux chemins
+  que le snapshot a sauvegardés et au coffre, par nom et par identité NTFS
+  depuis la racine de chaque lettre de lecteur. Une séparation qui ne peut
+  pas être prouvée est refusée. Un alias `subst` égal à une référence est
+  refusé ; **un alias qui désigne un sous-dossier d'une référence ne l'est
+  pas**, et la restauration est alors publiée dans la source ou dans le
+  coffre : défaut ouvert, voir les [limites](#limites).
 - **Rien n'est remplacé ni supprimé.** Chaque `--apply` publie une nouvelle
   restauration sous un nouvel identifiant ; un dossier existant non vide
   n'est jamais adopté.
@@ -57,8 +59,9 @@ de la commande par [ADR 0009](../adr/0009-restore-contract-receipt-v1.md).
 **vide**, ou une zone déjà marquée **pour le même jeu**. Tout autre dossier est
 refusé en code 1, sans rien écrire : un dossier non vide sans marqueur, un
 fichier, un lien ou une jonction, un coffre, une zone d'un autre jeu, ou un
-dossier situé dans un coffre ou dans une autre zone. Le volume doit être NTFS,
-sur un lecteur local fixe ou amovible.
+dossier situé dans un coffre ou dans une autre zone, à moins qu'un alias de
+lettre ne le masque. Le volume doit être NTFS, sur un lecteur local fixe ou
+amovible.
 
 `<op>` est l'identifiant de l'opération de restauration,
 `AAAAMMJJTHHMMSS-xxxxxxxx`. Le [receipt de restauration et le marqueur de
@@ -190,6 +193,15 @@ jamais sur le coffre.
 
 ## Limites
 
+- **Alias de lettre : n'en employez aucun.** Les distinctions partent de la
+  racine de la lettre, pas du volume. Une lettre qui désigne un dossier, par
+  `subst` par exemple, et pointe à l'intérieur d'une source ou du coffre
+  n'est pas détectée : sur Windows réel, la restauration est publiée dans la
+  source ou dans le coffre, code 0. Rien n'y est remplacé ni supprimé. Tant
+  que le chantier S-02 du
+  [modèle de sécurité](../safety-model.md#chantiers-de-sécurité-ouverts)
+  est ouvert, ne désignez ni la zone, ni le coffre, ni les chemins du
+  manifeste par un alias de lettre.
 - **Disque d'origine indisponible.** Tant qu'une lettre de lecteur nommée par
   le manifeste, ou par les chemins que le snapshot a sauvegardés, ne désigne
   aucun volume, la restauration est refusée : la séparation ne peut pas être

@@ -18,7 +18,9 @@ jeu et son launcher avant l'inspection.
 - **Aucun lien suivi.** Liens symboliques, jonctions, autres points
   d'analyse (*reparse points*) et placeholders hors ligne ou cloud sont
   signalés, jamais traversés ni lus. La règle s'applique à chaque dossier
-  depuis la racine du volume jusqu'à la source, puis à chaque entrée.
+  depuis la racine de la lettre de lecteur jusqu'à la source, puis à chaque
+  entrée ; pour un lecteur `subst`, les dossiers au-dessus de sa cible ne
+  sont pas contrôlés, voir les [limites](#limites).
 - **Dossiers épinglés.** Sous Windows, chaque dossier traversé reste ouvert
   sans droit de suppression jusqu'à la fin : il ne peut pas être renommé ni
   remplacé par une jonction pendant l'inspection.
