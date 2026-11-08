@@ -48,7 +48,10 @@ func hwNewVHD(t *testing.T, label string) *hwVHD {
 		}
 		t.Skipf("%s needs administrator rights for diskpart: proven on CI", label)
 	}
-	dir := hwTemp(t)
+	// diskpart finds an attached VHD by the path it was attached with, in
+	// its long form: on the CI runner, TEMP holds the 8.3 name RUNNER~1, and
+	// a second diskpart given the short path reports the VHD as detached.
+	dir := hwLongPath(t, hwTemp(t))
 	v := &hwVHD{file: filepath.Join(dir, label+".vhdx"), mount: filepath.Join(dir, label+"-mount")}
 	hwMkdir(t, v.mount)
 	t.Cleanup(func() {
@@ -70,6 +73,27 @@ func hwNewVHD(t *testing.T, label string) *hwVHD {
 	}
 	v.guid = guid
 	return v
+}
+
+// hwLongPath returns the long form of an existing path, every 8.3 name
+// expanded; the buffer is sized by a first call.
+func hwLongPath(t *testing.T, path string) string {
+	t.Helper()
+	pointer, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var probe [1]uint16
+	size, err := windows.GetLongPathName(pointer, &probe[0], 0)
+	if err != nil {
+		t.Fatalf("long path of %s: %v", path, err)
+	}
+	buffer := make([]uint16, size)
+	n, err := windows.GetLongPathName(pointer, &buffer[0], size)
+	if err != nil || n >= size {
+		t.Fatalf("long path of %s: %d characters for %d, %v", path, n, size, err)
+	}
+	return windows.UTF16ToString(buffer[:n])
 }
 
 func (v *hwVHD) detach(t *testing.T) {
