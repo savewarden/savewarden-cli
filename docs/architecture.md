@@ -124,7 +124,7 @@ build tags.
   publication est paramétré par le domaine de l'opération, `current` ou
   snapshots, sans changement de comportement pour `current`. Aucun port ni
   frontière nouvelle, aucune API d'écriture nouvelle.
-- B4, en développement : restauration d'un snapshot approuvé vers une zone
+- B4, livré : restauration d'un snapshot approuvé vers une zone
   de restauration isolée, [documentée](commands/restore.md),
   [receipt de restauration et marqueur de zone](restore-receipt-v1.md),
   protocole d'ADR 0006 §11 et contrat
@@ -132,7 +132,17 @@ build tags.
   par défaut, sans écriture ; aucun écrasement, aucune restauration en place,
   aucune écriture dans le coffre. Opération de `features/sync`, sans port ni
   frontière nouvelle ni API d'écriture nouvelle.
-- B5 : diagnostic read-only et campagne pilote.
+- B5, cadrage accepté le 7 novembre 2026, aucun code encore
+  ([plan v0.5](../.plans/Savewarden_Plan_B5_Durcissement_Doctor_RC_v0.5.md)) :
+  quatre PR successives. B5a ferme les chantiers S-01 et S-02 du
+  [modèle de sécurité](safety-model.md#chantiers-de-sécurité-ouverts) :
+  écritures par le chemin de volume des épingles, refus des lettres qui ne
+  désignent pas une racine de volume, chaînes depuis la vraie racine. B5b
+  durcit les lecteurs du coffre. B5c ajoute `doctor`, diagnostic en lecture
+  seule, dans une feature `features/doctor` soumise à ADR 0010 et à un
+  amendement d'ADR 0004, tous deux à accepter. B5d prépare la release
+  candidate par une campagne pilote et un build de contrôle, sans
+  publication.
 
 Les contrats encore futurs ne sont pas implémentés : aucune rétention des
 générations conservées, et la CLI n'a pas de sortie JSON. Les erreurs futures utilisent contexte et
