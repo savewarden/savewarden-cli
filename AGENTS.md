@@ -4,12 +4,16 @@
 
 - Lire le plan demandé intégralement et inspecter statut, branche, remote et
   fichiers existants avant toute écriture. Ne pas écraser du travail existant.
-- Lot courant : **B4**, restauration isolée, selon
-  `.plans/Savewarden_Plan_B4_Restauration_v0.2.md`, validé par le
-  propriétaire, et ADR 0004 à 0009, dont ADR 0006 §11. B3 est clos ; B4 est
-  livré en une PR, après un GO distinct ; puis Human GO et plan accepté avant
-  B5. Les snapshots et la restauration sont des opérations de
-  `features/sync` ; `restore` n'écrit jamais le coffre.
+- Lot courant : **B5**, durcissement S-01 et S-02, diagnostic `doctor` et
+  préparation de la release candidate, selon
+  `.plans/Savewarden_Plan_B5_Durcissement_Doctor_RC_v0.5.md`, accepté par le
+  propriétaire le 7 novembre 2026, et ADR 0004 à 0009, dont ADR 0006 §11.
+  B4 est clos. B5 est livré en quatre PR successives, B5a à B5d, chacune
+  après un GO distinct ; aucun code avant le GO de développement de B5a. Les
+  hypothèses Windows sont prouvées avant le code qui en dépend ; si l'une
+  tombe, arrêt et arbitrage du propriétaire. Les snapshots et la restauration
+  sont des opérations de `features/sync` ; `restore` n'écrit jamais le
+  coffre ; `doctor` n'écrit jamais.
 - Ne jamais déclarer une CI verte sans run terminé sur le commit concerné.
   Une compilation croisée prouve seulement la compilation.
 - Tenir code, tests, docs et CHANGELOG.md cohérents. Rapport final : branche,
@@ -38,6 +42,10 @@
   Ne pas importer de saves ou comptes dans Git.
 - Tests exclusivement synthétiques/tempfiles. Les paths historiques dans
   les docs sont des preuves rapportées par le plan, pas des données à explorer.
+- Lettres de lecteur : un test ne crée, réattribue et retire que les lettres
+  et noms DOS qu'il a créés. HW13, et tout test qui emploie sa voie, tourne
+  en CI seulement, jamais sur le poste ni dans la session du propriétaire
+  (plan B5 §2.3, §5.1).
 - Pas d'exécution de fichiers inspectés, suppression source, `/MIR`, suivi
   implicite de symlink/junction, relocation ou restauration en place.
 - Le code de production reste en lecture seule tant qu'un lot n'autorise pas
