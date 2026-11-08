@@ -21,7 +21,8 @@ contrat de la commande par [ADR 0008](../adr/0008-snapshot-contract-receipt-v1.m
 - **Lecture seule sans `--apply`.** Le plan et `--recover` sans `--apply`
   n'écrivent rien, nulle part.
 - **Rien n'est lu de la source du jeu ni de son installation** : seules leurs
-  identités servent à vérifier que le coffre en reste distinct. Le jeu peut
+  identités servent à vérifier que le coffre en reste distinct, sur une même
+  lettre de lecteur seulement, voir les [limites](#limites). Le jeu peut
   rester ouvert.
 - **Copie exacte d'une génération reconnue.** `current` doit être reconnu par
   toute sa chaîne de preuve, receipt, journal publié et identité NTFS, et
@@ -172,6 +173,13 @@ interrompue : code 1, `another operation is running on this game`.
 
 ## Limites
 
+- **Alias de lettre : n'en employez aucun.** Comme pour `sync`, le coffre et
+  l'installation ne sont comparés que s'ils portent la même lettre de
+  lecteur ; un alias `subst` contourne ce contrôle. Ce cas n'a pas été sondé
+  pour `snapshot`. Tant que le chantier S-02 du
+  [modèle de sécurité](../safety-model.md#chantiers-de-sécurité-ouverts)
+  est ouvert, ne désignez ni le coffre ni les chemins du manifeste par un
+  alias de lettre.
 - Un binaire antérieur à B3 refuse en code 3, sans rien écrire, un coffre qui
   contient `snapshots\`.
 - Les snapshots et les copies `.incomplete` s'accumulent : aucun n'est

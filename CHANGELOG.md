@@ -22,11 +22,12 @@ Aucun tag ni release n'est publié par le bootstrap.
   ambigu ou illisible est refusé, code 1.
 - Distinctions de la zone avec le coffre, l'installation, les sources et les
   chemins sauvegardés par le snapshot, par nom puis par identité NTFS depuis
-  la racine de chaque volume, quelle que soit la lettre de lecteur ; une
-  identité inobservable ou une lettre sans volume ne prouvent jamais la
-  séparation. Aucun ancêtre coffre ou zone. Ces distinctions sont refaites
-  une fois la session d'écriture ouverte, avant sa première écriture, pour
-  `--apply` comme pour `--recover --apply`.
+  la racine de chaque lettre de lecteur, et non du volume : un alias de
+  lettre qui désigne un sous-dossier d'une référence n'est pas détecté,
+  chantier S-02 ci-dessous. Une identité inobservable ou une lettre sans
+  volume ne prouvent jamais la séparation. Aucun ancêtre coffre ou zone.
+  Ces distinctions sont refaites une fois la session d'écriture ouverte,
+  avant sa première écriture, pour `--apply` comme pour `--recover --apply`.
 - Récupération : seule une destination absente ou vide est sans objet avant
   la lecture du manifeste ; une zone marquée sans opération en attente n'est
   déclarée sans objet qu'après la relecture stricte de son marqueur, du jeu
@@ -46,7 +47,7 @@ Aucun tag ni release n'est publié par le bootstrap.
   pour `sync` et `snapshot`.
 - Tests Windows réels de la restauration : bout en bout, coffre sous refus
   d'écriture, plans sous refus d'écriture, fichier ouvert dans la copie,
-  processus tué pendant la copie, alias `subst` vers une source puis vers le
+  processus tué pendant la copie, alias `subst` égal à une source puis au
   coffre, lettre `subst` réattribuée vers une source entre le plan et
   l'ouverture de la session, validation concurrente du marqueur, jonction à la place d'une
   restauration remise, restauration pendant une rotation et un snapshot ; et
@@ -211,6 +212,16 @@ Aucun tag ni release n'est publié par le bootstrap.
   `restore` refait ses distinctions une fois la session ouverte, ce qui
   refuse une réattribution antérieure. Ne modifiez pas les lettres de lecteur
   pendant une opération.
+- Chantier de sécurité S-02, ouvert le 6 novembre 2026 : une lettre de
+  lecteur qui désigne un dossier, alias `subst` par exemple, contourne les
+  distinctions. `restore` les fait depuis la racine de la lettre, et non du
+  volume comme l'exige ADR 0006 §11 ; `sync` et `snapshot` ne comparent le
+  coffre et l'installation que sur une même lettre. Sur Windows réel,
+  `restore --apply` a publié dans une source et dans le coffre,
+  `sync --apply` a publié un coffre dans l'installation ; rien n'est
+  remplacé ni supprimé. Interdiction opérationnelle : aucun alias de lettre
+  pour `--vault`, `--to` ni dans le manifeste. Correction prévue en B5a ;
+  bloquant pour toute diffusion publique.
 - doctor reste à implémenter ; pas de sortie JSON de la CLI.
 - L'inventaire n'est pas un instantané atomique ; les fichiers OneDrive et
   autres placeholders cloud sont refusés ; `subst` n'est pas détecté.
