@@ -59,6 +59,11 @@ jobs:
         run: go vet ./.github/scripts
       - name: Test CLI, binary smoke, documentation and architecture
         run: go test -count=1 -timeout 30m ./...
+      # Plan B5 §5.1: the Windows hypotheses of B5a record what they observe
+      # (error codes, effect of each primitive); -v shows it in the log.
+      - name: Record the Windows hypotheses of B5a
+        if: runner.os == 'Windows'
+        run: go test -count=1 -v -run '^TestHW' ./internal/platform/vault
       - name: Test workflow pins
         run: go test -count=1 ./.github/scripts
       - name: Build CLI
