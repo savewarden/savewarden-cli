@@ -151,6 +151,17 @@ Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $user
 		"*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*"+sid+":(OI)(CI)RX").CombinedOutput(); err != nil {
 		t.Fatalf("icacls: %v %s", err, strings.ReplaceAll(string(out), sid, "<SID>"))
 	}
+	// The child's TEMP: Start-Process -Credential passes the parent's
+	// environment, whose TEMP lies in the administrator's profile, refused
+	// to the account (run 44961893884). A folder of the dedicated space,
+	// where the account alone among users may write, takes its place.
+	childTemp := filepath.Join(dir, "tmp")
+	if err := os.Mkdir(childTemp, 0o700); err != nil { //nolint:gosec // G703: below the dedicated space this test created.
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("icacls", childTemp, "/grant", "*"+sid+":(OI)(CI)M").CombinedOutput(); err != nil { //nolint:gosec // G702: icacls on the child's TEMP, for the account this test created.
+		t.Fatalf("icacls: %v %s", err, strings.ReplaceAll(string(out), sid, "<SID>"))
+	}
 
 	stdout, stderr := filepath.Join(dir, "child.out"), filepath.Join(dir, "child.err")
 	script := `$ErrorActionPreference = 'Stop'
@@ -159,7 +170,8 @@ $credential = [pscredential]::new(` + hw13Quote(name) + `, $secure)
 $process = Start-Process -FilePath ` + hw13Quote(copied) + ` -ArgumentList '-test.run=^TestHW13NonElevatedChild$', '-test.v', '-test.count=1' ` +
 		`-Credential $credential -LoadUserProfile -WorkingDirectory ` + hw13Quote(dir) +
 		` -RedirectStandardOutput ` + hw13Quote(stdout) + ` -RedirectStandardError ` + hw13Quote(stderr) +
-		` -Environment @{ ` + hw13ChildVariable + ` = '1'; ` + hw13AccountVariable + ` = ` + hw13Quote(name) + ` } -PassThru
+		` -Environment @{ ` + hw13ChildVariable + ` = '1'; ` + hw13AccountVariable + ` = ` + hw13Quote(name) +
+		`; TEMP = ` + hw13Quote(childTemp) + `; TMP = ` + hw13Quote(childTemp) + ` } -PassThru
 $null = $process.Handle
 if (-not $process.WaitForExit(` + fmt.Sprint(hw13ChildTimeout.Milliseconds()) + `)) {
   Stop-Process -Id $process.Id -Force
@@ -203,7 +215,11 @@ if (Get-LocalUser -Name ` + hw13Quote(name) + ` -ErrorAction SilentlyContinue) {
 	if sid != "" {
 		script := `$ErrorActionPreference = 'Stop'
 $sid = ` + hw13Quote(sid) + `
-Get-CimInstance Win32_Process | Where-Object { $owner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid; $owner.Sid -eq $sid } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+foreach ($process in Get-CimInstance Win32_Process) {
+  # A process may end between the listing and the query: not a failure.
+  $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction SilentlyContinue
+  if ($owner -and $owner.Sid -eq $sid) { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue }
+}
 $userProfile = Get-CimInstance Win32_UserProfile | Where-Object SID -eq $sid
 if ($userProfile) { Remove-CimInstance -InputObject $userProfile }
 Remove-LocalUser -SID $sid
