@@ -68,17 +68,23 @@ func hwQueryDosDevice(name string) ([]string, error) {
 // DOS targets of each.
 func hwLetterState(t *testing.T) string {
 	t.Helper()
+	return hwLetterStateOf(t, hwLetters)
+}
+
+// hwLetterStateOf records the given letters, in upper case.
+func hwLetterStateOf(t *testing.T, letters string) string {
+	t.Helper()
 	mask, err := windows.GetLogicalDrives()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var lines []string
-	for i, letter := range hwLetters {
+	for _, letter := range letters {
 		targets, err := hwQueryDosDevice(string(letter) + ":")
 		if err != nil {
 			t.Fatalf("QueryDosDevice %c: %v", letter, err)
 		}
-		lines = append(lines, fmt.Sprintf("%c:%t=%s", letter, mask&(1<<i) != 0, strings.Join(targets, "|")))
+		lines = append(lines, fmt.Sprintf("%c:%t=%s", letter, mask&(1<<(letter-'A')) != 0, strings.Join(targets, "|")))
 	}
 	return strings.Join(lines, " ")
 }
@@ -129,26 +135,42 @@ func hwReserveLetter(t *testing.T) *hwLetter {
 // subst gives the letter to dir with subst.
 func (l *hwLetter) subst(t *testing.T, dir string) {
 	t.Helper()
+	if err := l.substErr(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// substErr is subst, reporting a refusal instead of failing the test.
+func (l *hwLetter) substErr(dir string) error {
 	if l.kind != "" {
-		t.Fatalf("%s is still defined", l.name)
+		return fmt.Errorf("%s is still defined", l.name)
 	}
 	if output, err := exec.Command("subst", l.name, dir).CombinedOutput(); err != nil { //nolint:gosec // G702: a letter this test reserved, to a directory of its own.
-		t.Fatalf("subst %s %s: %v %s", l.name, dir, err, output)
+		return fmt.Errorf("subst %s %s: %w %s", l.name, dir, err, output)
 	}
 	l.kind, l.target = "subst", dir
+	return nil
 }
 
 // define gives the letter to the raw NT target with DefineDosDevice, in the
 // logon session of the test, without broadcasting the change.
 func (l *hwLetter) define(t *testing.T, target string) {
 	t.Helper()
+	if err := l.defineErr(target); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// defineErr is define, reporting a refusal instead of failing the test.
+func (l *hwLetter) defineErr(target string) error {
 	if l.kind != "" {
-		t.Fatalf("%s is still defined", l.name)
+		return fmt.Errorf("%s is still defined", l.name)
 	}
 	if err := hwDefineDosDevice(windows.DDD_RAW_TARGET_PATH|windows.DDD_NO_BROADCAST_SYSTEM, l.name, target); err != nil {
-		t.Fatalf("DefineDosDevice %s %s: %v", l.name, target, err)
+		return fmt.Errorf("DefineDosDevice %s %s: %w", l.name, target, err)
 	}
 	l.kind, l.target = "dos", target
+	return nil
 }
 
 func (l *hwLetter) remove(t *testing.T) {
@@ -209,23 +231,39 @@ func (r hwRoot) String() string {
 // handles for attributes only, nothing listed or read.
 func hwCheckRoot(t *testing.T, root string) hwRoot {
 	t.Helper()
+	r, err := hwCheckRootErr(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// hwCheckRootErr is hwCheckRoot, reporting any failure to observe the root
+// instead of failing the test: nothing in it stops the test.
+func hwCheckRootErr(root string) (hwRoot, error) {
 	var r hwRoot
 	handle, err := hwOpen(root, windows.FILE_READ_ATTRIBUTES, hwShareAll)
 	if err != nil {
-		t.Fatalf("open %s: %v", root, err)
+		return r, fmt.Errorf("open %s: %w", root, err)
 	}
 	defer func() { _ = windows.CloseHandle(handle) }()
 	r.final, r.finalErr = hwFinalPath(handle, volumeNameGUID)
 	r.mount, r.mountErr = hwVolumeGUID(root)
 	if r.finalErr == nil {
-		r.volume = hwVolumePrefix(t, r.final)
+		if r.volume, err = hwVolumePrefixErr(r.final); err != nil {
+			return r, err
+		}
 		rootID, _, err := hwIdentity(handle)
 		if err != nil {
-			t.Fatal(err)
+			return r, fmt.Errorf("identity of %s: %w", root, err)
 		}
-		r.sameIdentity = hwIdentityOf(t, r.volume) == rootID
+		volumeID, err := hwIdentityOfErr(r.volume)
+		if err != nil {
+			return r, err
+		}
+		r.sameIdentity = volumeID == rootID
 	}
-	return r
+	return r, nil
 }
 
 func hwCIOnly(t *testing.T, what string) {

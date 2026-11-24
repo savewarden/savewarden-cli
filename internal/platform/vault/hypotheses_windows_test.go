@@ -127,16 +127,26 @@ func hwIdentity(handle windows.Handle) (hwID, uint32, error) {
 // hwIdentityOf opens path for its metadata only and returns its identity.
 func hwIdentityOf(t *testing.T, path string) hwID {
 	t.Helper()
+	id, err := hwIdentityOfErr(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// hwIdentityOfErr is hwIdentityOf, reporting an error instead of failing the
+// test.
+func hwIdentityOfErr(path string) (hwID, error) {
 	handle, err := hwOpen(path, windows.FILE_READ_ATTRIBUTES, hwShareAll)
 	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
+		return hwID{}, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer func() { _ = windows.CloseHandle(handle) }()
 	id, _, err := hwIdentity(handle)
 	if err != nil {
-		t.Fatalf("identity of %s: %v", path, err)
+		return hwID{}, fmt.Errorf("identity of %s: %w", path, err)
 	}
-	return id
+	return id, nil
 }
 
 // hwVolumeGUID returns \\?\Volume{GUID}\ for a mount point such as C:\.
@@ -155,12 +165,22 @@ func hwVolumeGUID(root string) (string, error) {
 // hwVolumePrefix returns the \\?\Volume{GUID}\ that starts a final GUID path.
 func hwVolumePrefix(t *testing.T, final string) string {
 	t.Helper()
+	prefix, err := hwVolumePrefixErr(final)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prefix
+}
+
+// hwVolumePrefixErr is hwVolumePrefix, reporting an error instead of failing
+// the test.
+func hwVolumePrefixErr(final string) (string, error) {
 	const head = `\\?\Volume{`
 	end := strings.Index(final, `}\`)
 	if !strings.HasPrefix(final, head) || end < 0 {
-		t.Fatalf("%q is not a volume GUID path", final)
+		return "", fmt.Errorf("%q is not a volume GUID path", final)
 	}
-	return final[:end+2]
+	return final[:end+2], nil
 }
 
 func hwCreateDir(path string) error {
