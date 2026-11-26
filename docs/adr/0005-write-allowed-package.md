@@ -2,7 +2,10 @@
 
 Date : 29 octobre 2026. Statut : accepté pour B2, plan B2 v0.2 §6.2, validé
 par le propriétaire le 29 octobre 2026 ; introduit par le premier commit de
-B2b, après le GO B2b.
+B2b, après le GO B2b. Amendement de B5a (S-01 et S-02), rédigé le
+26 novembre 2026 avec les résultats des hypothèses HW1 à HW13 :
+**accepté** par le propriétaire le 26 novembre 2026, dans sa révision r3,
+avant tout code de production de B5a (plan B5 v0.5 §3.5 et §8, commit 2).
 
 ## Contexte
 
@@ -104,6 +107,53 @@ publiée le 6 octobre 2026. Elle entre dans `go.mod` au commit qui l'importe
 pour la première fois, l'adaptateur, puisque `go mod tidy` retire une
 dépendance que rien n'importe.
 
+**Requêtes en lecture seule ajoutées par B5a** (amendement accepté, S-01 et
+S-02 ; ADR 0006 §11, « Lettres de lecteur, alias et volumes »). Elles
+s'ajoutent à `GetVolumeInformation`, `GetDriveType` et `GetDiskFreeSpaceEx`.
+Aucune n'écrit. Chacune répond à un besoin de la session, et ses preuves sont
+consignées dans `docs/validation/b5a.md` :
+
+| Requête | Besoin | Preuves |
+| --- | --- | --- |
+| `GetFinalPathNameByHandle` | Chemin de volume `\\?\Volume{GUID}\…` d'un handle : base de la session, contrôle de chaîne, chemin final de chaque nouveau handle, détection S-02 | HW1, HW3, HW8, HW9, HW12 |
+| `GetVolumeNameForVolumeMountPoint` | Contre-épreuve S-02 : la racine de la lettre est le point de montage d'un volume, de même GUID que son chemin final | HW12, HW13 |
+| `GetVolumeInformationByHandle` | Système de fichiers du volume tenu, lu sur l'épingle racine | HW10 |
+
+- **Drapeaux.** `GetFinalPathNameByHandle` ne reçoit qu'une constante locale
+  `0x1`, `VOLUME_NAME_GUID` avec `FILE_NAME_NORMALIZED`, que x/sys ne nomme
+  pas. Aucune autre valeur n'est employée pour construire une base.
+- **Tampon.** Sa taille vient d'une première requête. Un résultat n'est
+  accepté que si la taille rendue est strictement inférieure à la capacité
+  du tampon ; égale ou supérieure, c'est une troncature, refusée. Elle ne se
+  signale par aucune erreur (HW1, 142 caractères demandés pour un tampon de
+  8).
+- **Formes d'arguments.** `GetDriveType` et `GetDiskFreeSpaceEx`, déjà
+  permises, reçoivent aussi `\\?\Volume{GUID}\` et rendent les mêmes valeurs
+  que par la lettre (HW10). Ce n'est pas une API nouvelle.
+- **Aucune API d'écriture n'est ajoutée.** La table des sept API permises,
+  les interdits renforcés, les règles d'ouverture et d'appel de `MoveFileEx`
+  ne changent pas. Ouvrir `X:\` ou `\\?\Volume{GUID}\` se fait avec les
+  droits déjà nommés, `GENERIC_READ` ou `FILE_READ_ATTRIBUTES`, en
+  `OPEN_EXISTING`, comme l'ont fait les tests HW. Les sélecteurs du garde
+  `readonly_test.go` restent inchangés.
+- **Aucun chemin à lettre après `Open`.** La session ne résout une lettre
+  qu'à son ouverture. Ensuite, chaque écriture et chaque lecture de décision
+  passent par la base, chemin de volume tiré de ses épingles. Une
+  instrumentation interne au package le vérifie en test.
+- **`DefineDosDevice` et `subst`** restent interdits au code de production.
+  Seuls les tests d'hypothèses, fichiers `_test.go` hors de la portée du
+  garde, définissent des lettres et des noms DOS, sous la règle des lettres
+  d'`AGENTS.md`.
+- **Modèle de menace.** Savewarden protège ses écritures contre une lettre ou
+  un alias réattribué par accident ou par un outil bénin. Il ne protège pas
+  contre un processus hostile du même compte, qui peut de toute façon écrire
+  dans le coffre. Le chemin de volume est résolu par `\??\`, qui consulte
+  d'abord les noms DOS de la session de connexion : un nom local
+  `Volume{GUID}` détourne les appels (HW8). ADR 0006 §11 prévoit des
+  contrôles de la session qui doivent le détecter après coup, sans le
+  confiner. Ce sont des garanties à implémenter et à prouver en B5a, pas des
+  protections déjà disponibles.
+
 **Fichiers par OS.** `platform/vault` est réservé à Windows. POSIX
 `rename(2)` remplace sa cible : un fichier pour les autres systèmes renvoie
 `errors.ErrUnsupported`. La logique de `features/sync` est testée sur un faux
@@ -165,3 +215,23 @@ après B2b.
   création exclusive, cible existante refusée sans changement d'état, de
   non-mutation de la source, binaire lancé avec la source en écriture
   refusée, et d'absence d'écriture du mode plan.
+- Les requêtes ajoutées par B5a ne sont pas des écritures : le garde ne les
+  restreint pas, et rien ne l'y oblige. Leur usage est tenu par les tests de
+  la session : instrumentation sans chemin à lettre après `Open`, troncature
+  refusée, et tests réels de S-01 et S-02 du plan B5 §9.
+
+## Amendements
+
+- **26 novembre 2026, B5a, accepté** : requêtes en lecture seule
+  `GetFinalPathNameByHandle`, `GetVolumeNameForVolumeMountPoint` et
+  `GetVolumeInformationByHandle`, constante locale `0x1`, règle « aucun
+  chemin à lettre après `Open` », phrase de modèle de menace ; rédigé avec
+  les résultats de HW1 à HW13 (run 45297320109 sur `d2b79f4`, protocole HW7
+  du propriétaire du 26 novembre 2026). Aucune API d'écriture ajoutée.
+  Révisé le même jour sur la revue CTO : troncature refusée dès que la
+  taille rendue atteint la capacité du tampon ; contrôles de HW8 écrits
+  comme garanties à prouver. **Ratifié par le propriétaire le 26 novembre
+  2026**, dans la révision r3 (blob `8653f03` avant l'enregistrement de ce
+  statut), après sa revue finale : « Je ratifie les amendements d'ADR 0005
+  et d'ADR 0006 §11 ainsi que l'erratum E2 au plan B5 v0.5, dans leur
+  révision r3. » Ce n'est pas un GO de commit, de push ni de code.

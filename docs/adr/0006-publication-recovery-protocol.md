@@ -9,9 +9,12 @@ snapshots de B3, est accepté par le propriétaire le 31 octobre 2026, avec le
 plan B3 v0.2, et implémenté par B3, fusionné en `08ec0c2`. Le §11, restauration
 isolée de B4, et ses renvois depuis les §1, §2, §3 et §8, rédigés le
 1er novembre 2026, sont acceptés par le propriétaire le 3 novembre 2026, avec
-le plan B4 v0.2, et implémentés par B4 sur la branche `feat/b4-restore`,
-livrés avec lui par la PR B4, non encore fusionnée ni qualifiée par le
-pilote.
+le plan B4 v0.2, et implémentés par B4, fusionné dans `release/v0.1.0-a1`
+par la PR #13, merge commit `4197317`, le 4 novembre 2026 ; le pilote du
+propriétaire l'a qualifié le 6 novembre 2026, et la PR #14, merge commit
+`a59d787`, l'a clos le même jour. Le paragraphe « Lettres de lecteur, alias et volumes » du §11, S-01
+et S-02 de B5a, rédigé le 26 novembre 2026, est accepté par le propriétaire
+le même jour, dans sa révision r3.
 **Référence de sécurité** de toute publication et de toute récupération de
 Savewarden : une opération qui ne peut pas s'y conformer exige un amendement
 revu de cet ADR avant son code.
@@ -905,8 +908,11 @@ limites d'ADR 0008.
 
 **Statut : accepté** par le propriétaire le 3 novembre 2026, avec le plan B4
 v0.2, rédigé le 1er novembre 2026. Normatif pour tout code de restauration ;
-implémenté par B4 sur la branche `feat/b4-restore`, livré avec lui par la
-PR B4, non encore fusionnée ni qualifiée par le pilote. Il ne change aucune
+implémenté par B4, fusionné par la PR #13 (`4197317`, 4 novembre 2026),
+qualifié par le pilote du propriétaire le 6 novembre 2026 et clos par la
+PR #14 (`a59d787`, 6 novembre 2026). Son paragraphe « Lettres de lecteur,
+alias et volumes », de B5a, accepté, prévaut sur des règles des §4, §5 et
+§10, selon sa priorité normative. Le reste du §11 ne change aucune
 règle des §1 à §10 :
 une restauration n'écrit pas le coffre. Il ajoute un invariant, plus bas, qui
 contraint toute opération future du coffre.
@@ -1040,6 +1046,380 @@ revue de sécurité de B4 (P1-02) et ses revues ciblées.
   obligatoire : amendement d'ADR 0005 et primitives d'écriture indépendantes
   des lettres de lecteur modifiables, puis un nouveau gate de sécurité.
   Suivi : chantier S-01 du modèle de sécurité.
+
+#### Lettres de lecteur, alias et volumes : S-01 et S-02 (B5a)
+
+**Statut : accepté** par le propriétaire le 26 novembre 2026, dans sa
+révision r3, avant tout code de production de B5a ; commit 2 de B5a, rédigé
+avec les résultats des hypothèses HW1 à HW13 (plan B5 v0.5 §5.1). Preuves :
+`docs/validation/b5a.md`, run 45297320109 sur `d2b79f4` et protocole HW7 du
+propriétaire. Le propriétaire accepte explicitement le résidu de la classe
+2b, dans le modèle de menace, sans confinement ni atomicité revendiqués.
+Ce paragraphe vaut pour `sync`, `snapshot` et
+`restore`, et pour toutes leurs récupérations, qui partagent la session de
+`platform/vault` (§4, §5, §10 et ce §11). Il change la façon dont la session
+désigne les objets, les contrôles qui précèdent sa première écriture et le
+sort d'une session dont le volume a disparu. Les requêtes qu'il emploie sont
+celles de l'amendement d'ADR 0005. Le plan B5 est aligné par son erratum E2.
+
+**Priorité normative.** Ce paragraphe prévaut sur toute règle antérieure
+incompatible des §4, §5, §10 et §11 :
+
+- distinctions par lettre et raccourci « même lettre » ;
+- chaînes ancrées à la racine de la lettre plutôt qu'à celle du volume ;
+- ouverture de la session et création d'une racine par chemin à lettre,
+  dont I2 et Z2 ;
+- écritures d'une session par chemin complet à lettre, décrites par
+  l'amendement du 4 novembre 2026.
+
+Il conserve les automates de publication et de récupération, le journal,
+ses enregistrements et ses enveloppes, les invariants I1 à I12, les retries
+du §7 et les écarts X1 à X4.
+
+**Fin de l'acceptation provisoire du 4 novembre 2026.** Elle reste en
+vigueur jusqu'au gate de sécurité de B5a, et tombe à ce gate seulement. Ce
+gate exige le code de ce paragraphe, ses essais de bout en bout et la revue
+de sécurité indépendante. D'ici là, S-01 et S-02 restent ouverts, et
+l'interdiction opérationnelle des alias demeure, équivalent strict d'une
+racine compris.
+
+**Modèle de menace.** Savewarden protège ses écritures contre une lettre ou
+un alias réattribué par accident ou par un outil bénin. Il ne protège pas
+contre un processus hostile du même compte, qui peut de toute façon écrire
+dans le coffre, ni contre une action d'administrateur, de pilote ou du
+noyau.
+
+##### S-01 : aucune lettre résolue après l'ouverture
+
+**Ouverture**, sur le chemin à lettre donné par l'utilisateur :
+
+1. **Racine de la lettre.** `X:\` est épinglée la première, sans suivi. Elle
+   doit être une racine de volume (S-02, ci-dessous), sinon refus, rien
+   écrit.
+2. **Ancêtres**, épinglés un à un, sans suivi. **Contrôle de chaîne**, pour
+   chaque épingle de rang k, de chemin final F(k), lu par handle :
+   - F(k) prolonge F(k−1) d'exactement un segment. La comparaison porte sur
+     les segments, un à un, sans égard à la casse comme Windows résout les
+     noms. Ce n'est jamais un test de préfixe textuel, que `\A` et `\AB`
+     tromperaient ;
+   - F(k) privé de son dernier segment, rouvert sans suivi, a l'identité de
+     **l'épingle de rang k−1** ;
+   - F(k), rouvert sans suivi, a l'identité de l'épingle de rang k.
+
+   Le dernier segment de F(k) n'est jamais comparé au segment donné : il
+   peut en différer par la casse ou par un nom court, `RUNNER~1` devenant
+   `runneradmin` (HW3). Ce sont les identités qui décident. Une lettre
+   réattribuée pendant `Open` donne un chemin final qui ne prolonge pas
+   celui du parent : refus, rien écrit (HW3).
+3. **Cible existante** : épinglée ; la **base** de la session est son chemin
+   final.
+4. **Cible absente** : son parent est épinglé, un parent absent reste
+   refusé. La base est le chemin final du parent suivi du dernier segment,
+   validé comme nom Windows et encore absent (HW9).
+5. **Requêtes.** Tampon dimensionné par une première requête ; une taille
+   rendue égale ou supérieure à la capacité du tampon est refusée (HW1) ;
+   volume sans chemin GUID refusé.
+
+**Écritures.**
+
+- Toutes passent par la base. `CreateDirectory`, `CreateFile` en
+  `CREATE_NEW` et `MoveFileEx` avec `0` y gardent leur sémantique : cible
+  existante refusée en 183 pour un dossier ou un renommage et en 80 pour un
+  fichier, renommage entre volumes refusé en 17, état inchangé (HW2). Les
+  chemins longs et les noms Unicode passent, jusqu'à 324 caractères UTF-16
+  éprouvés (HW6).
+- Une épingle prise par la base interdit le renommage du dossier tenu,
+  erreur 32. Un handle ouvert par la lettre et un handle ouvert par la base
+  portent sur le même objet, avec les mêmes conflits de partage (HW5).
+- Une lettre `subst` retirée puis donnée à un autre dossier pendant la
+  session ne détourne aucune écriture : créations et renommage restent dans
+  la cible tenue, et le témoin garde son empreinte (HW4).
+- **Chemin final de chaque nouveau handle**, défense en profondeur : après
+  `NewFile`, après l'épingle qui suit `CreateDir` et après `Lock`, il doit
+  égaler la base suivie du nom. Sinon la session est invalidée et
+  l'opération refusée.
+- **Postcondition de `Move`.** Avant le renommage, la source est ouverte par
+  la base, sans suivi et en partage complet, puis refermée : son chemin
+  final doit égaler la base suivie du nom, et son identité est lue. Après le
+  renommage, la destination est contrôlée de même et doit porter cette
+  identité. Sinon la session est invalidée.
+- **Création d'une racine absente**, seule mutation préparatoire : après les
+  contrôles sous session sur le parent tenu, pour une destination absente au
+  plan et sous session. Elle est créée en exclusif par la base, épinglée
+  aussitôt ; son chemin final relu doit égaler la base, et son identité est
+  lue par handle (HW9). Les contrôles sous session sont repris sur la
+  chaîne qui l'inclut avant toute autre mutation. Un refus de la reprise
+  arrête l'opération en code 1 : la racine créée reste, nommée par le
+  message. Savewarden n'y fait aucune autre mutation et n'y supprime rien.
+  Aucune garantie ne porte sur ce qu'un autre processus a pu y ajouter.
+- **Ordre imposé**, testé pour chaque commande et chaque récupération :
+  `Open` ; contrôles sous session ; le cas échéant, création de la racine
+  absente et reprise des contrôles ; étapes d'initialisation des §4 et §11,
+  inchangées, ou leur reprise par `--recover --apply` ; verrou ; mutations
+  de l'opération, sous le verrou.
+
+**Contrôles sous session**, après `Open` et avant la première écriture, pour
+chaque `--apply` et chaque `--recover --apply`, dans cet ordre :
+
+1. racine de volume, faite par `Open` ;
+2. chaîne tenue égale à la chaîne du plan : identité de la cible existante,
+   ou de son parent si elle est absente ; une cible absente au plan et
+   présente sous session donne le code 1, hormis les reprises prévues (Z3) ;
+3. chaînes de référence relues après le contrôle S-02 de leur lettre, égales
+   à celles du plan : installation et sources ; pour `restore`, coffre et
+   chemins sauvegardés ; pour `restore --recover`, chemins sauvegardés des
+   plans de la zone, sans lire le coffre ;
+4. recouvrements dans les deux sens : aucune identité de référence dans la
+   chaîne tenue ; pour une cible existante, son identité dans aucune chaîne
+   de référence. Le parent d'une cible absente n'est jamais cherché dans une
+   chaîne de référence : il ne prouve que l'ancrage et l'absence ;
+5. lectures de décision par la base, sans suivi : marqueurs des ancêtres,
+   absence d'une cible absente, « encore vide » de Z3, relecture du marqueur
+   du coffre ou de la zone ;
+6. observation impossible : code 1, rien écrit.
+
+**Volume tenu.** Le système de fichiers est lu par
+`GetVolumeInformationByHandle` sur l'épingle racine, le type de lecteur et
+l'espace libre par `\\?\Volume{GUID}\`, mêmes valeurs que par la lettre
+(HW10). Les contrôles de volume de la session portent sur ce volume.
+
+**Erreurs.** Aucune erreur de la session ne contient la base ni un GUID. Les
+messages nomment un chemin relatif au coffre ou à la zone, ou le chemin à
+lettre de l'utilisateur au plan.
+
+##### Volume indisponible et invalidation (HW7)
+
+Constats identiques sur un VHD fixe détaché par le test en CI et sur une vraie
+clé USB NTFS amovible retirée par le propriétaire, sans éjection :
+
+| Moment | Appel | Code |
+| --- | --- | --- |
+| Volume absent | `CreateDirectory` et `CreateFile` par la base | 3, `ERROR_PATH_NOT_FOUND` |
+| Volume absent | Identité lue sur un handle de la session | 21, `ERROR_NOT_READY` |
+| Volume absent | Chemin GUID rouvert | 3 |
+| Volume revenu | Identité lue sur l'ancien handle | 21 |
+| Volume revenu | GUID du volume | **Le même** |
+
+Un chemin GUID désigne un volume, pas une session ouverte sur ce volume. Le
+GUID survit à la réinsertion : la base désigne de nouveau le volume revenu,
+alors que les épingles et le verrou de la session sont morts. HW7b établit
+la conservation du GUID et la mort de l'ancien handle. Qu'une création par
+la base réussisse alors sur le volume revenu, avec un chemin final conforme,
+en est la conséquence, à éprouver par les tests de la session. Le chemin
+final d'un nouveau handle ne suffit donc pas à prouver que la session vit.
+
+**Sonde de vivacité.** Elle lit l'identité de l'épingle racine **par le
+handle tenu**, sans rouvrir ni la lettre ni le chemin GUID, et la compare à
+celle lue à l'ouverture. Un échec de la sonde, quel que soit son code, ou
+une identité différente, classe directement « volume indisponible ». Il ne
+repasse jamais par le classement des erreurs ci-dessous, qui ne peut donc
+pas boucler.
+
+**Classement des erreurs.**
+
+- 15 et 21 classent directement « volume indisponible », comme aujourd'hui.
+- **Le code 3 ne prouve pas l'absence du volume** : c'est aussi celui d'un
+  chemin ordinaire introuvable. Toute erreur autre que 15 et 21 d'un appel
+  de la session déclenche la sonde. Sonde en échec : volume indisponible.
+  Sonde réussie : l'erreur garde son classement actuel, et les règles
+  existantes s'appliquent sans changement : retries sur 32 et 33 (§7),
+  cible existante, liens et points d'analyse refusés.
+
+**Invalidation.** Le premier classement « volume indisponible » invalide la
+session, définitivement. Toute méthode de mutation, ou de lecture de
+décision, d'une session invalidée échoue avec ce classement, sans appel
+système. Seules la fermeture des handles et la libération des épingles
+restent possibles, sans tentative de réparation ni autre mutation.
+
+**Contrôles par opération.** Les mutations par nom résolvent la base à
+chaque appel : un volume revenu peut les recevoir. Les opérations sur un
+handle déjà acquis restent liées à l'objet ouvert : retiré, il échoue, et
+revenu, il reste mort (HW7b). Elles n'exigent pas de sonde par appel.
+
+| Opération | Exigence |
+| --- | --- |
+| `CreateDir`, avec l'épingle qui suit | Sonde avant l'appel et après l'épingle |
+| `NewFile`, la création | Sonde avant et après la création |
+| `Move` | Sonde avant et après **chaque tentative effective**. Une tentative refusée par une session invalidée n'est pas faite : aucun retry après l'invalidation |
+| `Lock` | Sonde avant et après l'acquisition |
+| `Hold` | Sonde après l'ouverture de l'épingle ; en échec, l'épingle n'est pas gardée |
+| `Identity` et lectures de décision de la session | Sonde avant l'exploitation du résultat ; en échec, le résultat n'est pas utilisé. Une lecture composée de plusieurs appels est validée en entier, sonde après son dernier appel, avant toute exploitation |
+| `Write` d'un writer rendu par `NewFile` | Refusé, sans appel système, si sa session est invalidée ; une erreur est classée comme ci-dessus |
+| `SetFileTime` et `FlushFileBuffers`, dans la fermeture du writer | Non appelés si la session est invalidée : le handle est fermé, le fichier est tenu pour échoué et reste en place. Si l'erreur de `SetFileTime` invalide la session pendant la fermeture, `FlushFileBuffers` n'est pas appelé ensuite, et le handle est fermé quand même |
+| Fermeture d'un handle, libération des épingles, `Close` | Toujours possibles, même invalidée |
+| Validation d'un enregistrement du journal | Écriture du temporaire et renommage soumis aux lignes ci-dessus : aucune validation par une session invalidée |
+
+Un writer déjà rendu par `NewFile` reste donc lié à sa session : aucune
+mutation applicative ne passe par lui après l'invalidation. Une observation
+d'une session invalidée ne fonde aucune décision. Ces règles portent sur la
+session de `platform/vault` seule : elles n'étendent pas S-01 aux lectures
+de `platform/filesystem`, dont les limites restent celles écrites plus bas,
+ni ne dispensent des relectures des références externes.
+
+**Deux scénarios de réinsertion.**
+
+- **A, volume revenu avant la sonde préalable.** La sonde échoue, la
+  session est invalidée et la mutation n'est pas faite : rien n'est écrit
+  sur le volume revenu. Classe 1.
+- **B, retrait puis retour entre la sonde préalable et l'appel.** La
+  mutation a pu agir sur le volume revenu : un objet créé en exclusif, ou un
+  renommage sans remplacement, sur le même volume. La sonde qui suit le
+  détecte et invalide la session ; aucune mutation supplémentaire n'est
+  faite. Ce résidu est **dans le modèle de menace** : le retrait accidentel
+  d'une clé est une situation normale, ni hostile ni hors modèle. Il n'est
+  ni empêché ni confiné, et aucune atomicité n'est revendiquée : les
+  primitives retenues ne permettent pas de l'établir.
+
+**Classement de l'erreur et résultat de l'opération.** Ce sont deux
+décisions distinctes.
+
+- `platform/vault` classe l'**erreur** : « volume indisponible », et la
+  session est invalidée. Ce classement ne fixe pas le code de sortie.
+- Le service classe le **résultat de l'opération** selon les règles
+  existantes des ADR 0006, 0007, 0008 et 0009, à l'étape où l'erreur
+  survient. Aucune règle de code n'est changée par l'invalidation :
+
+| Situation | Résultat |
+| --- | --- |
+| Volume indisponible avant toute mutation de l'opération | Code 1, volume indisponible (ADR 0007, 0008, 0009) |
+| Mutation refusée par la session invalidée, absence d'effet établie | Classement existant de l'étape |
+| Mutation potentiellement effectuée, scénario B | Effet déclaré inconnu ; ni rollback ni absence d'écriture affirmés |
+| Rollback requis par le protocole, impossible par une session invalidée ; état ambigu | Code 3, intervention requise, selon les ADR existants : aucun rollback n'est tenté par la session invalidée |
+
+- Une opération interrompue n'est pas garantie récupérable. Elle est
+  examinée par `--recover`, sur une nouvelle session et par une nouvelle
+  observation (I4, I5), qui peut conclure à une ambiguïté exigeant une
+  intervention.
+- Le diagnostic et la ligne d'état n'affirment jamais un rollback réussi ni
+  une absence d'écriture que l'observation n'a pas prouvés. Les textes
+  exacts sont fixés avec le code et listés au §7.2 du plan B5.
+
+##### S-02 : seules les racines de volume
+
+- **Règle.** Une lettre n'est acceptée que si elle désigne la racine d'un
+  volume. Ce qui compte est ce qu'elle désigne, pas sa nature : une lettre
+  réelle, un `subst` ou un nom défini par `DefineDosDevice` est admis s'il
+  remplit les trois conditions ci-dessous (décision 24 du plan B5). Tout
+  autre alias est refusé.
+- **Détection**, trois conditions, toutes requises :
+  1. le chemin final GUID d'un handle de `X:\`, ouvert sans suivi, vaut
+     exactement `\\?\Volume{GUID}\`, sans reste ;
+  2. `GetVolumeNameForVolumeMountPoint("X:\")` réussit et rend le même GUID ;
+  3. l'identité de `X:\` égale celle de `\\?\Volume{GUID}\`.
+- **Preuves.** Pour une vraie lettre, les trois conditions tiennent. Pour un
+  alias `subst` ou `DefineDosDevice` d'un sous-dossier, le chemin final a un
+  reste, `GetVolumeNameForVolumeMountPoint` échoue en 87,
+  `ERROR_INVALID_PARAMETER`, et l'identité diffère (HW12). Une lettre
+  strictement équivalente à une racine, par `subst` comme par
+  `DefineDosDevice`, remplit les trois conditions. Sans élévation, sous un
+  compte standard, elle se crée, se réattribue et se retire sur le volume du
+  test ; l'essai vers un autre volume a été fait sous élévation (HW13).
+  Réattribuée vers un sous-dossier, elle échoue aux trois. Les conditions sont indépendantes :
+  une lettre qui échoue à l'une est refusée.
+- **Volume sans nom GUID** : refusé, message nommé.
+- **Où.** Au plan de `sync`, `snapshot` et `restore`, et de leurs
+  récupérations, avant toute distinction : lettre du coffre, de la zone, de
+  l'installation, de chaque source et, pour `restore`, de chaque chemin
+  sauvegardé lu dans le receipt du snapshot. Pour `restore --recover`, qui
+  ne lit jamais le coffre : zone, installation, sources du manifeste et
+  chemins sauvegardés des plans journalisés dans la zone. Une lettre absente
+  garde le comportement actuel.
+- **Sous session.** `Open` refait le contrôle sur sa première épingle, la
+  racine de la lettre : la fenêtre entre le plan et l'ouverture est fermée
+  pour la cible.
+- **Chaînes depuis la vraie racine.** La chaîne de la cible est celle des
+  épingles, dont la première est prouvée racine de volume. Chaque chaîne de
+  référence commence à une racine de lettre dont l'identité égale celle de
+  `\\?\Volume{GUID}\`.
+- **Distinction du coffre pour `sync` et `snapshot`.** Le raccourci « même
+  lettre » est supprimé : le coffre est comparé à l'installation et aux
+  sources par chaînes d'identités, quelle que soit la lettre. Deux lettres
+  d'un même arbre ne masquent plus un recouvrement.
+- **Refus.** Coffre, zone, installation, source ou chemin sauvegardé sur une
+  lettre qui n'est pas une racine de volume : code 1, rien écrit, avant
+  toute autre distinction. Le message nomme l'objet et la lettre.
+- **Points de montage.** Un point de montage de volume parmi les ancêtres
+  reste refusé comme point d'analyse, par la lettre comme par la base
+  (HW11).
+- **`inspect`** ne fait que lire et reste hors de cette règle : son contrôle
+  de liens part de la racine de la lettre, limite écrite.
+
+##### Portée de la fermeture, en trois classes
+
+Aucun scénario de ce tableau n'est encore déclaré neutralisé. Les hypothèses
+sont prouvées ; un scénario de la classe 1 ne passe à « neutralisé » qu'au
+rapport B5a, avec son essai de bout en bout passé, son run et son SHA. Un
+essai qui ne peut pas être exercé relève de T3 : arrêt et arbitrage du
+propriétaire. Aucun scénario des classes 2 et 3 n'est dit sécurisé ni
+confiné. La classe 2 réunit deux résidus de nature différente : 2a, le
+masquage local constaté par HW8 ; 2b, la fenêtre de réinsertion d'un volume,
+situation normale et dans le modèle de menace.
+
+| Classe | Scénario | Hypothèses prouvées | Essai exigé au gate | Ce qui sera affirmé |
+| --- | --- | --- | --- | --- |
+| 1 | Lettre du coffre ou de la zone réattribuée pendant une session ouverte | HW1, HW2, HW4, HW5 ; HW13 | `TestLetterRemappedDuringTheSession`, `TestRestoreRefusesALetterRemappedAfterTheSession` | Écritures dans la cible tenue ; témoin intact |
+| 1 | Lettre réattribuée pendant `Open` | HW3 ; HW13 | `TestOpenRefusesAnIncoherentChain` | Chaîne incohérente refusée, rien écrit |
+| 1 | Lettre du coffre réattribuée entre le plan et l'ouverture | HW12, HW13 | `TestSyncRefusesALetterRemappedBeforeTheSession`, `TestSnapshotRefusesALetterRemappedBeforeTheSession` | Code 1, rien écrit, témoin intact |
+| 1 | Lettre d'une référence réattribuée entre le plan et la session | HW12, HW13 | `TestReferenceLetterRemappedBeforeTheSessionIsRefused` | Code 1, rien écrit, référence nommée |
+| 1 | Alias `subst` d'un sous-dossier | HW12 | `TestAliasLetterIsRefused` | Refusé partout avant toute écriture |
+| 1 | Alias `DefineDosDevice` d'un sous-dossier | HW12 | `TestDefineDosDeviceAliasIsRefused` | Refusé partout avant toute écriture ; la détection seule ne suffit pas |
+| 1 | Volume retiré pendant une session ; ou retiré, puis revenu avant la sonde qui précède une mutation (scénario A) | HW7, VHD en CI et clé du propriétaire | `TestVolumeDetachedDuringTheSession`, sur VHD en CI ; `TestSessionIsInvalidatedAfterADeviceError` et `TestNoMutationAfterInvalidation`, sur faux | Session invalidée ; la mutation n'est pas faite ; rien écrit sur le volume revenu ; aucune mutation par un writer existant, aucun retry, aucune validation du journal après l'invalidation |
+| 1 | Point de montage parmi les ancêtres | HW11 | `TestMountPointAmongAncestorsIsRefused`, sur VHD en CI | Refusé |
+| 2a | Nom DOS local `Volume{GUID}` défini dans la session de connexion | HW8, constats ci-dessous | `TestLocalVolumeNameShadowing`, CI seulement | Les effets constatés, eux seuls ; détection après coup et invalidation, à prouver par ce test |
+| 2b | Volume retiré puis revenu entre la sonde préalable et la mutation (scénario B) | HW7b | `TestRemovalInTheCriticalWindowIsDetected`, sur faux, événement injecté à la limite de l'appel | Effet possible d'une mutation, sur le même volume ; détecté par la sonde qui suit ; session invalidée ; aucune mutation supplémentaire ; effet déclaré inconnu, jamais un rollback réussi |
+| 3a | Processus hostile du même compte ; administrateur, pilote ou noyau | Aucune | Aucun | Rien |
+| 3a | Réattribution administrative d'un volume : `mountvol`, gestion des disques | Aucune, non exercée | Aucun | Aucune protection universelle revendiquée |
+| 3b | Lectures par lettre de `platform/filesystem` ; hors du périmètre de S-01, limité aux écritures | Aucune | Aucun | Limite ci-dessous |
+
+**Classe 2a, masquage local : effets constatés par HW8** sur `windows-2025`,
+avec un nom local `Volume{GUID}` défini vers un dossier leurre :
+
+- le masquage est effectif : les appels par `\\?\Volume{GUID}\…` atteignent
+  le leurre ;
+- `CreateDirectory` crée le dossier dans le leurre, rien dans la cible
+  tenue. L'épingle qui suit est détectée par son chemin final, mécanisme
+  constaté pour `CreateFile` et à éprouver pour `CreateDir` par
+  `TestLocalVolumeNameShadowing` ;
+- `CreateFile` en `CREATE_NEW` crée le fichier dans le leurre. Le chemin
+  final de son handle n'égale pas la base suivie du nom : c'est détecté ;
+- `MoveFileEx` avec `0`, masquage installé après le contrôle de la source :
+  l'objet du leurre qui porte le nom de la source est renommé dans le
+  leurre. La source tenue reste en place, et la destination manque dans la
+  cible tenue : la postcondition le détecte.
+
+**Résidu de la classe 2a.** Des objets créés en exclusif, et un objet du
+leurre renommé sans remplacement, dans l'arbre que désigne le nom local,
+choisi par le processus qui l'a défini. Ils restent, rien n'étant supprimé.
+HW8 observe des signaux de détection, le chemin final d'un handle et
+l'absence de la destination d'un `Move`, sans code de production. La
+détection par la session et son invalidation sont des contrôles à
+implémenter et à prouver par `TestLocalVolumeNameShadowing`, pas des
+protections déjà disponibles. Aucun confinement ni aucun effet maximal n'est
+revendiqué. HW8 a tourné sur un runner élevé : la définition sans élévation
+d'un nom `Volume{GUID}` n'a pas été exercée. Elle est tenue pour possible,
+par prudence ; HW13, qui porte sur une lettre, n'en est pas la preuve.
+
+**Résidu de la classe 2b.** Celui du scénario B ci-dessus : l'effet d'une
+seule mutation, création exclusive ou renommage sans remplacement, sur le
+volume revenu, détecté après coup. Il n'est ni empêché ni confiné.
+
+**Limites qui restent.**
+
+- **Lectures.** Les lectures de `platform/filesystem` résolvent encore des
+  lettres : installation, sources, coffre et zone au plan, relectures sous
+  verrou, relecture de vérification, porte de provenance. Une lettre
+  réattribuée pendant une lecture fait lire un autre contenu. Les gardes
+  existants devraient refuser un contenu divergent, sans garantie du
+  diagnostic. Une lecture involontaire peut placer le contenu d'un autre
+  dossier dans un staging du coffre avant le refus, où il reste. Le
+  confinement des écritures n'implique pas celui des lectures.
+- **Volume entier.** Le chemin GUID suit le volume, pas la lettre. Entre deux
+  exécutions, un volume remonté ailleurs est le même volume pour le plan
+  suivant, qui refait tous ses contrôles.
+- **Alias de sous-dossier** : refusés ; leur acceptation est reportée hors
+  de B5.
+- **ReFS** reste non qualifié (§6) ; les hypothèses ont été éprouvées sur
+  NTFS.
 
 #### Initialisation de la zone
 
@@ -1475,3 +1855,45 @@ dans l'installation, une source, un coffre ou une autre zone.
   durcissement d'ADR 0005 et des primitives d'écriture obligatoire avant
   toute diffusion publique, chantier S-01. Aucune règle des §1 à §10 ne
   change.
+- **26 novembre 2026, B5a, accepté** par le propriétaire avant tout code de
+  production de B5a : paragraphe « Lettres
+  de lecteur, alias et volumes » du §11, rédigé avec les résultats de HW1 à
+  HW13 (run 45297320109 sur `d2b79f4` ; protocole HW7 du propriétaire du
+  26 novembre 2026). S-01 : session désignée par le chemin de volume de ses
+  épingles, aucune lettre résolue après `Open`, contrôle de chaîne par
+  prolongement d'un segment et identité, contrôles sous session avant la
+  première écriture, création d'une racine absente comme seule mutation
+  préparatoire, chemin final des nouveaux handles, postcondition de `Move`,
+  sonde de vivacité de l'épingle racine par son handle avant et après
+  chaque mutation par nom et chaque tentative de `Move`, invalidation
+  définitive au premier volume indisponible, writers existants et journal
+  compris. S-02 : seules les racines de volume, ou leurs équivalents
+  stricts, sont acceptées ; chaînes depuis la vraie racine ; distinction du
+  coffre de `sync` et `snapshot` par identité, quelle que soit la lettre.
+  Portée en trois classes : réinsertion avant la sonde en classe 1 ; résidu
+  du masquage local, 2a, limité aux effets constatés par HW8 ; fenêtre de
+  réinsertion, 2b, dans le modèle de menace, détectée après coup. Priorité
+  normative sur les règles incompatibles des §4, §5, §10 et §11. Plan B5
+  aligné par son erratum E2. L'acceptation provisoire du 4 novembre 2026
+  tombe au gate de sécurité de B5a seulement. Les automates de
+  publication et de récupération, le journal et ses enveloppes ne changent
+  pas. Révisé le même jour sur la revue CTO : P1-01, périmètre de la
+  vivacité ; P1-02, scénarios A et B. Puis sur la seconde revue CTO :
+  classement de l'erreur par `platform/vault` distinct du résultat de
+  l'opération, codes des ADR 0006 à 0009 inchangés, code 3 conservé pour un
+  état ambigu ou un rollback impossible, aucune récupérabilité garantie ;
+  sonde avant l'exploitation de `Identity` et des lectures de décision,
+  lecture composée validée en entier ; aucun `FlushFileBuffers` après une
+  invalidation par `SetFileTime` pendant la fermeture. **Ratifié par le
+  propriétaire le 26 novembre 2026**, dans la révision r3 (blob `6efc51d`
+  avant l'enregistrement de ce statut), après sa revue finale : « Je
+  ratifie les amendements d'ADR 0005 et d'ADR 0006 §11 ainsi que l'erratum
+  E2 au plan B5 v0.5, dans leur révision r3. » F1 à F8 et la sonde des
+  lectures de décision acceptés ; résidu de la classe 2b accepté
+  explicitement ; codes de sortie, automates de publication et règles de
+  récupération préservés. Ce n'est pas un GO de commit, de push ni de code.
+- **26 novembre 2026, correction documentaire**, séparée des changements
+  normatifs : l'en-tête et le statut du §11 disaient B4 non fusionné ni
+  qualifié ; B4 est fusionné par la PR #13 (`4197317`), qualifié par le
+  pilote du propriétaire et clos par la PR #14 (`a59d787`). Les entrées
+  précédentes restent inchangées. Aucune règle ne change.

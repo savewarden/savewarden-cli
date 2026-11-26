@@ -1896,6 +1896,117 @@ Pour chaque sous-lot :
 - écarts au plan, risques résiduels, questions ouvertes ;
 - recommandation **sans auto-approbation**.
 
+## Erratum E2 — résultats HW de B5a : F1, F2 et F3
+
+**Statut : accepté** par le propriétaire le 26 novembre 2026, dans sa
+révision r3 (blob `14ce645` avant l'enregistrement de ce statut), en même
+temps que les amendements d'ADR 0005 et 0006 §11, après trois revues CTO du
+même jour : « Je ratifie les amendements d'ADR 0005 et d'ADR 0006 §11 ainsi
+que l'erratum E2 au plan B5 v0.5, dans leur révision r3. » Rédigé avec le
+commit 2 de B5a. Ce n'est pas un GO de commit, de push ni de code.
+
+Les sections ratifiées ne sont pas réécrites. Cet erratum prévaut sur les
+passages qu'il cite, qui restent lisibles tels qu'ils ont été ratifiés. En
+cas de divergence, ADR 0006 §11 amendé fait foi. Rien d'autre ne change :
+périmètre, découpage, décisions 1 à 25, interdiction opérationnelle des
+alias jusqu'au gate de S-02.
+
+### F1 — vivacité de la session et réinsertion d'un volume (HW7b)
+
+**Constat.** HW7, sur VHD comme sur une vraie clé, montre que le GUID d'un
+volume survit à sa réinsertion, alors que les handles de la session restent
+morts. Un chemin GUID désigne un volume, pas une session ouverte sur ce
+volume. Contrôler la vivacité de l'épingle racine avant les seuls `Move` et
+enregistrements du journal laisserait une création par nom atteindre le
+volume revenu, avec un chemin final conforme.
+
+**Passages remplacés.**
+
+| Passage ratifié | Remplacé par |
+| --- | --- |
+| §4.1, Invalidation : « Avant chaque `Move` et chaque enregistrement validé du journal, la vivacité de l'épingle racine est contrôlée : même identité, lue par handle. » | Sonde de vivacité par le handle tenu, sans résolution de chemin, **avant et après chaque mutation par nom** (`CreateDir` et l'épingle qui suit, `NewFile`, chaque tentative effective de `Move`, `Lock`) ; après l'ouverture pour `Hold` ; avant l'exploitation du résultat pour `Identity` et les lectures de décision de la session, une lecture composée étant validée en entier. Une observation d'une session invalidée ne fonde aucune décision ; cette règle n'étend pas S-01 aux lectures de `platform/filesystem`. Session invalidée définitivement : aucune mutation, writers existants et validation du journal compris ; fermeture et libération toujours possibles. Contrat par opération : ADR 0006 §11, « Volume indisponible et invalidation » |
+| §4.1, Invalidation : « Un volume retiré puis réinséré laisse des handles morts. La session s'invalide alors, sans écrire sur le nouveau montage (HW7b). » | **Scénario A**, volume revenu avant la sonde préalable : mutation non faite, rien écrit sur le volume revenu, classe 1. **Scénario B**, retrait puis retour entre la sonde et l'appel : effet possible d'une seule mutation sur le même volume, détecté par la sonde qui suit, session invalidée, aucune mutation supplémentaire ; classe 2b, dans le modèle de menace, ni empêché ni confiné |
+| §5.1, HW7, preuve attendue (b) : « Retiré puis réinséré : handles morts, session invalidée, rien écrit sur le nouveau montage. » | Ce qu'HW7b prouve reste : handles morts et GUID conservé. « Rien écrit sur le nouveau montage » ne vaut que pour le scénario A ; le scénario B relève de la classe 2b |
+| §6, classe 1 : « Volume retiré, puis réinséré, pendant une session » ; « Session invalidée ; rien écrit sur le nouveau montage » | Ligne de classe 1 limitée au scénario A, et nouvelle ligne de **classe 2b** pour le scénario B. La classe 2 du §6 devient 2a, masquage local de HW8, et 2b, fenêtre de réinsertion, deux résidus de nature différente |
+| §6, Volume entier : « la session s'invalide, rien n'est écrit sur le nouveau montage (§4.1). Garanti seulement par HW7 » | Garanti pour le scénario A seulement, par HW7 et les tests de la session ; résidu 2b pour le scénario B |
+| §12, critère 1 | La fermeture de S-01 déclare aussi la classe 2b, avec son résidu, jamais comme neutralisée ; les tests F1 ci-dessous passent |
+| §14, risque « Volume réinséré pendant une session » | Mitigation : sonde par handle avant et après chaque mutation par nom, invalidation définitive ; résidu 2b déclaré |
+
+**Classement de l'erreur et résultat de l'opération.** `platform/vault`
+classe l'erreur « volume indisponible » et invalide la session ; ce
+classement ne fixe pas le code de sortie. Le service classe le résultat de
+l'opération selon les règles existantes des ADR 0006 à 0009, à l'étape où
+l'erreur survient, sans aucun changement de code :
+
+- volume indisponible avant toute mutation de l'opération : code 1 ;
+- mutation refusée, absence d'effet établie : classement existant de
+  l'étape ;
+- mutation potentiellement effectuée : effet déclaré inconnu, ni rollback
+  ni absence d'écriture affirmés ;
+- rollback requis mais impossible par une session invalidée, ou état
+  ambigu : code 3, intervention requise, selon les ADR existants.
+
+Aucun rollback n'est tenté par une session invalidée. Une opération
+interrompue n'est pas garantie récupérable : `--recover` l'examine sur une
+nouvelle session, par une nouvelle observation, et peut conclure à une
+ambiguïté exigeant une intervention. Les textes exacts sont ajoutés au §7.2
+avec le code.
+
+**Tests ajoutés au §9**, faits aux commits 5 et 6. Les fenêtres difficiles
+à provoquer sont exercées sur faux, l'événement étant injecté à la limite
+des appels ; le VHD apporte la preuve Windows réelle.
+
+| Test | Scénario | Attendu |
+| --- | --- | --- |
+| `TestSessionIsInvalidatedAfterADeviceError` (faux), complété | Volume indisponible avant une mutation ; erreurs 15, 21, 3 | 15 et 21 invalident directement ; 3 avec une racine vivante garde son classement ; sonde par le handle tenu, sans résolution de chemin ni récursion du classement ; aucun appel de mutation après l'invalidation |
+| `TestVolumeBackBeforeTheProbeIsRefused` (faux ; Windows réel, VHD, CI) | Volume revenu avant une mutation | Ancienne session refusée, mutation non faite, rien écrit sur le volume revenu |
+| `TestRemovalInTheCriticalWindowIsDetected` (faux) | Retrait avant toute mutation de l'opération ; retrait puis retour entre la sonde et une mutation, à plusieurs étapes du protocole, dont une où un rollback serait requis | Avant mutation : code 1, rien écrit. Après une mutation potentielle : effet résiduel détecté par la sonde qui suit, session invalidée, aucune mutation supplémentaire, effet déclaré inconnu, jamais `rolled back` ; code selon l'étape et les ADR existants, code 3 quand le rollback requis est impossible ou l'état ambigu. Puis `--recover`, sur une nouvelle session, décide par l'observation, sans récupérabilité présumée |
+| `TestMoveRetryStopsAfterInvalidation` (faux) | Retrait pendant un retry de `Move` | Aucune tentative après l'invalidation |
+| `TestNoMutationAfterInvalidation` (faux) | Writer rendu par `NewFile` avant l'invalidation ; `SetFileTime` qui invalide la session pendant la fermeture du writer ; journal après l'invalidation ; lectures de décision après l'invalidation ; fermeture | `Write` refusé sans appel système ; `SetFileTime` et `FlushFileBuffers` non appelés ; après une invalidation par `SetFileTime`, aucun `FlushFileBuffers`, mais le handle est fermé ; enregistrement non validé ; aucune lecture de décision exploitée ; `Close` libère les handles sans réparation |
+| `TestVolumeDetachedDuringTheSession` (Windows réel, VHD, CI), complété | Détachement puis rattachement | Après le rattachement, toute mutation de l'ancienne session est refusée et rien n'apparaît sur le volume |
+
+### F2 — contrôle de chaîne par segments et identités (HW3)
+
+**Constat.** Le segment `RUNNER~1` a pour nom final `runneradmin` : un nom
+court, ou une autre casse, sépare le segment donné du segment final.
+
+| Passage ratifié | Remplacé par |
+| --- | --- |
+| §4.1, Ouverture, étape 2 : « Le chemin final de chaque épingle doit égaler celui de la précédente suivi du segment (HW3). » | Le chemin final de rang k prolonge celui de rang k−1 d'exactement un segment, comparé segment par segment sans égard à la casse, jamais par préfixe textuel. Ce préfixe, rouvert sans suivi, a l'identité de **l'épingle de rang k−1**, et le chemin de rang k celle de l'épingle de rang k. Le dernier segment n'est jamais comparé au segment donné |
+
+Tests : `TestOpenRefusesAnIncoherentChain` vérifie aussi la comparaison à
+l'épingle précédente ; `TestChainAcceptsShortAndCaseVariantNames` (Windows
+réel) accepte un nom court et une autre casse ; `TestChainIsNotATextPrefix`
+(faux) refuse `\A` pris pour préfixe de `\AB`.
+
+### F3 — classement des erreurs de périphérique (HW7)
+
+**Constat.** Retirée, la clé rend 3 pour `CreateDirectory`, `CreateFile` et
+la réouverture du chemin GUID, et 21 pour un handle. Le 3 est aussi celui
+d'un chemin ordinaire introuvable.
+
+| Passage ratifié | Remplacé par |
+| --- | --- |
+| §4.1, Invalidation : « volume indisponible, au sens des codes classés aujourd'hui et de ceux qu'observe HW7 » | 15 et 21 classent directement « volume indisponible ». Toute autre erreur déclenche la sonde de vivacité ; sonde en échec, volume indisponible ; sonde réussie, l'erreur garde son classement, retries sur 32 et 33, cible existante et refus des liens inchangés. Le 3 n'est pas ajouté aux codes de périphérique |
+
+### Précisions de la même revue, sans décision nouvelle
+
+- §4.1, étape 5 : un résultat est refusé dès que la taille rendue atteint la
+  capacité du tampon.
+- §4.1, création d'une racine absente, §4.3, étape 6,
+  `TestCreatedRootIsCheckedBeforeTheLock` et §12, critère 3 (« Une reprise
+  qui échoue ne laisse que la racine vide, sans autre objet ni
+  suppression ») : « la racine vide reste » se lit « la racine créée reste,
+  sans autre mutation de Savewarden ni suppression ». Aucune garantie ne
+  porte sur ce qu'un autre processus a pu y ajouter.
+- §5.1, HW8 : le commit 1 observe des signaux de détection sans code de
+  production ; refus et invalidation sont prouvés par
+  `TestLocalVolumeNameShadowing` au commit 5. La définition sans élévation
+  d'un nom `Volume{GUID}` reste non exercée ; HW13 n'en est pas la preuve.
+- ADR 0006 §11 amendé déclare sa priorité normative sur les règles
+  antérieures incompatibles de lettres, d'ancrage et d'initialisation, en
+  conservant les automates de publication et de récupération.
+
 ## Historique
 
 | Version | Date | Commit | Changements |
@@ -1905,3 +2016,4 @@ Pour chaque sous-lot :
 | 0.3 | 6 novembre 2026 | `fceaa38`, branche `docs/b5-framing`, présente sur le remote (§1) | **Révision ciblée sur la revue CTO de `1bdeb01`** (§0.5), sans réécriture. C1 : parent d'une cible absente réservé à l'ancrage, chaîne reconstruite après création, tests de frères. C2 : HW7 obligatoire (décision 13) ; HW11 obligatoire aussi, proposé au titre des garanties non testées. C3 : matrice sémantique des codes, commande de référence par ligne, cas de `current` et des générations conservées exhaustifs, snapshot dégradé en 2. C4 : gate strict de T12, HD2 classe par classe, repli de `--verify` sur les snapshots publiés (décision 14). « Objet vide » supprimé ; HW8 en trois constats ; postcondition de `Move`. Décisions 10 à 12 postérieures à `1bdeb01` ; `restore --recover` sans coffre ; ordre imposé et revue du port `Vault` ; M1 élargi ; GoReleaser v2.20.0 au moins. Rôle de CTO tenu par le propriétaire, consigné. Aucun ADR rédigé, aucun GO de push, de fusion ni de développement |
 | 0.4 | 7 novembre 2026 | `3c16d23`, local, branche `docs/b5-framing`, non ratifiée | **Précisions A et B de la revue CTO de `fceaa38`** (§0.5), sans refonte. Décisions 15 à 18 : six compléments retenus, HW11 obligatoire et HD2 structurel acceptés. A : création exclusive d'une racine absente, seule mutation préparatoire avant la reprise des contrôles ; échec sans autre objet ni suppression ; étapes d'initialisation d'ADR 0006 inchangées après la reprise (écart à la lettre signalé) ; formules « avant toute écriture » corrigées (T4, §4.1, §4.3, §8, critère 3, tests). B : portée de la fermeture de S-01 en trois classes (§6, §2.1, §3.5, critères 1 et 5). GoReleaser jamais flottant. Push de `fceaa38` constaté et consigné (§1). Aucun ADR rédigé, aucun GO de push, de fusion ni de développement |
 | 0.5, r3 | 7 novembre 2026 | `5ba95c1`, branche `docs/b5-framing` : complément préparé hors du dépôt à partir de `3c16d23`, commité tel quel au blob `f646f71` ; acceptation consignée ensuite | **Arbitrages CTO D1 à D4 sur `3c16d23`** (§0.5). Décisions 19 à 22, qui citent le CTO mot pour mot et séparent la transposition de l'agent. D1 : texte inchangé. D2 : `TestDefineDosDeviceAliasIsRefused` et `TestReferenceLetterRemappedBeforeTheSessionIsRefused` au gate de B5a ; classe 1 « à démontrer » au cadrage ; classe 3 en deux catégories, 3a hors modèle de menace, où figure `mountvol` avec sa limite, et 3b non exercé (§6, §5.1, §8, §9, critères 1, 2 et 5). D3 : écart de procédure du push de `fceaa38` consigné avec les seuls faits du reflog, sans autorisation rétroactive (§1). D4 : v0.4 non ratifiée avant vérification. **r2, corrections de la revue qualité de r1** : test de référence en processus sur un double du port `Vaults`, précondition HW13 et son risque ; erratum E1 des tests de B4 que S-02 change ; « jamais déclassé » retiré ; refus de `restore` et `restore --recover` au §7.2 ; couverture, légende du §9 et mineurs. HW13 et E1 dépassent la lettre de D4 et sont soumis au CTO. **r3, précisions P1 à P3 de la revue CTO de la r2** (décisions 23 et 24) : équivalent strict d'une racine de volume admis aux trois conditions de la détection, alias de sous-dossier refusés ; banc de HW13 borné, en CI seulement ; preuves d'E1 conservées : fixture sans alias, refus attribué à son garde, mutation du garde de séparation, opérations réellement récupérables, références historiques jamais forgées. **Ratifiée par le propriétaire le 7 novembre 2026** (décision 25). Aucun ADR rédigé, aucun GO de développement |
+| 0.5, erratum E2 | 26 novembre 2026 | Préparé localement avec le commit 2 de B5a | **Accepté par le propriétaire le 26 novembre 2026**, révision r3 : F1, vivacité de la session et scénarios A et B de réinsertion ; F2, contrôle de chaîne par segments et identités ; F3, classement des erreurs de périphérique ; précisions de la revue CTO du même jour. Puis, sur la seconde revue CTO : classement de l'erreur distinct du résultat de l'opération, codes existants conservés ; lectures de décision ; fermeture du writer ; §5.1 HW7b et §12 critère 3 cités. Sections ratifiées inchangées. Ratifié avec les amendements d'ADR 0005 et 0006 §11, après la revue finale ; aucun GO de commit ni de code |
