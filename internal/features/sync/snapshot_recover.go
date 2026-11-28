@@ -43,6 +43,8 @@ type SnapshotRecovery struct {
 	domain        *snapshotVault
 	journal       backup.Journal
 	lock          bool // sync.lock was there when the recovery was planned
+	// session is what the checks under the session compare with.
+	session sessionPlan
 }
 
 // SnapshotRecoverPlan finds the interrupted snapshot operation of the
@@ -118,6 +120,9 @@ func (s *Service) snapshotRecoverPlan(ctx context.Context, request SnapshotReque
 	}
 	if _, err := backup.DecodeMarker(data); err != nil {
 		return rec, errVault(request.VaultPath, "%v; a marker is never rewritten", err)
+	}
+	if rec.session, err = s.vaultSessionPlan(request.VaultPath, vaultVolume, vaultSegments, manifest, &vault{marker: data}); err != nil {
+		return rec, err
 	}
 	// Only the path to the journals is required; the rest of the vault,
 	// the current domain included, is never read.
@@ -256,6 +261,10 @@ func (s *Service) SnapshotRecover(ctx context.Context, request SnapshotRequest, 
 }
 
 func (o *operation) recoverSnapshot(rec *SnapshotRecovery, request SnapshotRequest) error {
+	// Before the first write, the session open: the checks under the session.
+	if err := o.checkUnderSession(rec.session); err != nil {
+		return err
+	}
 	for _, dir := range append(o.target.chain(), o.at(snapshotsDir), o.at(o.domain.journals), o.journalDir()) {
 		if err := o.vault.Hold(dir); err != nil {
 			return errVault(rec.Vault, "%w", err)

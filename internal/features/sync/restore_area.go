@@ -35,9 +35,12 @@ type HandedOverRestore struct {
 // for a marked area, its operations, receipts and handed-over restores.
 // Its anomalies are its own: the vault is never concerned.
 type area struct {
-	exists     bool
-	root       backup.RestoreRoot
-	marker     backup.RestoreAreaMarker
+	exists bool
+	root   backup.RestoreRoot
+	marker backup.RestoreAreaMarker
+	// markerData is the content of that marker, read again through the
+	// session before it writes (ADR 0006 §11).
+	markerData []byte
 	journals   map[string]backup.Journal
 	lastRecord map[string]string
 	receipts   map[string][]byte
@@ -148,6 +151,7 @@ func readArea(scope Scope, path, name, gameID string) (*area, error) {
 	if a.marker, err = backup.DecodeRestoreAreaMarker(data); err != nil {
 		return nil, errDestination(path, "%v; a marker is never rewritten", err)
 	}
+	a.markerData = data
 	if a.marker.GameID != gameID {
 		return nil, errDestination(path, "is a restore area of game %q, not of %q; choose another destination", a.marker.GameID, gameID)
 	}

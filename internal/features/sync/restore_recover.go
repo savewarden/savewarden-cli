@@ -46,6 +46,9 @@ type RestoreRecovery struct {
 	destSegments []string
 	// refs are the paths the area was found distinct from.
 	refs []reference
+	// session is what the checks under the session compare with; the
+	// vault is never among its references.
+	session sessionPlan
 }
 
 // Warning is the notice of a restore renamed but not yet published, steps
@@ -167,7 +170,11 @@ func (s *Service) restoreRecoverPlan(ctx context.Context, request RestoreRequest
 			rec.refs = append(rec.refs, backedUpReferences(j.RestorePlan.Sources)...)
 		}
 	}
-	return rec, s.distinctDestination(path, volume, segments, rec.refs)
+	if err := s.distinctDestination(path, volume, segments, rec.refs); err != nil {
+		return rec, err
+	}
+	rec.session, err = s.areaSessionPlan(path, volume, segments, rec.refs, a)
+	return rec, err
 }
 
 // nothingToRecover applies the first step of a recovery, the table of the
@@ -283,8 +290,9 @@ func (s *Service) RestoreRecover(ctx context.Context, request RestoreRequest, w 
 }
 
 func (o *operation) recoverRestore(rec *RestoreRecovery, request RestoreRequest) error {
-	// Before its first write, the session open: the separation again.
-	if err := o.separatedUnderSession(rec.refs); err != nil {
+	// Before its first write, the session open: the checks under the
+	// session, the vault never among its references.
+	if err := o.checkUnderSession(rec.session); err != nil {
 		return err
 	}
 	if rec.Action == RecoverAreaMarker {
@@ -314,6 +322,20 @@ func (o *operation) recoverRestore(rec *RestoreRecovery, request RestoreRequest)
 		(again.Observed == nil) != (rec.Observed == nil) || (again.Observed != nil && *again.Observed != *rec.Observed) {
 		return o.target.errorf("destination-changed: the restore area changed since the recovery plan; run restore --recover again")
 	}
+	// The references come from the manifest, read again, and from the plans
+	// journaled in the area: a set that differs from the one the checks
+	// validated is refused, never adopted, never completed.
+	if !sameReferences(again.refs, rec.refs) {
+		return o.target.errorf("destination-changed: the references of the recovery, from the manifest or the plans journaled in the area, changed since the recovery plan; run restore --recover again")
+	}
+	// Under the lock, the checks under the session again, on the trusted
+	// observations: the recovery plan just read again decides the action,
+	// never the chains to trust, and never reads the vault (plan B5 §4.3).
+	if err := o.recheckUnderLock(); err != nil {
+		return err
+	}
+	// From here on, rec is the plan read under the lock; its references and
+	// chains are not used again.
 	*rec = again
 	j := rec.journal
 	o.seq, o.prev = len(j.Records), rec.area.lastRecord[o.op]
@@ -424,13 +446,11 @@ func restoreDetail(detail string) string {
 // without any lock, the temporaries kept (ADR 0006 §11). A marker another
 // run validated meanwhile leaves nothing to do.
 func (o *operation) resumeAreaMarker(rec *RestoreRecovery) error {
-	scope, err := o.s.files.OpenScope(o.target.volume)
-	if err != nil {
-		return o.target.errorf("open volume %s: %v", o.target.volume, err)
-	}
-	defer func() { _ = scope.Close() }()
+	// Read again through the session that holds it (Z3 of the resume), never
+	// through the letter: a decision read of plan B5 §4.3.
 	name := strings.Join(o.target.segments, "/")
-	entries, err := list(scope, name)
+	scope := sessionScope{vault: o.vault, root: name}
+	entries, err := o.heldEntries(".")
 	if err != nil {
 		return o.target.errorf("cannot be read again before its marker: %v", err)
 	}
@@ -456,7 +476,8 @@ func (o *operation) resumeAreaMarker(rec *RestoreRecovery) error {
 }
 
 // markedMeanwhile judges an area another run marked between the recovery
-// plan and the resume, read as strictly as any area: a marker unreadable,
+// plan and the resume, read through the session as strictly and as stably
+// as any area, two readings that agree out of three: a marker unreadable,
 // of an unknown schema or of another game is refused, code 1, never
 // rewritten; an area holding anything beyond its structure is
 // destination-changed, code 1, nothing written. Only a marker of this game
@@ -467,6 +488,10 @@ func (o *operation) markedMeanwhile(scope Scope, name, gameID string) error {
 		return err
 	}
 	switch {
+	case !a.exists || a.root.State != backup.RestoreRootMarked:
+		// The marker seen first is no longer there for the stable reading:
+		// nothing is concluded without a marker established.
+		return o.target.errorf("destination-changed: another run marked this area, which no longer holds a marker; nothing is written, run restore --recover again")
 	case len(a.interventions) > 0:
 		first := a.interventions[0]
 		return o.target.errorf("destination-changed: another run marked this area, which now holds %s %s; nothing is written, run restore --recover again",

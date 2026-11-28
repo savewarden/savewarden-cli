@@ -73,6 +73,8 @@ type RestorePlan struct {
 	destSegments  []string
 	// refs are the paths the area was found distinct from.
 	refs []reference
+	// session is what the checks under the session compare with.
+	session sessionPlan
 }
 
 // restoreSource is the snapshot a restore copies, as its authentication
@@ -404,7 +406,11 @@ func (s *Service) planDestination(plan *RestorePlan, manifest game.Manifest, pro
 		return err
 	}
 	plan.refs = plan.references(manifest)
-	return s.distinctDestination(path, plan.destVolume, plan.destSegments, plan.refs)
+	if err := s.distinctDestination(path, plan.destVolume, plan.destSegments, plan.refs); err != nil {
+		return err
+	}
+	plan.session, err = s.areaSessionPlan(path, plan.destVolume, plan.destSegments, plan.refs, a)
+	return err
 }
 
 // references lists the paths the area must stay apart from: the vault, the

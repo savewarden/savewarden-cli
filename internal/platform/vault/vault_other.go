@@ -5,6 +5,7 @@ package vault
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"time"
 
 	"github.com/savewarden/savewarden-cli/internal/entities/backup"
@@ -41,6 +42,21 @@ func (*Session) Identity(string) (backup.FileID, error) {
 
 // Lock is unavailable on this platform.
 func (*Session) Lock(string) error { return errors.ErrUnsupported }
+
+// Chain is unavailable on this platform.
+func (*Session) Chain() ([]backup.FileID, error) { return nil, errors.ErrUnsupported }
+
+// Stat is unavailable on this platform.
+func (*Session) Stat(string) (fs.FileMode, error) { return 0, errors.ErrUnsupported }
+
+// ReadDir is unavailable on this platform.
+func (*Session) ReadDir(string) ([]fs.DirEntry, error) { return nil, errors.ErrUnsupported }
+
+// ReadFile is unavailable on this platform.
+func (*Session) ReadFile(string, int64) ([]byte, error) { return nil, errors.ErrUnsupported }
+
+// MarkedAncestor is unavailable on this platform.
+func (*Session) MarkedAncestor(...string) (int, error) { return -1, errors.ErrUnsupported }
 
 // Close is unavailable on this platform.
 func (*Session) Close() error { return nil }

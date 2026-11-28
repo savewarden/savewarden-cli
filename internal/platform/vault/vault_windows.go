@@ -30,11 +30,12 @@ const noFollow = windows.FILE_FLAG_OPEN_REPARSE_POINT | windows.FILE_FLAG_BACKUP
 type Session struct {
 	base string
 	// ancestors pins the volume root and every directory down to the
-	// vault's parent; pins holds the vault, under ".", and the directories
-	// created or held below it.
-	ancestors []windows.Handle
-	pins      map[string]windows.Handle
-	lock      windows.Handle
+	// vault's parent, ancestorPaths naming each; pins holds the vault, under
+	// ".", and the directories created or held below it.
+	ancestors     []windows.Handle
+	ancestorPaths []string
+	pins          map[string]windows.Handle
+	lock          windows.Handle
 }
 
 // Open starts a session on the vault directory path, an absolute clean
@@ -68,6 +69,7 @@ func Open(path string) (*Session, error) {
 			s.pins["."] = handle
 		case err == nil:
 			s.ancestors = append(s.ancestors, handle)
+			s.ancestorPaths = append(s.ancestorPaths, current)
 		case errors.Is(err, fs.ErrNotExist) && k == len(segments) && k > 0:
 			return s, nil
 		default:
@@ -316,6 +318,152 @@ func (s *Session) Lock(name string) error {
 	return nil
 }
 
+// Chain returns the identities of the directories the session holds, from
+// the volume root down to the vault, or down to the vault's parent while the
+// vault does not exist: read on the pins' own handles, never by a name
+// resolved again (ADR 0006 §11, checks under the session).
+func (s *Session) Chain() ([]backup.FileID, error) {
+	handles := append([]windows.Handle(nil), s.ancestors...)
+	names := append([]string(nil), s.ancestorPaths...)
+	if pin, held := s.pins["."]; held {
+		handles, names = append(handles, pin), append(names, s.base)
+	}
+	ids := make([]backup.FileID, 0, len(handles))
+	for i, handle := range handles {
+		var data windows.ByHandleFileInformation
+		if err := windows.GetFileInformationByHandle(handle, &data); err != nil {
+			return nil, &fs.PathError{Op: "held chain", Path: names[i], Err: describe("held chain", names[i], err)}
+		}
+		ids = append(ids, backup.FileID{Volume: data.VolumeSerialNumber, Index: uint64(data.FileIndexHigh)<<32 | uint64(data.FileIndexLow)})
+	}
+	return ids, nil
+}
+
+// Stat reports what name is, without following it: fs.ModeDir for a plain
+// directory, 0 for a regular file, fs.ModeIrregular for a link, junction,
+// other reparse point or placeholder. Its parent must be held; "." is the
+// vault itself, read below its held parent, and fs.ErrNotExist when it does
+// not exist.
+func (s *Session) Stat(name string) (fs.FileMode, error) {
+	if err := s.requireParent(name); err != nil {
+		return 0, err
+	}
+	return statPath(name, s.absolute(name))
+}
+
+// ReadDir lists the plain directory name without following it or anything
+// in it; an entry's type reports a link or reparse point as such.
+func (s *Session) ReadDir(name string) ([]fs.DirEntry, error) {
+	if err := s.requireParent(name); err != nil {
+		return nil, err
+	}
+	path := s.absolute(name)
+	handle, err := openForReading(name, path, true)
+	if err != nil {
+		return nil, err
+	}
+	dir := os.NewFile(uintptr(handle), path)
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, &fs.PathError{Op: "read directory", Path: name, Err: describe("read directory", name, err)}
+	}
+	return entries, nil
+}
+
+// ReadFile reads the regular file name, without following it, refusing more
+// than limit bytes.
+func (s *Session) ReadFile(name string, limit int64) ([]byte, error) {
+	if err := s.requireParent(name); err != nil {
+		return nil, err
+	}
+	if name == "." {
+		return nil, &fs.PathError{Op: "read", Path: name, Err: fs.ErrInvalid}
+	}
+	path := s.absolute(name)
+	handle, err := openForReading(name, path, false)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(handle), path)
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	switch {
+	case err != nil:
+		return nil, &fs.PathError{Op: "read", Path: name, Err: describe("read", name, err)}
+	case int64(len(data)) > limit:
+		return nil, &fs.PathError{Op: "read", Path: name, Err: fmt.Errorf("larger than %d bytes", limit)}
+	}
+	return data, nil
+}
+
+// MarkedAncestor reports the depth of the first held ancestor, 0 being the
+// volume root, in which one of names exists, whatever it is, or -1. The
+// vault itself is not an ancestor.
+func (s *Session) MarkedAncestor(names ...string) (int, error) {
+	for depth, dir := range s.ancestorPaths {
+		for _, name := range names {
+			if err := game.CheckWindowsName(name); err != nil {
+				return -1, err
+			}
+			_, err := statPath(name, filepath.Join(dir, name))
+			switch {
+			case err == nil:
+				return depth, nil
+			case !errors.Is(err, fs.ErrNotExist):
+				return -1, err
+			}
+		}
+	}
+	return -1, nil
+}
+
+// statPath opens path for its attributes only, without following it and
+// sharing everything, and reports its kind as Stat does.
+func statPath(name, path string) (fs.FileMode, error) {
+	pointer, err := windows.UTF16PtrFromString(longPath(path))
+	if err != nil {
+		return 0, &fs.PathError{Op: "stat", Path: name, Err: err}
+	}
+	handle, err := windows.CreateFile(pointer, windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, noFollow, 0)
+	if err != nil {
+		return 0, &fs.PathError{Op: "stat", Path: name, Err: describe("stat", name, err)}
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	var data windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &data); err != nil {
+		return 0, &fs.PathError{Op: "stat", Path: name, Err: describe("stat", name, err)}
+	}
+	switch {
+	case refuseLinks(name, data.FileAttributes) != nil:
+		return fs.ModeIrregular, nil
+	case data.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0:
+		return fs.ModeDir, nil
+	}
+	return 0, nil
+}
+
+// openForReading opens path for reading, without following it and sharing
+// everything, so that no write or rename of another process is blocked; the
+// handle is refused unless it denotes a plain directory, or a regular file.
+func openForReading(name, path string, directory bool) (windows.Handle, error) {
+	pointer, err := windows.UTF16PtrFromString(longPath(path))
+	if err != nil {
+		return windows.InvalidHandle, &fs.PathError{Op: "open", Path: name, Err: err}
+	}
+	handle, err := windows.CreateFile(pointer, windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, noFollow, 0)
+	if err != nil {
+		return windows.InvalidHandle, &fs.PathError{Op: "open", Path: name, Err: describe("open", name, err)}
+	}
+	if err := checkHandle(name, handle, directory); err != nil {
+		_ = windows.CloseHandle(handle)
+		return windows.InvalidHandle, err
+	}
+	return handle, nil
+}
+
 // Close releases the lock and every pin.
 func (s *Session) Close() error {
 	var errs []error
@@ -327,7 +475,7 @@ func (s *Session) Close() error {
 	for _, handle := range s.ancestors {
 		errs = append(errs, closeHandle(s.base, handle))
 	}
-	s.ancestors = nil
+	s.ancestors, s.ancestorPaths = nil, nil
 	return errors.Join(errs...)
 }
 

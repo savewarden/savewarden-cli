@@ -52,6 +52,8 @@ type Recovery struct {
 	vaultSegments []string
 	observed      *vault
 	journal       backup.Journal
+	// session is what the checks under the session compare with.
+	session sessionPlan
 }
 
 // RecoverPlan finds the interrupted operation of the game, observes the
@@ -94,6 +96,9 @@ func (s *Service) recoverPlan(ctx context.Context, request Request, probe bool) 
 	}
 	if err := ctx.Err(); err != nil {
 		return rec, fmt.Errorf("recovery plan interrupted: %w", err)
+	}
+	if rec.session, err = s.vaultSessionPlan(request.VaultPath, vaultVolume, vaultSegments, manifest, v); err != nil {
+		return rec, err
 	}
 	rec.VaultState, rec.observed = v.state, v
 	switch v.state {
@@ -320,18 +325,25 @@ func (s *Service) Recover(ctx context.Context, request Request, w Writer) (Resul
 }
 
 func (o *operation) recover(rec *Recovery, request Request) error {
+	// Before the first write, the session open: the checks under the session.
+	if err := o.checkUnderSession(rec.session); err != nil {
+		return err
+	}
 	if rec.Action == RecoverInitialization {
-		// The vault root is read again once the session pins it: still only
-		// marker temporaries, the same ones (ADR 0006 I3).
-		again, err := o.s.recoverPlan(o.ctx, request, false)
+		// The vault root is read again through the session that holds it,
+		// a decision read of plan B5 §4.3: still only marker temporaries, the
+		// very ones of the plan, numbers included (ADR 0006 I3). No lock: an
+		// unmarked vault never receives one.
+		entries, err := o.heldEntries(".")
 		if err != nil {
-			return err
+			return errVault(rec.Vault, "cannot be read again under the session before its marker: %v", err)
 		}
-		if again.Action != RecoverInitialization || len(again.observed.rootTaken) != len(rec.observed.rootTaken) {
+		classified := backup.ClassifyVaultRoot(entries)
+		if classified.State != backup.RootInterrupted || !sameTaken(classified.Taken, rec.observed.rootTaken) {
 			return errVault(rec.Vault, "vault-changed: the vault changed since the recovery plan; run sync --recover again")
 		}
 		// The marker alone; games and the rest come with the next --apply.
-		for k := range again.observed.rootTaken {
+		for k := range classified.Taken {
 			o.marker[k] = true
 		}
 		marker, err := backup.EncodeMarker(backup.Marker{CreatedAt: o.now(), ToolVersion: o.w.ToolVersion})

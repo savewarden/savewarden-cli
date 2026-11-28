@@ -124,6 +124,8 @@ type Plan struct {
 	vaultVolume   string
 	vaultSegments []string
 	observed      *vault
+	// session is what the checks under the session compare with.
+	session sessionPlan
 }
 
 // Blocking counts the blocking findings.

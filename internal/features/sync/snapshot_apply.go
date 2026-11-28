@@ -138,6 +138,10 @@ func (o *operation) snapshot(request SnapshotRequest, plan SnapshotPlan) error {
 // structure, the operation directory and the planned record (ADR 0006
 // §10, creation step 1).
 func (o *operation) snapshotUnderLock(request SnapshotRequest, before SnapshotPlan) error {
+	// Before the first write, the session open: the checks under the session.
+	if err := o.checkUnderSession(before.session); err != nil {
+		return err
+	}
 	for _, dir := range o.target.chain() {
 		if err := o.vault.Hold(dir); err != nil {
 			return o.target.errorf("%w", err)

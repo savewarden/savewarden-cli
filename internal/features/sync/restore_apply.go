@@ -154,8 +154,8 @@ func (o *operation) restoreSnapshot(request RestoreRequest, plan RestorePlan) er
 // again under it (Z6), then creates the structure and the operation
 // directory (Z7, Z8) and commits the planned record (Z9).
 func (o *operation) restoreUnderLock(request RestoreRequest, before RestorePlan) error {
-	// Before its first write, the session open: the separation again.
-	if err := o.separatedUnderSession(before.refs); err != nil {
+	// Before its first write, the session open: the checks under the session.
+	if err := o.checkUnderSession(before.session); err != nil {
 		return err
 	}
 	if before.State != DestinationArea {
@@ -198,6 +198,17 @@ func (o *operation) restoreUnderLock(request RestoreRequest, before RestorePlan)
 	if again.area.used(o.op) || o.op == before.Snapshot || o.op == before.From {
 		return o.target.errorf("operation id %s is already used in this area, or names the snapshot or its generation; run restore again", o.op)
 	}
+	// The references come from the manifest, read again, and from the receipt
+	// of the snapshot: a set that differs from the one the checks validated
+	// is refused, never adopted, never completed.
+	if !sameReferences(again.refs, before.refs) {
+		return o.target.errorf("destination-changed: the references of the restore, from the manifest or the snapshot, changed since the plan; run restore again")
+	}
+	// Z6, under the lock: the checks under the session again, on the trusted
+	// observations, never on the plan just read again (plan B5 §4.3).
+	if err := o.recheckUnderLock(); err != nil {
+		return err
+	}
 	// Z7: the structure, made of exclusive creations, after the space check.
 	for _, dir := range []string{backup.RestoreReceiptsDir, backup.RestoreJournalDir} {
 		if err := o.ensureDir(o.at(dir)); err != nil {
@@ -227,17 +238,6 @@ func (o *operation) restoreUnderLock(request RestoreRequest, before RestorePlan)
 	o.restored = backup.SnapshotSource{Operation: before.Snapshot, ReceiptSHA256: src.receiptSum}
 	o.snapshotIdentity = src.identity
 	return o.record(backup.StepPlanned, backup.StepValues{RestoredSnapshot: o.restored, SnapshotIdentity: o.snapshotIdentity, RestorePlan: o.restorePlan})
-}
-
-// separatedUnderSession checks the distinctions of the area again once the
-// session is open, the destination or its parent pinned, and before the
-// session writes anything: Z2, Z3, the lock of a marked area, a resumed
-// marker (security review P1-02). The path of the destination, a drive
-// letter among others, may resolve elsewhere than at the plan. The session
-// writes by path: a letter remapped while it is open is not excluded by
-// this check, a limit shared with sync and snapshot (docs/safety-model.md).
-func (o *operation) separatedUnderSession(refs []reference) error {
-	return o.s.distinctDestination(o.target.path, o.target.volume, o.target.segments, refs)
 }
 
 // sameArea requires the area under lock to be the one the plan read, the
@@ -270,7 +270,8 @@ func sameMarker(a, b backup.RestoreAreaMarker) bool {
 // ADR 0006 §11: the destination created if it is missing, read again while
 // the session pins it, then the marker committed by rename.
 func (o *operation) initializeArea(before RestorePlan) error {
-	// Z2: the destination itself, never adopted if it appeared meanwhile.
+	// Z2: the destination itself, never adopted if it appeared meanwhile, the
+	// only mutation before the checks resume.
 	if before.State == DestinationNew {
 		if err := o.vault.CreateDir("."); err != nil {
 			if errors.Is(err, fs.ErrExist) {
@@ -279,6 +280,9 @@ func (o *operation) initializeArea(before RestorePlan) error {
 			return o.target.errorf("%w", err)
 		}
 		o.wrote()
+		if err := o.checkCreatedRoot(); err != nil {
+			return err
+		}
 	}
 	// Z3: pinned by the session, read again: it must still be empty.
 	if err := o.stillEmpty(); err != nil {
@@ -294,18 +298,17 @@ func (o *operation) initializeArea(before RestorePlan) error {
 		return err
 	}
 	o.areaMarker = &marker
+	// The marker this run validated: read again under the lock, never taken
+	// for a change.
+	o.trustMarker(backup.RestoreAreaMarkerName, data)
 	return nil
 }
 
-// stillEmpty reads the destination again, without following anything: a
-// file added since the plan leaves it unmarked, nothing more written.
+// stillEmpty reads the destination again through the session that holds
+// it, without following anything: a file added since the plan leaves it
+// unmarked, nothing more written (Z3, a decision read under the session).
 func (o *operation) stillEmpty() error {
-	scope, err := o.s.files.OpenScope(o.target.volume)
-	if err != nil {
-		return o.target.errorf("open volume %s: %v", o.target.volume, err)
-	}
-	defer func() { _ = scope.Close() }()
-	entries, err := scope.ReadDir(strings.Join(o.target.segments, "/"))
+	entries, err := o.vault.ReadDir(".")
 	switch {
 	case err != nil:
 		return o.target.errorf("cannot be read again before its marker: %v", err)

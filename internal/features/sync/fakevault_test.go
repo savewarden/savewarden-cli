@@ -42,6 +42,16 @@ type fakeVaults struct {
 	failWrite func(call string) error
 	// sessions lists the path of every session opened, in order.
 	sessions []string
+	// trace lists, in order, every call of every session, reads included:
+	// Open, Chain, Stat, ReadDir, ReadFile, MarkedAncestor, Hold, Identity
+	// and the mutating calls.
+	trace []string
+	// chainErr, if set, fails Chain: the held chain cannot be read.
+	chainErr error
+	// onCall, if set, runs after each mutating call that succeeded; onRead,
+	// before each read of a session.
+	onCall func(call string)
+	onRead func(call string)
 }
 
 func newFakeVaults(f *fakeFS) *fakeVaults {
@@ -53,13 +63,18 @@ func (v *fakeVaults) Open(path string) (sync.Vault, error) {
 		return nil, errCrash
 	}
 	v.sessions = append(v.sessions, path)
+	v.trace = append(v.trace, "Open "+path)
 	parts := strings.Split(path[3:], `\`)
 	n := v.f.volumes[path[:3]]
+	// Like the real session, the fake pins the nodes from the volume root
+	// down to the directory, or to its parent while it is absent: Chain
+	// reports them whatever the letters resolve to afterwards.
+	ancestors := []*node{n}
 	for i, part := range parts {
 		child, ok := n.children[part]
 		switch {
 		case !ok && i == len(parts)-1:
-			return &fakeVault{v: v, base: path, held: map[string]bool{}}, nil
+			return &fakeVault{v: v, base: path, held: map[string]bool{}, ancestors: ancestors}, nil
 		case !ok:
 			return nil, fs.ErrNotExist
 		case isLink(child.mode):
@@ -67,9 +82,12 @@ func (v *fakeVaults) Open(path string) (sync.Vault, error) {
 		case !child.mode.IsDir():
 			return nil, errors.New(part + ": not a directory")
 		}
+		if i < len(parts)-1 {
+			ancestors = append(ancestors, child)
+		}
 		n = child
 	}
-	return &fakeVault{v: v, base: path, held: map[string]bool{".": true}}, nil
+	return &fakeVault{v: v, base: path, held: map[string]bool{".": true}, ancestors: ancestors, root: n}, nil
 }
 
 // call counts one mutating call and applies the crash plan; perform runs it.
@@ -78,6 +96,7 @@ func (v *fakeVaults) call(name string, perform func() error) error {
 		return errCrash
 	}
 	v.calls = append(v.calls, name)
+	v.trace = append(v.trace, name)
 	k := len(v.calls)
 	if k == v.crashBefore {
 		v.dead = true
@@ -85,6 +104,9 @@ func (v *fakeVaults) call(name string, perform func() error) error {
 	}
 	if err := perform(); err != nil {
 		return err
+	}
+	if v.onCall != nil {
+		v.onCall(name)
 	}
 	if k == v.crashAfter {
 		v.dead = true
@@ -98,6 +120,10 @@ type fakeVault struct {
 	base string
 	held map[string]bool
 	lock string
+	// ancestors are the nodes pinned at Open from the volume root down to
+	// the directory's parent; root is the directory once held.
+	ancestors []*node
+	root      *node
 }
 
 func (s *fakeVault) path(name string) string {
@@ -153,8 +179,11 @@ func (s *fakeVault) CreateDir(name string) error {
 		if s.v.f.get(s.path(name)) != nil {
 			return fs.ErrExist
 		}
-		s.v.f.put(s.path(name), s.v.f.dir())
+		created := s.v.f.put(s.path(name), s.v.f.dir())
 		s.held[name] = true
+		if name == "." {
+			s.root = created
+		}
 		return nil
 	})
 }
@@ -318,6 +347,120 @@ func (s *fakeVault) Lock(name string) error {
 		s.v.locks[path], s.lock = true, path
 		return nil
 	})
+}
+
+// read traces one read of the session; a dead process reads nothing.
+func (s *fakeVault) read(call string) error {
+	if s.v.dead {
+		return errCrash
+	}
+	s.v.trace = append(s.v.trace, call)
+	if s.v.onRead != nil {
+		s.v.onRead(call)
+	}
+	return nil
+}
+
+func nodeID(n *node) backup.FileID {
+	return backup.FileID{Volume: 0x1a2b3c4d, Index: uint64(n.id)} //nolint:gosec // G115: node ids count up from 1.
+}
+
+func (s *fakeVault) Chain() ([]backup.FileID, error) {
+	if err := s.read("Chain"); err != nil {
+		return nil, err
+	}
+	if s.v.chainErr != nil {
+		return nil, s.v.chainErr
+	}
+	var ids []backup.FileID
+	for _, n := range s.ancestors {
+		ids = append(ids, nodeID(n))
+	}
+	if s.root != nil && s.held["."] {
+		ids = append(ids, nodeID(s.root))
+	}
+	return ids, nil
+}
+
+func (s *fakeVault) Stat(name string) (fs.FileMode, error) {
+	if err := s.read("Stat " + name); err != nil {
+		return 0, err
+	}
+	if err := s.requireParent(name); err != nil {
+		return 0, err
+	}
+	n := s.v.f.get(s.path(name))
+	switch {
+	case n == nil:
+		return 0, fs.ErrNotExist
+	case n.statErr != nil:
+		return 0, n.statErr
+	case isLink(n.mode):
+		return fs.ModeIrregular, nil
+	case n.mode.IsDir():
+		return fs.ModeDir, nil
+	}
+	return 0, nil
+}
+
+func (s *fakeVault) ReadDir(name string) ([]fs.DirEntry, error) {
+	if err := s.read("ReadDir " + name); err != nil {
+		return nil, err
+	}
+	if err := s.requireParent(name); err != nil {
+		return nil, err
+	}
+	n := s.v.f.get(s.path(name))
+	switch {
+	case n == nil:
+		return nil, fs.ErrNotExist
+	case isLink(n.mode):
+		return nil, &notFollowedError{name}
+	case !n.mode.IsDir():
+		return nil, errors.New(name + ": not a directory")
+	case n.listErr != nil:
+		return nil, n.listErr
+	}
+	entries := make([]fs.DirEntry, 0, len(n.children))
+	for childName, child := range n.children {
+		entries = append(entries, fs.FileInfoToDirEntry(info(childName, child)))
+	}
+	return entries, nil
+}
+
+func (s *fakeVault) ReadFile(name string, limit int64) ([]byte, error) {
+	if err := s.read("ReadFile " + name); err != nil {
+		return nil, err
+	}
+	if err := s.requireParent(name); err != nil {
+		return nil, err
+	}
+	n := s.v.f.get(s.path(name))
+	switch {
+	case n == nil:
+		return nil, fs.ErrNotExist
+	case isLink(n.mode):
+		return nil, &notFollowedError{name}
+	case !n.mode.IsRegular():
+		return nil, errors.New(name + ": not a regular file")
+	case int64(len(n.data)) > limit:
+		return nil, fmt.Errorf("%s: larger than %d bytes", name, limit)
+	}
+	return append([]byte(nil), n.data...), nil
+}
+
+func (s *fakeVault) MarkedAncestor(names ...string) (int, error) {
+	if err := s.read("MarkedAncestor"); err != nil {
+		return -1, err
+	}
+	for depth, n := range s.ancestors {
+		for _, name := range names {
+			if _, ok := n.children[name]; ok {
+				return depth, nil
+			}
+		}
+	}
+	return -1, nil
 }
 
 func (s *fakeVault) Close() error {

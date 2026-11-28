@@ -82,6 +82,8 @@ type SnapshotPlan struct {
 	head          *backup.Receipt
 	vaultVolume   string
 	vaultSegments []string
+	// session is what the checks under the session compare with.
+	session sessionPlan
 }
 
 // Blocking counts the blocking findings.
@@ -175,6 +177,9 @@ func (s *Service) snapshotPlan(ctx context.Context, request SnapshotRequest, pro
 		return SnapshotPlan{}, fmt.Errorf("plan interrupted: %w", err)
 	}
 	plan.observed, plan.VaultState = v, v.state
+	if plan.session, err = s.vaultSessionPlan(request.VaultPath, vaultVolume, vaultSegments, manifest, v); err != nil {
+		return SnapshotPlan{}, err
+	}
 	root := strings.Join(vaultSegments, "/")
 	gameName := join(root, gamesDir+"/"+manifest.Game.ID)
 	plan.domain = &snapshotVault{}

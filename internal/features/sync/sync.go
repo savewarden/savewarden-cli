@@ -129,6 +129,9 @@ func (s *Service) Plan(ctx context.Context, request Request) (Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return Plan{}, fmt.Errorf("plan interrupted: %w", err)
 	}
+	if plan.session, err = s.vaultSessionPlan(request.VaultPath, vaultVolume, vaultSegments, manifest, v); err != nil {
+		return Plan{}, err
+	}
 	plan.VaultState, plan.Pending, plan.observed = v.state, v.pending, v
 	if len(v.interventions) > 0 {
 		plan.Interventions, plan.CurrentUnchecked = v.interventions, v.current || v.currentLink

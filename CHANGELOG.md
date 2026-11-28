@@ -177,6 +177,32 @@ Aucun tag ni release n'est publié par le bootstrap.
   instructions agents et dossier historique du pilote Odyssey.
 - Licence MIT choisie par le propriétaire du projet.
 
+### Changed
+
+- Contrôles sous session (B5a, T4, ADR 0006 §11) : avant sa première
+  écriture, chaque `--apply` et chaque `--recover --apply` de `sync`,
+  `snapshot` et `restore` compare la chaîne de dossiers que sa session tient,
+  lue sur ses propres handles, à celle que le plan a lue ; relit
+  l'installation, les sources et, pour `restore`, le coffre et les chemins
+  sauvegardés, sans jamais lire le coffre pour `restore --recover` ; refuse
+  tout recouvrement entre sa cible et une référence, dans les deux sens et
+  par identité, quelle que soit la lettre ; relit par la session le
+  marqueur, l'absence d'une cible absente, Z3, les ancêtres d'une zone, la
+  reprise du marqueur d'un coffre et celle d'une zone marquée entre-temps.
+  Une racine absente n'est créée qu'après la réussite de ces contrôles, seule
+  écriture permise avant leur reprise, aussitôt faite sur la chaîne qui
+  l'inclut, ancêtres marqués compris. `restore` les refait sous verrou, à Z6
+  et pendant la récupération d'une opération, sur les observations validées
+  avant la première écriture, jamais sur un plan relu sous verrou ; une
+  restauration ou une récupération dont les références relues sous verrou
+  diffèrent est refusée, et une zone
+  marquée entre-temps n'est sans objet que si son marqueur reste établi.
+  Trois sortes de refus, tous en code 1 :
+  avant toute écriture, rien n'est écrit ; après la création d'une racine,
+  celle-ci reste en place et rien d'autre n'est écrit ; sous verrou, rien de
+  plus n'est écrit, le marqueur et le verrou déjà écrits restent. Les refus de
+  B4 gardent leur message. S-01 et S-02 restent ouverts.
+
 ### Security
 
 - Toolchain Go épinglée en 1.27.3 dans `go.mod`, donc en CI : corrige
@@ -209,9 +235,11 @@ Aucun tag ni release n'est publié par le bootstrap.
   garantie technique ne l'empêche ; acceptation provisoire, ratifiée, pour la
   seule qualification interne, durcissement d'ADR 0005 obligatoire avant
   toute diffusion publique.
-  `restore` refait ses distinctions une fois la session ouverte, ce qui
-  refuse une réattribution antérieure. Ne modifiez pas les lettres de lecteur
-  pendant une opération.
+  `sync`, `snapshot` et `restore` refont leurs contrôles sur la chaîne que
+  leur session tient, avant leur première écriture, ce qui refuse une
+  réattribution antérieure à l'ouverture (B5a, T4) ; une réattribution
+  pendant la session reste le risque S-01. Ne modifiez pas les lettres de
+  lecteur pendant une opération.
 - Chantier de sécurité S-02, ouvert le 6 novembre 2026 : une lettre de
   lecteur qui désigne un dossier, alias `subst` par exemple, contourne les
   distinctions. `restore` les fait depuis la racine de la lettre, et non du

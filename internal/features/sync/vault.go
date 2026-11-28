@@ -54,6 +54,9 @@ type vault struct {
 	rootTaken    map[int]bool
 	receiptTaken map[string]map[int]bool
 	receiptSum   map[string][32]byte // SHA-256 of each valid receipt file, by operation
+	// marker is the content of the marker of an initialized vault, read
+	// again through the session before it writes (ADR 0006 §11).
+	marker []byte
 }
 
 func (v *vault) intervene(cause Cause, subject, detail string) {
@@ -141,6 +144,7 @@ func (v *vault) readProbing(scope Scope, vaultPath string, segments []string, ga
 	if _, err := backup.DecodeMarker(data); err != nil {
 		return errVault(vaultPath, "%v; a marker is never rewritten", err)
 	}
+	v.marker = data
 	for _, name := range classified.Unexpected {
 		v.intervene(CauseUnexpectedEntry, name, "has no place at the vault root")
 	}

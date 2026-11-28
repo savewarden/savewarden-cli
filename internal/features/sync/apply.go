@@ -180,6 +180,12 @@ type operation struct {
 	restored         backup.SnapshotSource
 	snapshotIdentity backup.FileID
 	areaMarker       *backup.RestoreAreaMarker
+	// trusted is what the checks under the session validated before the
+	// first write, once checked is set: the chain, extended by a root this
+	// run created, the references and the marker. A plan read again under
+	// the lock never replaces it (plan B5 §4.3).
+	trusted sessionPlan
+	checked bool
 }
 
 // rotation reports whether the operation replaces an existing current.
@@ -346,7 +352,11 @@ func (o *operation) at(rel string) string { return o.target.at(rel) }
 // creations, up to the planned record.
 func (o *operation) initialize() error {
 	state := o.plan.VaultState
-	// I2: the vault itself.
+	// Before the first write, the session open: the checks under the session.
+	if err := o.checkUnderSession(o.plan.session); err != nil {
+		return err
+	}
+	// I2: the vault itself, the only mutation before the checks resume.
 	if state == VaultAbsent {
 		if err := o.vault.CreateDir("."); err != nil {
 			if errors.Is(err, fs.ErrExist) {
@@ -355,6 +365,9 @@ func (o *operation) initialize() error {
 			return o.target.errorf("%w", err)
 		}
 		o.wrote()
+		if err := o.checkCreatedRoot(); err != nil {
+			return err
+		}
 	}
 	// I3 and I4: the marker, committed by rename.
 	if state == VaultAbsent || state == VaultEmpty {

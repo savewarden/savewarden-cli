@@ -84,6 +84,27 @@ type Vault interface {
 	// holder gets a busy error.
 	Lock(name string) error
 	Close() error
+
+	// The reads below write nothing. They are the checks under the session
+	// of ADR 0006 §11: what the session holds, observed through it rather
+	// than through a letter resolved again by the plan's adapters.
+
+	// Chain returns the identities of the directories the session holds,
+	// from the volume root down to its directory, or down to that
+	// directory's parent while it does not exist, read on the held handles.
+	Chain() ([]backup.FileID, error)
+	// Stat reports what name is without following it: fs.ModeDir, 0 for a
+	// regular file, fs.ModeIrregular for a link or reparse point;
+	// fs.ErrNotExist if absent, "." included.
+	Stat(name string) (fs.FileMode, error)
+	// ReadDir lists a plain directory without following anything.
+	ReadDir(name string) ([]fs.DirEntry, error)
+	// ReadFile reads a regular file without following it, refusing more
+	// than limit bytes.
+	ReadFile(name string, limit int64) ([]byte, error)
+	// MarkedAncestor returns the depth, 0 for the volume root, of the first
+	// held ancestor of the directory that contains one of names, or -1.
+	MarkedAncestor(names ...string) (int, error)
 }
 
 // Clock dates operations and paces the bounded retries of ADR 0006 §7.
